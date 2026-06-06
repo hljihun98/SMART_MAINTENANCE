@@ -1,1 +1,1627 @@
 <h1>벨트 장력계</h1>
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#edf0f5">
+<title>음파식 벨트 텐션 측정기 · U-550</title>
+
+<!-- Pretendard(한글/UI) + JetBrains Mono(수치/계측 표기) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+
+<style>
+/* =====================================================================
+   DESIGN SYSTEM — "Precision Instrument" dark theme
+   ===================================================================== */
+:root{
+  /* surfaces (light) */
+  --ink:#edf0f5; --ink-2:#f3f6fa;
+  --surface:#ffffff; --surface-2:#fbfcfe; --surface-3:#f1f4f8;
+  --line:#e7ecf2; --line-2:#d6dee8;
+  /* text */
+  --text:#152232; --text-dim:#566576; --text-faint:#90a0b0;
+  /* brand / semantic */
+  --accent:#0ca99a; --accent-deep:#0b8c80; --accent-glow:rgba(12,169,154,.16);
+  --amber:#c1760f; --green:#16a34a; --warn:#d97706; --orange:#ea580c; --red:#e11d48;
+  --violet:#7c5cff;
+  /* legacy aliases so inline JS styles & leftover refs keep working */
+  --cyan:var(--accent); --muted:var(--text-dim); --muted-2:var(--text-faint);
+  --tension:var(--amber); --border:var(--line-2); --border-soft:var(--line);
+  /* shape */
+  --r-xs:9px; --r-sm:12px; --r:16px; --r-lg:22px;
+  --mono:'JetBrains Mono', ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace;
+  --kr:'Pretendard','Pretendard Variable',system-ui,-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+  --shadow:0 14px 34px -18px rgba(22,42,80,.20);
+}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;}
+body{
+  font-family:var(--kr);
+  color:var(--text);
+  background:var(--ink);
+  background-image:
+    radial-gradient(1100px 520px at 80% -10%, rgba(12,169,154,.10), transparent 60%),
+    radial-gradient(820px 460px at 0% 4%, rgba(193,118,15,.06), transparent 58%),
+    linear-gradient(180deg,#f2f5f9 0%, #edf0f5 45%);
+  background-attachment:fixed;
+  line-height:1.5;
+  min-height:100vh;
+  letter-spacing:-.01em;
+  padding:env(safe-area-inset-top) 16px calc(env(safe-area-inset-bottom) + 40px);
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+.app{max-width:480px;margin:0 auto;}
+::selection{background:rgba(12,169,154,.22);}
+
+/* staggered entrance */
+@keyframes rise{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
+.app>*{animation:rise .55s cubic-bezier(.2,.75,.25,1) both;}
+.app>*:nth-child(1){animation-delay:.02s}.app>*:nth-child(2){animation-delay:.07s}
+.app>*:nth-child(3){animation-delay:.12s}.app>*:nth-child(4){animation-delay:.17s}
+.app>*:nth-child(5){animation-delay:.22s}.app>*:nth-child(6){animation-delay:.27s}
+.app>*:nth-child(n+7){animation-delay:.3s}
+@media (prefers-reduced-motion:reduce){.app>*{animation:none;}}
+
+/* ---------- top bar ---------- */
+.topbar{display:flex;align-items:center;gap:12px;padding:18px 4px 16px;}
+.brand{display:flex;align-items:center;gap:11px;min-width:0;}
+.mark{
+  width:40px;height:40px;border-radius:12px;flex:none;display:grid;place-items:center;
+  background:linear-gradient(150deg,#e4fbf6,#ffffff);
+  border:1px solid #b9e8e1; box-shadow:0 0 0 1px rgba(12,169,154,.06), 0 6px 16px -9px rgba(12,169,154,.5);
+}
+.mark svg{display:block;}
+.brand-title{font-size:16.5px;font-weight:700;letter-spacing:-.02em;line-height:1.15;}
+.brand-sub{font-family:var(--mono);font-size:9.5px;font-weight:500;letter-spacing:.22em;
+  color:var(--text-faint);text-transform:uppercase;margin-top:2px;}
+.status-pill{
+  margin-left:auto;flex:none;font-family:var(--mono);font-size:10.5px;font-weight:700;
+  letter-spacing:.12em;text-transform:uppercase;padding:7px 12px;border-radius:999px;
+  border:1px solid var(--line-2);color:var(--text-dim);background:var(--surface-2);
+  white-space:nowrap;transition:.2s;display:inline-flex;align-items:center;gap:7px;
+}
+.status-pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.85;}
+.status-pill.s-listen{color:var(--accent);border-color:rgba(61,215,192,.4);background:rgba(61,215,192,.1);}
+.status-pill.s-good{color:var(--green);border-color:rgba(86,217,140,.4);background:rgba(86,217,140,.1);}
+.status-pill.s-weak{color:var(--warn);border-color:rgba(244,196,78,.4);background:rgba(244,196,78,.1);}
+.status-pill.s-noise{color:var(--orange);border-color:rgba(251,139,60,.4);background:rgba(251,139,60,.1);}
+.status-pill.s-bad{color:var(--red);border-color:rgba(251,106,120,.4);background:rgba(251,106,120,.1);}
+
+/* ---------- panels ---------- */
+.panel{
+  background:linear-gradient(180deg,var(--surface) 0%, var(--surface-2) 100%);
+  border:1px solid var(--line); border-radius:var(--r);
+  padding:18px; margin-top:14px; box-shadow:var(--shadow);
+  position:relative;
+}
+.panel-title{
+  display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 15px;
+}
+.panel-title .ko{font-size:13px;font-weight:700;letter-spacing:-.01em;color:var(--text);
+  display:flex;align-items:center;gap:9px;}
+.panel-title .ko::before{content:"";width:4px;height:14px;border-radius:99px;
+  background:linear-gradient(180deg,var(--accent),var(--accent-deep));}
+.panel-title .en{font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.16em;
+  color:var(--text-faint);text-transform:uppercase;}
+
+/* ---------- HERO ---------- */
+.hero{
+  margin-top:6px;padding:22px 20px 20px;border-radius:var(--r-lg);
+  background:
+    radial-gradient(420px 220px at 88% -20%, rgba(193,118,15,.10), transparent 60%),
+    linear-gradient(180deg,#ffffff 0%, #fbfcfe 100%);
+  border:1px solid var(--line-2);
+  box-shadow:var(--shadow), inset 0 1px 0 rgba(255,255,255,.6);
+  overflow:hidden;
+}
+.hero::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;
+  background:linear-gradient(90deg,transparent, var(--amber) 30%, var(--accent) 75%, transparent);
+  opacity:.7;}
+.hero-head{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.hero-label{font-family:var(--kr);font-size:11px;font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-dim);}
+#resJudgeWrap{
+  font-family:var(--mono);font-size:13px;font-weight:800;letter-spacing:.04em;
+  display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;
+  border:1px solid var(--line-2);background:var(--surface-3);color:var(--text-faint);transition:.2s;
+}
+#resJudgeWrap::before{content:"JUDGE";font-family:var(--mono);font-size:8.5px;font-weight:600;
+  letter-spacing:.14em;color:var(--text-faint);opacity:.8;}
+#resJudgeWrap.judge-ok{border-color:rgba(86,217,140,.45);background:rgba(86,217,140,.12);color:var(--green);}
+#resJudgeWrap.judge-ok::before{color:var(--green);opacity:.7;}
+#resJudgeWrap.judge-ng{border-color:rgba(251,106,120,.45);background:rgba(251,106,120,.12);color:var(--red);}
+#resJudgeWrap.judge-ng::before{color:var(--red);opacity:.7;}
+
+.hero-readout{display:flex;align-items:baseline;gap:10px;margin:10px 0 2px;}
+#resTensionN{font-family:var(--mono);font-weight:800;font-size:66px;line-height:.92;
+  color:var(--amber);letter-spacing:-.04em;font-variant-numeric:tabular-nums;
+  text-shadow:none;}
+.hero-unit{font-family:var(--mono);font-weight:700;font-size:24px;color:#a8741f;}
+.hero-kgf{font-family:var(--mono);font-size:16px;font-weight:500;color:var(--text-dim);letter-spacing:.01em;}
+.hero-kgf #resTensionKgf{color:var(--text);font-weight:700;}
+
+/* target band gauge */
+.gauge{margin-top:18px;}
+.gauge-scale{display:flex;justify-content:space-between;font-family:var(--mono);
+  font-size:10.5px;font-weight:600;color:var(--text-faint);margin-bottom:7px;letter-spacing:.02em;}
+.gauge-scale .mid{color:var(--text-dim);}
+.gauge-track{position:relative;height:12px;border-radius:999px;background:var(--ink-2);
+  border:1px solid var(--line);overflow:hidden;}
+.gauge-zone{position:absolute;top:0;bottom:0;border-radius:999px;
+  background:linear-gradient(180deg,rgba(86,217,140,.5),rgba(86,217,140,.25));
+  box-shadow:inset 0 0 0 1px rgba(86,217,140,.4);transition:left .35s ease,width .35s ease,opacity .3s;}
+.gauge-marker{position:absolute;top:50%;left:50%;width:14px;height:14px;border-radius:50%;
+  transform:translate(-50%,-50%);background:var(--text-dim);
+  box-shadow:0 0 0 3px var(--surface), 0 0 0 4px var(--line-2);
+  transition:left .35s cubic-bezier(.2,.7,.2,1),background .25s,box-shadow .25s;z-index:2;}
+.gauge-marker.ok{background:var(--green);box-shadow:0 0 0 3px var(--surface),0 0 12px 1px rgba(86,217,140,.7);}
+.gauge-marker.ng{background:var(--red);box-shadow:0 0 0 3px var(--surface),0 0 12px 1px rgba(251,106,120,.7);}
+.gauge.no-target{opacity:.5;}
+.gauge-cap{margin-top:9px;text-align:center;font-family:var(--mono);font-size:11.5px;
+  font-weight:600;color:var(--text-dim);letter-spacing:.02em;}
+.gauge-cap b{color:var(--text);font-weight:700;}
+
+/* ---------- LIVE panel ---------- */
+.live-row{display:grid;grid-template-columns:1fr 1fr auto;gap:14px;align-items:center;}
+.stat .stat-k{font-size:10.5px;font-weight:600;color:var(--text-dim);letter-spacing:.02em;}
+.stat .stat-v{font-family:var(--mono);font-weight:800;font-size:27px;line-height:1.05;margin-top:5px;
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
+.stat .stat-v i{font-style:normal;font-size:12px;font-weight:600;color:var(--text-faint);margin-left:3px;}
+.stat .stat-v.accent{color:var(--accent);}
+#liveFreq{color:var(--accent);}
+
+.conf-ring{position:relative;width:64px;height:64px;justify-self:end;}
+.ring-svg{transform:rotate(-90deg);width:64px;height:64px;display:block;}
+.ring-bg{fill:none;stroke:var(--line);stroke-width:6;}
+.ring-arc{fill:none;stroke:var(--accent);stroke-width:6;stroke-linecap:round;
+  stroke-dasharray:163.36;stroke-dashoffset:163.36;transition:stroke-dashoffset .5s ease,stroke .3s;}
+.conf-center{position:absolute;inset:0;display:grid;place-items:center;line-height:1;}
+.conf-center span{font-family:var(--mono);font-weight:800;font-size:17px;font-variant-numeric:tabular-nums;}
+.conf-center i{font-style:normal;font-size:9px;color:var(--text-faint);font-weight:600;margin-left:1px;}
+.conf-label{grid-column:3;justify-self:end;font-size:9.5px;font-weight:600;color:var(--text-faint);
+  text-transform:uppercase;letter-spacing:.1em;font-family:var(--mono);margin-top:6px;text-align:center;width:64px;}
+
+.signal{margin-top:18px;}
+.signal-head{display:flex;justify-content:space-between;font-size:10.5px;font-weight:600;
+  color:var(--text-dim);margin-bottom:8px;letter-spacing:.02em;}
+.signal-head #meterVal{font-family:var(--mono);color:var(--text);}
+.meter-track{height:10px;border-radius:999px;background:var(--ink-2);border:1px solid var(--line);overflow:hidden;}
+.meter-fill{height:100%;width:0%;border-radius:999px;
+  background:linear-gradient(90deg,var(--green),var(--warn) 68%,var(--red));transition:width .09s linear;}
+
+.live-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
+.dot-wrap{display:flex;align-items:center;gap:9px;min-width:0;}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--text-faint);flex:none;transition:background .2s;}
+.dot.live{box-shadow:0 0 0 0 var(--accent-glow);animation:pulse 1.5s infinite;}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(61,215,192,.5);}70%{box-shadow:0 0 0 9px rgba(61,215,192,0);}100%{box-shadow:0 0 0 0 rgba(61,215,192,0);}}
+.status-text{font-size:12.5px;font-weight:500;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.peak{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text-faint);letter-spacing:.04em;white-space:nowrap;}
+.peak b{color:var(--text-dim);font-weight:700;margin-left:4px;}
+
+/* ---------- spectrum ---------- */
+.canvas-box{width:100%;border-radius:var(--r-sm);overflow:hidden;
+  background:linear-gradient(180deg,#f3f6fb,#eef2f8);border:1px solid var(--line);}
+canvas{display:block;width:100%;height:200px;}
+
+/* ---------- action bar ---------- */
+.actions{margin-top:14px;}
+.btn{
+  font-family:var(--mono);font-weight:700;font-size:14px;letter-spacing:.01em;
+  border:1px solid var(--line-2);border-radius:var(--r-sm);
+  color:var(--text);background:var(--surface-3);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:8px;min-height:50px;padding:13px 12px;
+  transition:transform .07s,filter .18s,background .18s,border-color .18s,opacity .18s;
+}
+.btn:active{transform:scale(.975);}
+.btn:disabled{opacity:.38;cursor:not-allowed;}
+.btn .ico{font-size:14px;line-height:1;}
+.btn-start{width:100%;min-height:62px;font-size:17px;font-weight:800;letter-spacing:.02em;
+  color:#04221f;border:none;
+  background:linear-gradient(135deg,#48e3cb 0%, #18b9a3 100%);
+  box-shadow:0 14px 26px -14px rgba(12,169,154,.45), inset 0 1px 0 rgba(255,255,255,.45);}
+.btn-start:hover{filter:brightness(1.05);}
+.actions-sub{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px;}
+.actions-sub .btn{min-height:48px;font-size:13px;}
+.btn-stop{color:#fff;border-color:transparent;background:linear-gradient(135deg,#f2596a,#d23b4c);}
+.btn-stop:disabled{background:var(--surface-3);color:var(--text);}
+.btn-hold{color:var(--warn);border-color:rgba(244,196,78,.3);}
+.btn-hold.active{background:rgba(244,196,78,.14);}
+.btn-save{color:var(--green);border-color:rgba(86,217,140,.3);}
+
+/* ---------- presets ---------- */
+.presets{display:grid;grid-template-columns:1fr 1fr;gap:11px;}
+.preset{
+  text-align:left;padding:15px 15px;border-radius:var(--r-sm);cursor:pointer;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--text);
+  transition:.18s;display:flex;flex-direction:column;gap:5px;
+}
+.preset:active{transform:scale(.985);}
+.preset .title{font-family:var(--mono);font-size:16px;font-weight:800;letter-spacing:-.01em;}
+.preset .sub{font-size:12px;color:var(--text-dim);font-weight:500;}
+.preset.active{border-color:var(--accent);background:linear-gradient(180deg,rgba(61,215,192,.1),rgba(61,215,192,.03));
+  box-shadow:inset 0 0 0 1px rgba(61,215,192,.25), 0 0 24px -12px var(--accent);}
+.preset.active .title{color:var(--accent);}
+
+/* ---------- collapsibles ---------- */
+details.panel{padding:0;overflow:hidden;}
+details.panel>summary{list-style:none;cursor:pointer;padding:17px 18px;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  font-size:13px;font-weight:700;color:var(--text);}
+details.panel>summary::-webkit-details-marker{display:none;}
+details.panel>summary::before{content:"";width:4px;height:14px;border-radius:99px;margin-right:1px;
+  background:linear-gradient(180deg,var(--accent),var(--accent-deep));}
+details.panel>summary .sum-en{margin-left:auto;font-family:var(--mono);font-size:10px;font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--text-faint);}
+details.panel>summary .chev{transition:transform .25s;color:var(--text-faint);font-size:13px;}
+details.panel[open]>summary .chev{transform:rotate(180deg);}
+details.panel .panel-body{padding:2px 18px 18px;}
+
+/* ---------- inputs ---------- */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.field{display:flex;flex-direction:column;}
+.field.full{grid-column:1 / -1;}
+.field label{font-size:11px;color:var(--text-dim);margin-bottom:7px;font-weight:600;letter-spacing:.01em;
+  display:flex;justify-content:space-between;align-items:baseline;gap:8px;}
+.field label .unit{font-family:var(--mono);color:var(--accent);font-size:10px;font-weight:600;letter-spacing:.04em;}
+.field input, select{
+  font-family:var(--mono);font-size:18px;font-weight:600;color:var(--text);
+  background:var(--ink-2);border:1px solid var(--line-2);border-radius:var(--r-xs);
+  padding:13px 14px;width:100%;outline:none;transition:border-color .15s,box-shadow .15s;
+  font-variant-numeric:tabular-nums;
+}
+select{font-size:15px;}
+.field input::placeholder{color:var(--text-faint);font-weight:400;}
+.field input:focus, select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow);}
+.field input.invalid{border-color:var(--red);box-shadow:0 0 0 3px rgba(251,106,120,.18);}
+.estimate-input{display:grid;grid-template-columns:1fr 96px auto;gap:9px;align-items:stretch;}
+.estimate-input input{font-size:15px;}
+.estimate-input .btn{min-height:0;padding:0 16px;font-size:13px;}
+.note{margin-top:13px;padding:12px 14px;border-radius:var(--r-xs);font-size:12px;line-height:1.6;
+  color:var(--text-dim);background:var(--ink-2);border:1px solid var(--line);}
+.note b{color:var(--accent);font-weight:600;}
+
+/* ---------- detail result ---------- */
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;}
+.mini{background:var(--ink-2);border:1px solid var(--line);border-radius:var(--r-xs);padding:13px 14px;}
+.mini .k{font-size:10.5px;color:var(--text-dim);font-weight:600;letter-spacing:.02em;}
+.mini .v{font-family:var(--mono);font-weight:700;font-size:18px;margin-top:5px;font-variant-numeric:tabular-nums;}
+.detail-meta{margin-top:12px;font-family:var(--mono);font-size:11.5px;color:var(--text-dim);
+  display:grid;grid-template-columns:1fr 1fr;gap:9px 16px;}
+.detail-meta span{display:flex;justify-content:space-between;gap:8px;
+  padding-bottom:8px;border-bottom:1px solid var(--line);}
+.detail-meta b{color:var(--text);font-weight:700;}
+
+/* ---------- history ---------- */
+.history-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:15px;}
+.history-actions{display:flex;gap:9px;}
+.history-actions .btn{min-height:42px;padding:9px 14px;font-size:12.5px;}
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:var(--r-xs);border:1px solid var(--line);}
+table{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:11.5px;white-space:nowrap;
+  font-variant-numeric:tabular-nums;}
+thead th{background:var(--surface-3);color:var(--text-dim);font-weight:600;text-align:right;
+  padding:11px 13px;letter-spacing:.02em;position:sticky;top:0;}
+thead th:first-child{text-align:center;}
+tbody td{padding:10px 13px;text-align:right;border-top:1px solid var(--line);color:var(--text);}
+tbody td:first-child{text-align:center;color:var(--text-faint);}
+tbody tr:nth-child(even){background:rgba(22,42,80,.025);}
+.empty-row td{text-align:center !important;color:var(--text-faint);padding:22px;font-family:var(--kr);font-size:13px;}
+.tens-cell{color:var(--amber);font-weight:700;}
+
+/* ---------- help ---------- */
+.help-grid{display:grid;gap:10px;}
+.help-item{padding:13px 15px;border-radius:var(--r-xs);border:1px solid var(--line);background:var(--ink-2);}
+.help-item .title{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--accent);margin-bottom:7px;}
+.help-item .text{font-size:13px;color:var(--text-dim);line-height:1.62;}
+.disclaimer{margin-top:12px;font-size:12px;color:var(--text-faint);line-height:1.65;
+  border:1px dashed var(--line-2);border-radius:var(--r-xs);padding:13px 15px;background:rgba(255,186,82,.03);}
+.disclaimer b{color:var(--amber);font-weight:600;}
+
+/* ---------- toast ---------- */
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);
+  background:var(--surface-3);color:var(--text);border:1px solid var(--line-2);
+  border-left:3px solid var(--accent);padding:13px 18px;border-radius:var(--r-sm);
+  font-size:13.5px;font-weight:500;max-width:88vw;box-shadow:0 22px 44px -16px rgba(22,42,80,.20);
+  opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:60;}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+#toast.err{border-left-color:var(--red);}
+#toast.warn{border-left-color:var(--warn);}
+#toast.ok{border-left-color:var(--green);}
+
+@media (max-width:420px){
+  body{padding-left:13px;padding-right:13px;}
+  #resTensionN{font-size:56px;}
+  .stat .stat-v{font-size:23px;}
+  .live-row{grid-template-columns:1fr 1fr;}
+  .conf-ring{grid-column:1 / -1;justify-self:center;margin-top:4px;}
+  .conf-label{grid-column:1 / -1;justify-self:center;}
+  .actions-sub{grid-template-columns:1fr 1fr 1fr;}
+  .estimate-input{grid-template-columns:1fr;}
+}
+/* ---------- 측정 보조 토글 ---------- */
+.toggle-row{display:flex;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid var(--line);}
+.toggle-row:first-of-type{padding-top:2px;}
+.toggle-row:last-of-type{border-bottom:none;}
+.toggle-info{min-width:0;flex:1;}
+.toggle-name{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap;letter-spacing:-.01em;}
+.toggle-desc{font-size:12px;color:var(--text-dim);margin-top:5px;line-height:1.5;}
+.toggle-ctrl{display:flex;align-items:center;gap:9px;flex:none;}
+.switch{width:50px;height:30px;border-radius:999px;border:1px solid var(--line-2);background:var(--surface-3);
+  position:relative;cursor:pointer;transition:background .2s,border-color .2s;padding:0;flex:none;}
+.switch .knob{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;
+  box-shadow:0 1px 3px rgba(0,0,0,.28);transition:left .22s cubic-bezier(.3,.8,.3,1);}
+.switch[aria-pressed="true"]{background:linear-gradient(135deg,var(--accent),var(--accent-deep));border-color:transparent;}
+.switch[aria-pressed="true"] .knob{left:25px;}
+.assist-chip{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.08em;padding:3px 8px;
+  border-radius:999px;background:rgba(12,169,154,.12);color:var(--accent-deep);
+  border:1px solid rgba(12,169,154,.32);text-transform:uppercase;}
+.assist-sel{font-family:var(--mono);font-size:12px;color:var(--text-dim);display:inline-flex;align-items:center;gap:5px;}
+.assist-sel select{width:auto;padding:4px 9px;font-size:13px;border-radius:8px;}
+.mini-btn{font-family:var(--mono);font-size:11px;font-weight:700;padding:8px 11px;border-radius:9px;
+  border:1px solid var(--line-2);background:var(--surface-3);color:var(--text-dim);cursor:pointer;}
+.mini-btn:active{transform:scale(.96);}
+.assist-note{margin-top:13px;padding:11px 13px;border-radius:var(--r-xs);font-size:11.5px;line-height:1.6;
+  color:var(--text-dim);background:var(--ink-2);border:1px solid var(--line);}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ===== TOP BAR ===== -->
+  <div class="topbar">
+    <div class="brand">
+      <div class="mark">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <path d="M2 12 H5 L7 5 L10 19 L13 8 L15 14 H18 L20 12 H22"
+            stroke="#0b8c80" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-title">벨트 텐션 측정기</div>
+        <div class="brand-sub">Sonic · U-550 Method</div>
+      </div>
+    </div>
+    <span id="statusPill" class="status-pill">READY</span>
+  </div>
+
+  <!-- ===== HERO RESULT ===== -->
+  <section class="hero">
+    <div class="hero-head">
+      <span class="hero-label">보정 후 장력 · Corrected</span>
+      <span id="resJudgeWrap"><span id="resJudge">--</span></span>
+    </div>
+    <div class="hero-readout">
+      <span id="resTensionN">--</span>
+      <span class="hero-unit">N</span>
+    </div>
+    <div class="hero-kgf"><span id="resTensionKgf">--</span> kgf</div>
+
+    <div class="gauge" id="gaugeWrap">
+      <div class="gauge-scale">
+        <span id="gaugeLow">–</span>
+        <span class="mid">목표 범위</span>
+        <span id="gaugeHigh">–</span>
+      </div>
+      <div class="gauge-track">
+        <div id="gaugeZone" class="gauge-zone"></div>
+        <div id="gaugeMarker" class="gauge-marker"></div>
+      </div>
+      <div class="gauge-cap">목표 <b id="resTarget">--</b></div>
+    </div>
+  </section>
+
+  <!-- ===== LIVE ANALYSIS ===== -->
+  <section class="panel">
+    <div class="panel-title"><span class="ko">실시간 분석</span><span class="en">Live Analysis</span></div>
+    <div class="live-row">
+      <div class="stat">
+        <div class="stat-k">검출 주파수</div>
+        <div class="stat-v"><span id="resFreq">--</span><i>Hz</i></div>
+      </div>
+      <div class="stat">
+        <div class="stat-k">현재 주파수</div>
+        <div class="stat-v accent"><span id="liveFreq">--</span><i>Hz</i></div>
+      </div>
+      <div class="conf-ring">
+        <svg class="ring-svg" viewBox="0 0 64 64">
+          <circle class="ring-bg" cx="32" cy="32" r="26"/>
+          <circle id="confArc" class="ring-arc" cx="32" cy="32" r="26"/>
+        </svg>
+        <div class="conf-center"><span id="resConf">--</span><i>%</i></div>
+      </div>
+      <div class="conf-label">Confidence</div>
+    </div>
+
+    <div class="signal">
+      <div class="signal-head"><span>신호 강도</span><span id="meterVal">0%</span></div>
+      <div class="meter-track"><div id="meterFill" class="meter-fill"></div></div>
+    </div>
+
+    <div class="live-foot">
+      <span class="dot-wrap">
+        <span id="statusDot" class="dot"></span>
+        <span id="statusText" class="status-text">대기 중</span>
+      </span>
+      <span class="peak">피크<b id="livePeak">대기</b></span>
+    </div>
+  </section>
+
+  <!-- ===== SPECTRUM ===== -->
+  <section class="panel">
+    <div class="panel-title"><span class="ko">주파수 스펙트럼</span><span class="en">10–5000 Hz</span></div>
+    <div class="canvas-box"><canvas id="spectrum"></canvas></div>
+  </section>
+
+  <!-- ===== ACTIONS ===== -->
+  <section class="actions">
+    <button id="btnStart" class="btn btn-start"><span class="ico">●</span> 측정 시작</button>
+    <div class="actions-sub">
+      <button id="btnStop" class="btn btn-stop" disabled><span class="ico">■</span> 중지</button>
+      <button id="btnHold" class="btn btn-hold" disabled><span class="ico">⏸</span> 고정</button>
+      <button id="btnSave" class="btn btn-save" disabled><span class="ico">＋</span> 저장</button>
+    </div>
+  </section>
+
+  <!-- ===== PRESET ===== -->
+  <section class="panel">
+    <div class="panel-title"><span class="ko">측정 모드</span><span class="en">Preset</span></div>
+    <div class="presets">
+      <button id="btnPreset500" type="button" class="preset">
+        <span class="title">500 N <small style="font-size:11px;color:var(--text-faint);font-weight:600;">±10%</small></span>
+        <span class="sub">리프팅 벨트 텐션</span>
+      </button>
+      <button id="btnPreset170" type="button" class="preset">
+        <span class="title">170 N <small style="font-size:11px;color:var(--text-faint);font-weight:600;">±20%</small></span>
+        <span class="sub">구동모듈 벨트 텐션</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- ===== ASSIST (노이즈 저감 / 측정 대상 고정) ===== -->
+  <section class="panel">
+    <div class="panel-title"><span class="ko">측정 보조</span><span class="en">Assist</span></div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name">노이즈 저감
+          <span id="nrChip" class="assist-chip" style="display:none;">학습 중</span>
+        </div>
+        <div class="toggle-desc">주변 소음 스펙트럼을 학습해 실시간 신호에서 차감합니다. 모터·전원 험 등 정상 소음에 강합니다.</div>
+      </div>
+      <div class="toggle-ctrl">
+        <button id="btnRelearn" class="mini-btn" type="button" style="display:none;">재학습</button>
+        <button id="swNoise" class="switch" type="button" aria-pressed="false" aria-label="노이즈 저감"><span class="knob"></span></button>
+      </div>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name">측정 대상 고정
+          <span id="lockWidthWrap" class="assist-sel" style="display:none;">± <select id="selLockWidth"><option value="20">20%</option><option value="30" selected>30%</option><option value="40">40%</option></select></span>
+        </div>
+        <div class="toggle-desc" id="lockDesc">예상 주파수 주변의 좁은 대역만 탐색해 엉뚱한 피크를 무시합니다.</div>
+      </div>
+      <div class="toggle-ctrl">
+        <button id="swLock" class="switch" type="button" aria-pressed="false" aria-label="측정 대상 고정"><span class="knob"></span></button>
+      </div>
+    </div>
+
+    <div class="assist-note">노이즈 저감은 측정 직전 조용한 상태에서 자동 학습됩니다. 측정 대상 고정은 예상 주파수(또는 목표 장력)가 있을 때 가장 정확합니다.</div>
+  </section>
+
+  <!-- ===== CONDITIONS ===== -->
+  <details class="panel" open>
+    <summary>측정 조건 설정 <span class="sum-en">Conditions</span> <span class="chev">⌄</span></summary>
+    <div class="panel-body">
+      <div class="form-grid">
+        <div class="field">
+          <label>Mass <span class="unit">g/m</span></label>
+          <input id="inMass" type="number" inputmode="decimal" step="any" placeholder="2.5">
+        </div>
+        <div class="field">
+          <label>Width / Rib <span class="unit">mm·count</span></label>
+          <input id="inWidth" type="number" inputmode="decimal" step="any" placeholder="25 / 1">
+        </div>
+        <div class="field">
+          <label>Span <span class="unit">mm</span></label>
+          <input id="inSpan" type="number" inputmode="decimal" step="any" placeholder="300">
+        </div>
+        <div class="field">
+          <label>보정계수 <span class="unit">CF</span></label>
+          <input id="inCF" type="number" inputmode="decimal" step="any" value="1.000" placeholder="1.000">
+        </div>
+        <div class="field">
+          <label>목표 장력 <span class="unit">N</span></label>
+          <input id="inTargetN" type="number" inputmode="decimal" step="any" placeholder="500">
+        </div>
+        <div class="field">
+          <label>허용오차 <span class="unit">%</span></label>
+          <input id="inTolPct" type="number" inputmode="decimal" step="any" value="10" placeholder="10">
+        </div>
+        <div class="field full">
+          <label>예상 주파수 <span class="unit">Hz · estimate</span></label>
+          <div class="estimate-input">
+            <input id="estFreq" type="number" inputmode="decimal" step="any" placeholder="직접 입력 또는 계산">
+            <input id="kconst" type="number" inputmode="decimal" step="any" value="1000" title="k constant" placeholder="k">
+            <button id="btnEstimate" class="btn" type="button">계산</button>
+          </div>
+        </div>
+        <div class="field full">
+          <label>FFT 크기 <span class="unit">resolution</span></label>
+          <select id="selFFT">
+            <option value="8192">8192</option>
+            <option value="16384" selected>16384 (기본)</option>
+            <option value="32768">32768</option>
+          </select>
+        </div>
+      </div>
+      <div class="note">입력값은 모바일에서 자동으로 1열로 전환됩니다. <b>목표 장력</b>과 <b>허용오차</b>를 넣으면 상단 게이지에 합·부 범위가 표시됩니다.</div>
+    </div>
+  </details>
+
+  <!-- ===== DETAIL RESULT ===== -->
+  <section class="panel">
+    <div class="panel-title"><span class="ko">상세 결과</span><span class="en">Detail</span></div>
+    <div class="detail-grid">
+      <div class="mini"><div class="k">계산 장력 (보정 전)</div><div class="v"><span id="resRawN">--</span> N</div></div>
+      <div class="mini"><div class="k">측정 시간</div><div class="v" style="font-size:15px;"><span id="resTime">--</span></div></div>
+    </div>
+    <div class="detail-meta">
+      <span>Mass <b id="resMass">--</b></span>
+      <span>Width <b id="resWidth">--</b></span>
+      <span>Span <b id="resSpan">--</b></span>
+      <span>CF <b id="resCF">--</b></span>
+    </div>
+  </section>
+
+  <!-- ===== HISTORY ===== -->
+  <section class="panel">
+    <div class="history-toolbar">
+      <div class="panel-title" style="margin:0;"><span class="ko">측정 기록</span></div>
+      <div class="history-actions">
+        <button id="btnCSV" class="btn" type="button"><span class="ico">⤓</span> CSV</button>
+        <button id="btnClear" class="btn" type="button"><span class="ico">↺</span> 초기화</button>
+      </div>
+    </div>
+    <div class="table-scroll">
+      <table id="histTable">
+        <thead>
+          <tr>
+            <th>No.</th><th>Time</th><th>Mass</th><th>Width</th><th>Span</th>
+            <th>Freq</th><th>T[N]</th><th>T보정</th><th>kgf</th><th>Target</th><th>Judge</th>
+          </tr>
+        </thead>
+        <tbody id="histBody">
+          <tr class="empty-row"><td colspan="11">저장된 측정 기록이 없습니다.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== HELP ===== -->
+  <details class="panel">
+    <summary>사용 안내 · 주의사항 <span class="sum-en">Guide</span> <span class="chev">⌄</span></summary>
+    <div class="panel-body">
+      <div class="help-grid">
+        <div class="help-item">
+          <div class="title">측정 방법</div>
+          <div class="text">측정 시작 후 Span 중앙부를 짧고 선명하게 튕겨 주세요. 검출 주파수와 장력이 안정될 때까지 1~2회 반복하면 정확도가 좋아집니다.</div>
+        </div>
+        <div class="help-item">
+          <div class="title">환경 주의</div>
+          <div class="text">주변 소음이 크면 검출이 불안정해집니다. 마이크가 벨트를 향하게 하고, 너무 약한 타격은 피하세요.</div>
+        </div>
+        <div class="help-item">
+          <div class="title">저장 기준</div>
+          <div class="text">Confidence가 높고 상태가 GOOD/STABLE일 때 저장하세요. 자동 안정화가 완료되면 결과가 고정됩니다.</div>
+        </div>
+      </div>
+      <div class="disclaimer"><b>안내</b> · 본 측정값은 마이크 입력과 알고리즘 추정에 기반한 참고값입니다. 정밀 측정이 필요하면 기준 장력계와 비교해 보정계수를 조정하세요.</div>
+    </div>
+  </details>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+
+"use strict";
+/* ================================================================
+   음파식 벨트 텐션 측정기 (U-550 방식)
+   - 마이크 입력 → FFT → 10~5000Hz 피크 검출 → 장력 계산
+   ================================================================ */
+
+/* ---------- 분석 상수 (현장 보정 시 이 값들을 조정) ---------- */
+const MIN_FREQ = 10;          // 분석 최소 주파수 [Hz]
+const MAX_FREQ = 5000;        // 분석 최대 주파수 [Hz]
+const ABS_MIN_DB = -72;       // 이 값보다 약하면 "신호 약함"
+const PROMINENCE_DB = 9;      // 피크가 주변 노이즈 바닥보다 이만큼(dB) 높아야 유효
+const NOISE_LOUD_DB = -42;    // 대역 평균 레벨이 이보다 높으면 "주변 소음 큼"
+const BROADBAND_RATIO = 0.45; // 대역 bin 중 이 비율 이상이 피크 근처면 광대역 노이즈로 간주
+const BUF_SIZE = 5;           // 안정화 버퍼 크기 (최근 유효 피크 개수)
+const OUTLIER_TOL = 0.12;     // 중앙값 대비 ±12% 벗어난 피크는 이상치로 제외
+const G = 9.80665;            // kgf 환산 중력가속도
+
+/* ---------- 전역 상태 ---------- */
+let audioCtx=null, analyser=null, srcNode=null, micStream=null;
+let floatBuf=null, byteBuf=null, rafId=null;
+let measuring=false, held=false;
+let peakBuffer=[];                 // 최근 유효 피크 주파수 저장 (안정화용)
+let currentResult=null;            // 화면에 표시 중인 최종 결과 객체
+let records=[];                    // 저장된 측정 기록
+let measureStartTs=0;
+let activePreset=null;             // 현재 선택된 프리셋
+// transient collection state
+let collecting=false, strikeTs=0, collectStartTs=0, collectEndTs=0, collectedSnapshots=[];
+let lastStrikeAt=0;
+/* ---- 측정 보조: 노이즈 저감 / 측정 대상 고정 상태 ---- */
+let noiseReduction={enabled:false};   // 노이즈 저감 ON/OFF
+let noiseProfile=null;                // 주변 소음 스펙트럼(선형 진폭)
+let noiseProfileReady=false;          // 학습 완료 여부
+let targetLock={enabled:false, widthPct:30}; // 측정 대상 고정 ON/OFF + 밴드 폭(±%)
+let lockCenter=NaN, lockLoBin=-1, lockHiBin=-1;
+
+/* ---------- DOM 캐시 ---------- */
+const $ = id => document.getElementById(id);
+const inMass=$('inMass'), inWidth=$('inWidth'), inSpan=$('inSpan'), inCF=$('inCF'), inTargetN=$('inTargetN'), inTolPct=$('inTolPct'), selFFT=$('selFFT');
+const btnStart=$('btnStart'), btnStop=$('btnStop'), btnHold=$('btnHold'),
+      btnSave=$('btnSave'), btnClear=$('btnClear'), btnCSV=$('btnCSV');
+const btnPreset500=$('btnPreset500'), btnPreset170=$('btnPreset170');
+const estFreq=$('estFreq'), kconst=$('kconst'), btnEstimate=$('btnEstimate');
+const statusDot=$('statusDot'), statusText=$('statusText'), statusPill=$('statusPill');
+const liveFreq=$('liveFreq'), livePeak=$('livePeak'), meterFill=$('meterFill'), meterVal=$('meterVal');
+const canvas=$('spectrum'), ctx=canvas.getContext('2d');
+const resTarget=$('resTarget'), resJudge=$('resJudge'), resJudgeWrap=$('resJudgeWrap');
+
+/* ================================================================
+   유틸: 토스트 메시지
+   ================================================================ */
+let toastTimer=null;
+function toast(msg, type=''){
+  const t=$('toast');
+  t.textContent=msg;
+  t.className='show '+type;
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>{ t.className=''; }, 3200);
+}
+
+/* ================================================================
+   상태 배지 갱신
+   state: ready | listen | good | weak | noise | bad
+   ================================================================ */
+function setStatus(state, text, pillText){
+  statusText.textContent=text;
+  statusPill.textContent=pillText;
+  statusPill.className='status-pill '+
+    ({ready:'',listen:'s-listen',good:'s-good',weak:'s-weak',noise:'s-noise',bad:'s-bad'}[state]||'');
+  statusDot.className='dot'+(state==='listen'||state==='good'?' live':'');
+  if(state==='good') statusDot.style.background='var(--green)';
+  else if(state==='listen') statusDot.style.background='var(--cyan)';
+  else if(state==='weak') statusDot.style.background='var(--amber)';
+  else if(state==='noise') statusDot.style.background='var(--orange)';
+  else if(state==='bad') statusDot.style.background='var(--red)';
+  else statusDot.style.background='var(--muted-2)';
+}
+
+/* ================================================================
+   입력값 검증 (12.1 / 12.2)
+   ================================================================ */
+function readInputs(){
+  const mass=parseFloat(inMass.value);
+  const width=parseFloat(inWidth.value);
+  const span=parseFloat(inSpan.value);
+  let cf=parseFloat(inCF.value);
+  if(!isFinite(cf)||cf<=0) cf=1.0;
+  return {mass,width,span,cf};
+}
+function readTarget(){
+  let targetN=parseFloat(inTargetN.value);
+  let tolPct=parseFloat(inTolPct.value);
+  if(!isFinite(targetN) || targetN<=0) targetN=NaN;
+  if(!isFinite(tolPct) || tolPct<=0) tolPct=NaN;
+  return {targetN, tolPct};
+}
+function validateInputs(){
+  [inMass,inWidth,inSpan].forEach(el=>el.classList.remove('invalid'));
+  const {mass,width,span}=readInputs();
+  // 12.1 입력값 누락
+  if([mass,width,span].some(v=>isNaN(v))){
+    [inMass,inWidth,inSpan].forEach(el=>{ if(isNaN(parseFloat(el.value))) el.classList.add('invalid'); });
+    toast('입력값을 모두 입력해주세요.', 'err');
+    return false;
+  }
+  // 12.2 0 또는 음수
+  if(mass<=0||width<=0||span<=0){
+    [inMass,inWidth,inSpan].forEach(el=>{ if(parseFloat(el.value)<=0) el.classList.add('invalid'); });
+    toast('Mass, Width, Span은 0보다 큰 값을 입력해야 합니다.', 'err');
+    return false;
+  }
+  return true;
+}
+
+/* ================================================================
+   U-550 방식 장력 계산 (6. 장력 계산 로직 / 19. 보정계수)
+   T_N = 4 × Mass × Width × Span² × Frequency² × 1e-9
+   T_corrected = T_N × CF ,  T_kgf = T_corrected / 9.80665
+   ================================================================ */
+function calcTension(mass,width,span,freq,cf){
+  const rawN = 4*mass*width*span*span*freq*freq*1e-9; // 보정 전 [N]
+  const corrN = rawN*cf;                              // 보정 후 [N]
+  const kgf = corrN/G;                                // 보정 후 [kgf]
+  return {rawN, corrN, kgf};
+}
+function calcExpectedFreq(mass,width,span,targetN,cf){
+  const safeCF = (isFinite(cf) && cf > 0) ? cf : 1;
+  const denom = 4 * mass * width * span * span * 1e-9 * safeCF;
+  if(!isFinite(targetN) || targetN <= 0 || !isFinite(denom) || denom <= 0) return NaN;
+  return Math.sqrt(targetN / denom);
+}
+function refreshPresetEstimate(){
+  if(!activePreset) return;
+  const mass = parseFloat(inMass.value);
+  const width = parseFloat(inWidth.value);
+  const span = parseFloat(inSpan.value);
+  const targetN = parseFloat(inTargetN.value);
+  const cf = parseFloat(inCF.value);
+  const expectedFreq = calcExpectedFreq(mass, width, span, targetN, cf);
+  if(isFinite(expectedFreq)) estFreq.value = expectedFreq.toFixed(2);
+}
+function canUseMicrophone(){
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.isSecureContext);
+}
+function micUnavailableMessage(){
+  if(!window.isSecureContext){
+    return '모바일에서 마이크 권한 팝업이 안 뜨는 경우는 대부분 HTTPS가 아니기 때문입니다. HTTPS 또는 localhost에서 열어주세요.';
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    return '이 브라우저/환경에서는 마이크를 사용할 수 없습니다. 브라우저 설정과 권한을 확인해주세요.';
+  }
+  return '마이크를 사용할 수 없는 환경입니다. 브라우저 권한과 기기 설정을 확인해주세요.';
+}
+function setPreset(preset){
+  inMass.value = preset.mass;
+  inWidth.value = preset.width;
+  inSpan.value = preset.span;
+  inTargetN.value = preset.targetN;
+  inTolPct.value = preset.tolPct;
+  activePreset = preset;
+  refreshPresetEstimate();
+  [btnPreset500, btnPreset170].forEach(btn=>btn.classList.remove('active'));
+  preset.button.classList.add('active');
+  toast(preset.label+' 프리셋을 적용했습니다.', 'ok');
+  if(isFinite(preset.targetN) && isFinite(preset.tolPct)){
+    const lower = preset.targetN * (1 - preset.tolPct/100);
+    const upper = preset.targetN * (1 + preset.tolPct/100);
+    toast('목표 범위: '+lower.toFixed(1)+' ~ '+upper.toFixed(1)+' N', 'ok');
+  }
+}
+
+/* ================================================================
+   3~7. 측정 시작 — 마이크 권한 요청 & Web Audio API 초기화
+   ================================================================ */
+async function startMeasure(){
+  if(measuring) return;
+  if(!validateInputs()) return;               // 1~2. 입력 검증
+  if(!canUseMicrophone()){
+    setStatus('bad','마이크 사용 불가','UNAVAILABLE');
+    toast(micUnavailableMessage(), 'err');
+    btnStart.disabled = !window.isSecureContext;
+    return;
+  }
+
+  // 마이크 권한 요청 (12.3 거부 처리)
+  try{
+    // 마이크 제약: 노이즈 억제는 켜고, 에코 캔슬링 허용, AGC 비활성
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:false }
+    });
+  }catch(err){
+    const name = err && err.name ? err.name : '';
+    if(name === 'NotAllowedError' || name === 'SecurityError'){
+      setStatus('bad','마이크 권한 거부','DENIED');
+      toast('마이크 권한이 거부되었거나 브라우저가 차단했습니다. 사이트 설정에서 마이크를 허용해주세요.', 'err');
+    }else if(name === 'NotFoundError'){
+      setStatus('bad','마이크를 찾을 수 없음','NO MIC');
+      toast('사용 가능한 마이크를 찾지 못했습니다. 기기 마이크 또는 외부 마이크 연결을 확인해주세요.', 'err');
+    }else{
+      setStatus('bad','마이크 초기화 실패','ERROR');
+      toast('마이크 초기화에 실패했습니다: '+(err.message || '알 수 없는 오류'), 'err');
+    }
+    stopMeasure();
+    return;
+  }
+
+  // ---- Web Audio API 초기화 ----
+  try{
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended') await audioCtx.resume();
+    srcNode = audioCtx.createMediaStreamSource(micStream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = parseInt(selFFT.value,10);   // 기본 16384
+    analyser.smoothingTimeConstant = 0;             // 순간 충격음 포착 위해 평활화 끔
+    srcNode.connect(analyser);                      // (스피커로는 연결하지 않음 → 하울링 방지)
+    floatBuf = new Float32Array(analyser.frequencyBinCount);
+    byteBuf  = new Uint8Array(analyser.frequencyBinCount);
+  }catch(err){
+    setStatus('bad','오디오 초기화 실패','ERROR');
+    toast('오디오 초기화에 실패했습니다: '+err.message, 'err');
+    stopMeasure();
+    return;
+  }
+
+  // 상태 전환
+  measuring=true; held=false; peakBuffer=[];
+  measureStartTs=Date.now();
+  btnStart.disabled=true; btnStop.disabled=false; btnHold.disabled=false; btnSave.disabled=true;
+  btnHold.classList.remove('active'); btnHold.innerHTML='<span class="ico">⏸</span> 측정값 고정';
+  selFFT.disabled=true;
+  setStatus('listen','측정 중 — 벨트를 튕겨주세요','LISTENING');
+  toast('측정을 시작했습니다. 벨트 Span 중앙을 가볍게 튕기세요.', 'ok');
+  analyzeLoop();
+}
+
+/* ================================================================
+   측정 중지 — 리소스 정리
+   ================================================================ */
+function stopMeasure(){
+  measuring=false;
+  if(rafId){ cancelAnimationFrame(rafId); rafId=null; }
+  if(srcNode){ try{srcNode.disconnect();}catch(e){} srcNode=null; }
+  if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
+  if(audioCtx){ try{audioCtx.close();}catch(e){} audioCtx=null; }
+  analyser=null;
+  btnStart.disabled=false; btnStop.disabled=true; btnHold.disabled=true; btnSave.disabled=true;
+  selFFT.disabled=false;
+  setStatus('ready','대기 중','READY');
+  meterFill.style.width='0%'; meterVal.textContent='0%';
+  liveFreq.textContent='--'; livePeak.textContent='대기'; livePeak.style.color='var(--muted)';
+}
+
+/* ================================================================
+   8. 피크 주파수 검출 + 분석 루프 (7. 실시간 FFT)
+   requestAnimationFrame으로 매 프레임 분석
+   ================================================================ */
+function analyzeLoop(){
+  if(!measuring||!analyser){ return; }
+
+  // ---- FFT 데이터 수집 (예외 방지) ----
+  try{
+    analyser.getFloatFrequencyData(floatBuf);   // dB 스케일 (분석용)
+    analyser.getByteFrequencyData(byteBuf);     // 0~255 (그래프/레벨 표시용)
+  }catch(err){
+    console.error('FFT read error', err);
+    toast('오디오 처리 중 오류가 발생했습니다. 측정을 중지합니다.','err');
+    stopMeasure();
+    return;
+  }
+
+  const sampleRate = audioCtx.sampleRate;
+  const binHz = sampleRate / analyser.fftSize;          // 1 bin 당 주파수 폭
+
+  // ★ 노이즈 저감(ON): 주변 소음 스펙트럼을 학습해 실시간 신호에서 bin 단위 차감
+  //   - floatBuf(dB)를 제자리(in-place)로 정제 → 이후 피크/기본주파수 검출이 모두 정제본 사용
+  //   - byteDraw : 그래프용 정제 스펙트럼(저감 효과를 눈으로 확인)
+  let byteDraw = byteBuf;
+  if(noiseReduction.enabled){ byteDraw = applyNoiseReduction(floatBuf, byteBuf, binHz); }
+
+  // ---- 10~5000 Hz 범위 필터링 ----
+  let minBin = Math.max(1, Math.floor(MIN_FREQ/binHz));
+  let maxBin = Math.min(floatBuf.length-2, Math.ceil(MAX_FREQ/binHz));
+
+  // ★ 측정 대상 고정(ON): 예상 주파수 주변의 좁은 밴드만 탐색해 엉뚱한 피크 제거
+  lockLoBin=-1; lockHiBin=-1; lockCenter=NaN;
+  if(targetLock.enabled){
+    const c = computeLockCenter();               // 예상/목표 기반 중심 주파수
+    if(isFinite(c) && c>0){
+      lockCenter=c;
+      const w=targetLock.widthPct/100;
+      const lo=Math.max(MIN_FREQ, c*(1-w)), hi=Math.min(MAX_FREQ, c*(1+w));
+      lockLoBin=Math.max(minBin, Math.floor(lo/binHz));
+      lockHiBin=Math.min(maxBin, Math.ceil(hi/binHz));
+      if(lockHiBin>lockLoBin){ minBin=lockLoBin; maxBin=lockHiBin; } // 탐색밴드 축소
+    }
+  }
+
+  // 대역 내 최대 피크 bin 탐색 + 노이즈 바닥 추정
+  let peakBin=-1, peakDb=-Infinity, sumDb=0, n=0;
+  let aboveCount=0;                                     // 광대역 노이즈 판단용
+  for(let i=minBin;i<=maxBin;i++){
+    const db=floatBuf[i];
+    sumDb+=db; n++;
+    if(db>peakDb){ peakDb=db; peakBin=i; }
+  }
+  const meanDb = sumDb/Math.max(1,n);                   // 대역 평균 = 대략적 노이즈 바닥
+
+  // 피크 부근(±6dB) bin 비율 계산 → 광대역이면 뚜렷한 피크 없음
+  for(let i=minBin;i<=maxBin;i++){ if(floatBuf[i] >= peakDb-6) aboveCount++; }
+  const broadband = (aboveCount/Math.max(1,n)) > BROADBAND_RATIO;
+
+  // ---- 신호 강도(레벨) 표시: 대역 내 byte 최대값 기준 ----
+  let lvl=0; for(let i=minBin;i<=maxBin;i++){ if(byteBuf[i]>lvl) lvl=byteBuf[i]; }
+  const lvlPct=Math.round(lvl/255*100);
+  meterFill.style.width=lvlPct+'%'; meterVal.textContent=lvlPct+'%';
+
+  // ---- 스펙트럼 그래프 그리기 ----
+  drawSpectrum(byteDraw, binHz, minBin, maxBin, peakBin);
+
+  // RMS (시간영역)으로 충격(스트라이크) 감지 및 0.5~2s 수집
+  const now = Date.now();
+  const rms = computeRMS();
+  if(!collecting){
+    if(rms > 0.08 && (now - lastStrikeAt) > 3000){
+      strikeTs = now; lastStrikeAt = now;
+      collecting = true; collectStartTs = strikeTs + 500; collectEndTs = strikeTs + 2000; collectedSnapshots = [];
+      setStatus('listen','충격 감지 — 0.5s 무시 후 1.5s 분석','COLLECTING');
+    }
+  } else {
+    // currently collecting snapshots between collectStartTs and collectEndTs
+    if(now > collectEndTs){
+      collecting = false;
+      finalizeCollection();
+    }else if(now >= collectStartTs){
+      const det = detectFundamentalBandpass(floatBuf, binHz, minBin, maxBin);
+      if(det) collectedSnapshots.push({t:now, f:det.freq, mag:det.mag});
+      liveFreq.textContent = det?det.freq.toFixed(1):'--';
+    }
+    rafId=requestAnimationFrame(analyzeLoop); return;
+  }
+
+  // 측정값 고정(hold) 중이면 화면 갱신만 멈추고 새 피크 반영 안 함
+  if(held){ rafId=requestAnimationFrame(analyzeLoop); return; }
+
+  // ---- 피크 유효성 판정 (8번 로직) ----
+  if(meanDb > NOISE_LOUD_DB){
+    // 12.5 주변 소음 큼
+    setStatus('noise','주변 소음이 큽니다','NOISE');
+    livePeak.textContent='소음'; livePeak.style.color='var(--orange)';
+    liveFreq.textContent='--';
+  }
+  else if(peakDb < ABS_MIN_DB){
+    // 12.4 신호 약함
+    setStatus('weak','신호가 약합니다 — 더 명확히 튕겨주세요','WEAK');
+    livePeak.textContent='약함'; livePeak.style.color='var(--amber)';
+    liveFreq.textContent='--';
+  }
+  else if(broadband || (peakDb - meanDb) < PROMINENCE_DB){
+    // 12.6 유효한 피크 없음 (뚜렷하지 않음 → 재측정 필요)
+    setStatus('listen','대기 중 — 벨트를 튕겨주세요','LISTENING');
+    livePeak.textContent='—'; livePeak.style.color='var(--muted)';
+    liveFreq.textContent='--';
+  }
+  else{
+    // 유효 피크 → 포물선 보간으로 정밀 주파수 추정
+    const f = interpolatePeak(floatBuf, peakBin, binHz);
+    // 12.7 측정 범위 초과 방어
+    if(f<MIN_FREQ || f>MAX_FREQ){
+      setStatus('listen','측정 범위를 벗어난 주파수','RANGE');
+    }else{
+      pushPeak(f);                                      // 안정화 버퍼에 추가
+      const stable = stableFreq();                      // 9. 안정화된 주파수
+      const unstable = isUnstable();
+      liveFreq.textContent = f.toFixed(1);
+      livePeak.textContent='검출'; livePeak.style.color='var(--green)';
+      if(unstable){
+        setStatus('noise','측정 불안정 — 반복 측정해주세요','UNSTABLE');
+      }else{
+        setStatus('good','신호 검출','DETECTED');
+      }
+      updateResult(stable);                             // 최종 결과 카드 갱신
+    }
+  }
+
+  rafId=requestAnimationFrame(analyzeLoop);
+}
+
+/* ----------------------------------------------------------------
+   포물선 보간: 피크 bin과 좌우 bin으로 sub-bin 정밀 주파수 계산
+   ---------------------------------------------------------------- */
+function interpolatePeak(buf, bin, binHz){
+  const a=buf[bin-1], b=buf[bin], c=buf[bin+1];
+  const denom=(a-2*b+c);
+  let delta=0;
+  if(denom!==0) delta=0.5*(a-c)/denom;          // -0.5 ~ +0.5
+  if(!isFinite(delta)||Math.abs(delta)>1) delta=0;
+  return (bin+delta)*binHz;
+}
+
+/* ----------------------------------------------------------------
+   RMS 계산 (시간영역)
+   ---------------------------------------------------------------- */
+function computeRMS(){
+  if(!analyser) return 0;
+  const tbuf = new Float32Array(analyser.fftSize);
+  try{ analyser.getFloatTimeDomainData(tbuf); }catch(e){ return 0; }
+  let s=0; for(let i=0;i<tbuf.length;i++){ s += tbuf[i]*tbuf[i]; }
+  return Math.sqrt(s/tbuf.length);
+}
+
+/* ----------------------------------------------------------------
+   ★ 노이즈 저감: 스펙트럴 차감
+   - 조용한 프레임(충격 수집 중 아님 & RMS 낮음)에서 소음 프로파일을 EMA 학습
+   - 매 프레임 floatBuf(dB)에서 소음 프로파일(선형)을 차감, 스펙트럴 플로어 적용
+   - 반환: 그래프용 정제 byte 스펙트럼
+   ---------------------------------------------------------------- */
+function applyNoiseReduction(floatBuf, byteBuf, binHz){
+  const N=floatBuf.length;
+  if(!noiseProfile || noiseProfile.length!==N){ noiseProfile=new Float32Array(N); noiseProfileReady=false; }
+  const rms=computeRMS();
+  const quiet=(!collecting) && rms<0.05;              // 충격 아닌 조용한 순간만 학습
+  const beta=noiseProfileReady?0.92:0.6;              // 초기엔 빠르게, 이후 천천히 적응
+  const alpha=1.5, floorRatio=0.06;                   // 과차감 계수 / 스펙트럴 플로어
+  const minDb=analyser?analyser.minDecibels:-100, maxDb=analyser?analyser.maxDecibels:-30;
+  const rng=Math.max(1,maxDb-minDb);
+  const out=new Uint8Array(N);
+  for(let i=0;i<N;i++){
+    const lin=Math.pow(10,(floatBuf[i]||-200)/20);
+    if(quiet){ noiseProfile[i]=beta*noiseProfile[i]+(1-beta)*lin; }
+    let cleaned=lin-alpha*noiseProfile[i];
+    if(cleaned < floorRatio*lin) cleaned=floorRatio*lin;   // 음수/뮤지컬 노이즈 방지
+    if(cleaned < 1e-7) cleaned=1e-7;
+    const cdb=20*Math.log10(cleaned);
+    floatBuf[i]=cdb;                                       // 검출용 정제(제자리)
+    let b=(cdb-minDb)/rng*255;                            // 그래프용
+    out[i]=b<0?0:(b>255?255:b);
+  }
+  if(quiet && !noiseProfileReady){ noiseProfileReady=true; setNoiseChip('적용 중'); }
+  return out;
+}
+
+/* ★ 측정 대상 고정: 중심 주파수 산출 (예상 → 목표·파라미터 → k/Span 순) */
+function computeLockCenter(){
+  let c=parseFloat(estFreq.value);
+  if(isFinite(c) && c>0) return c;
+  const mass=parseFloat(inMass.value), width=parseFloat(inWidth.value),
+        span=parseFloat(inSpan.value), cf=parseFloat(inCF.value), targetN=parseFloat(inTargetN.value);
+  const ef=calcExpectedFreq(mass,width,span,targetN,cf);
+  if(isFinite(ef) && ef>0) return ef;
+  const k=parseFloat(kconst.value)||1000;
+  if(isFinite(span) && span>0) return k/span;
+  return NaN;
+}
+
+/* 노이즈 저감 상태칩 갱신 */
+function setNoiseChip(txt){
+  const el=document.getElementById('nrChip');
+  if(!el) return;
+  el.textContent=txt||''; el.style.display=txt?'inline-flex':'none';
+}
+
+/* ----------------------------------------------------------------
+   밴드패스 내 후보에서 기본주파수(고조파 제거) 탐색
+   floatBuf는 dB 스케일
+   ---------------------------------------------------------------- */
+function detectFundamentalBandpass(floatBuf, binHz, globalMinBin, globalMaxBin){
+  // estimate center from user input or fallback
+  const span = parseFloat(inSpan.value) || 0;
+  const k = parseFloat(kconst.value) || 1000;
+  let expected = parseFloat(estFreq.value);
+  if(!isFinite(expected) && span>0){ expected = k / span; }
+  let loBin = globalMinBin, hiBin = globalMaxBin;
+  if(isFinite(expected) && expected>0){
+    const lo = Math.max(MIN_FREQ, expected*0.7);
+    const hi = Math.min(MAX_FREQ, expected*1.3);
+    loBin = Math.max(globalMinBin, Math.floor(lo/binHz));
+    hiBin = Math.min(globalMaxBin, Math.ceil(hi/binHz));
+  }
+  // ★ 측정 대상 고정(ON): 락 밴드로 후보 범위를 강제 제한
+  if(targetLock.enabled && lockLoBin>=0 && lockHiBin>lockLoBin){
+    loBin=Math.max(globalMinBin, lockLoBin);
+    hiBin=Math.min(globalMaxBin, lockHiBin);
+  }
+  // gather candidates
+  const cands = [];
+  for(let i=loBin;i<=hiBin;i++){
+    const db = floatBuf[i];
+    const mag = Math.pow(10, db/20);
+    cands.push({bin:i,mag});
+  }
+  cands.sort((a,b)=>b.mag-a.mag);
+  if(!cands.length) return null;
+  // convert to frequency and pick fundamental by avoiding harmonics
+  const selected = [];
+  for(const c of cands.slice(0,12).reverse()){ // low->high frequency preference
+    const f = c.bin * binHz;
+    // skip if harmonic of already selected lower fundamental
+    let isHarm=false;
+    for(const s of selected){
+      const ratio = f / s.freq;
+      for(let n=2;n<=4;n++){
+        if(Math.abs(ratio - n) < 0.035){ isHarm = true; break; }
+      }
+      if(isHarm) break;
+    }
+    if(!isHarm) selected.push({freq:f,mag:c.mag,bin:c.bin});
+    if(selected.length>=1) break; // we only need the fundamental
+  }
+  if(!selected.length){ // fallback to highest mag
+    const top=cands[0];
+    return {freq: top.bin*binHz, mag: top.mag};
+  }
+  const best = selected[0];
+  // refine
+  const refined = interpolatePeak(floatBuf, best.bin, binHz);
+  return {freq: refined, mag: best.mag};
+}
+
+/* ----------------------------------------------------------------
+   9. 측정 안정화: 최근 유효 피크 버퍼링 + 이상치 제거 + 중앙값
+   ---------------------------------------------------------------- */
+function pushPeak(f){
+  peakBuffer.push(f);
+  if(peakBuffer.length>BUF_SIZE) peakBuffer.shift();
+}
+function median(arr){
+  if(!arr.length) return NaN;
+  const s=[...arr].sort((x,y)=>x-y);
+  const m=Math.floor(s.length/2);
+  return s.length%2 ? s[m] : (s[m-1]+s[m])/2;
+}
+function stableFreq(){
+  if(!peakBuffer.length) return NaN;
+  let med=median(peakBuffer);
+  // median이 0이면 평균으로 대체 (영점 방지)
+  if(!isFinite(med) || med===0){
+    const avg = peakBuffer.reduce((s,v)=>s+v,0)/peakBuffer.length;
+    if(!isFinite(avg) || avg===0) return NaN;
+    med = avg;
+  }
+  // 중앙값에서 크게 벗어난 이상치 제외 후 평균
+  const kept=peakBuffer.filter(v=>Math.abs(v-med)<=med*OUTLIER_TOL);
+  const use=kept.length?kept:peakBuffer;
+  return use.reduce((a,b)=>a+b,0)/use.length;
+}
+function isUnstable(){
+  if(peakBuffer.length<3) return false;
+  const med=median(peakBuffer);
+  const spread=Math.max(...peakBuffer)-Math.min(...peakBuffer);
+  return spread > med*OUTLIER_TOL*2;            // 편차가 크면 불안정
+}
+
+/* ----------------------------------------------------------------
+   최종 결과 카드 갱신 (10. 출력 항목)
+   ---------------------------------------------------------------- */
+function updateResult(freq){
+  if(!isFinite(freq)) return;
+  const {mass,width,span,cf}=readInputs();
+  const {rawN,corrN,kgf}=calcTension(mass,width,span,freq,cf);
+  const {targetN, tolPct}=readTarget();
+  let judge='--';
+  let judgeOk = null;
+  if(isFinite(targetN) && isFinite(tolPct)){
+    const lower = targetN * (1 - tolPct/100);
+    const upper = targetN * (1 + tolPct/100);
+    judgeOk = corrN >= lower && corrN <= upper;
+    judge = judgeOk ? 'OK' : 'NG';
+    resTarget.textContent = targetN.toFixed(1)+' N ±'+tolPct.toFixed(0)+'%';
+    resJudge.textContent = judge;
+    resJudgeWrap.className = judgeOk ? 'judge-ok' : 'judge-ng';
+  }else{
+    resTarget.textContent = '--';
+    resJudge.textContent = '--';
+    resJudgeWrap.className = '';
+  }
+  currentResult={
+    time:new Date(), mass,width,span,cf, freq, targetN, tolPct,
+    rawN, corrN, kgf
+  };
+  $('resTensionN').textContent=corrN.toFixed(1);
+  $('resTensionKgf').textContent=kgf.toFixed(2);
+  $('resFreq').textContent=freq.toFixed(1);
+  $('resRawN').textContent=rawN.toFixed(1);
+  $('resMass').textContent=mass;
+  $('resWidth').textContent=width;
+  $('resSpan').textContent=span;
+  $('resCF').textContent=cf.toFixed(3);
+  $('resTime').textContent=fmtTime(currentResult.time);
+  try{ renderTargetGauge(corrN, targetN, tolPct, judgeOk); }catch(e){}
+}
+
+/* ----------------------------------------------------------------
+   수집 종료 후 결과 정리: 안정화, 고조파 제거 반영, 신뢰도 계산
+   ---------------------------------------------------------------- */
+function finalizeCollection(){
+  if(!collectedSnapshots.length){
+    setStatus('listen','유효한 스냅샷이 없습니다','READY');
+    toast('충격은 감지되었으나 유효한 주파수를 수집하지 못했습니다. 다시 시도하세요.','err');
+    return;
+  }
+  // take last 20
+  const last = collectedSnapshots.slice(-20);
+  const freqs = last.map(s=>s.f);
+  const mags = last.map(s=>s.mag);
+  freqs.sort((a,b)=>a-b);
+  const med = median(freqs);
+  const lower = med*0.95, upper = med*1.05;
+  const filtered = last.filter(s=>s.f>=lower && s.f<=upper);
+  const finalFreq = filtered.length ? filtered.reduce((s,i)=>s+i.f,0)/filtered.length : (freqs[Math.floor(freqs.length/2)]||NaN);
+  const minF = Math.min(...freqs), maxF = Math.max(...freqs);
+  const rangePercent = (maxF - minF)/med*100;
+
+  // rough noise estimate from current FFT
+  analyser.getFloatFrequencyData(floatBuf);
+  const sr = audioCtx.sampleRate; const binHz = sr / analyser.fftSize;
+  const bandMin = Math.max(1, Math.floor(MIN_FREQ/binHz));
+  const bandMax = Math.min(floatBuf.length-2, Math.ceil(MAX_FREQ/binHz));
+  let avgNoise = 0, cnt=0;
+  for(let i=bandMin;i<=bandMax;i++){ avgNoise += Math.pow(10,(floatBuf[i]||-200)/20); cnt++; }
+  avgNoise = cnt? avgNoise/cnt : 1e-6;
+  const avgMag = mags.reduce((s,v)=>s+v,0)/mags.length;
+  const snr = avgMag / Math.max(1e-6, avgNoise);
+  const agreement = filtered.length / Math.max(1,last.length);
+
+  let confidence = Math.min(100, (Math.log10(snr+1)*30 + agreement*50 + Math.max(0,40 - rangePercent)));
+  if(!isFinite(confidence)) confidence = 0; if(confidence<0) confidence=0;
+
+  // 업데이트 및 UI
+  updateResult(finalFreq);
+  // attach meta
+  if(currentResult){ currentResult.confidence = Math.round(confidence); currentResult.rangePercent = rangePercent; }
+  $('resConf').textContent = Math.round(confidence);
+  try{ renderConfidenceRing(Math.round(confidence)); }catch(e){}
+  // 저장 조건: Confidence>=90 and variation <=3%
+  const okToSave = (confidence>=90 && rangePercent<=3);
+  btnSave.disabled = !okToSave;
+
+  // 자동 종료: 안정적이면 자동으로 측정 종료 및 고정
+  if(rangePercent<=3 && agreement>=0.8){
+    // finalize and stop (clean audio but keep UI/result)
+    setStatus('good','안정적인 주파수 감지 — 자동 종료','STABLE');
+    held=true; btnHold.classList.add('active'); btnHold.innerHTML='<span class="ico">▶</span> 고정 해제';
+    // stop audio resources without clearing the result
+    measuring=false;
+    if(rafId){ cancelAnimationFrame(rafId); rafId=null; }
+    if(srcNode){ try{srcNode.disconnect();}catch(e){} srcNode=null; }
+    if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
+    if(audioCtx){ try{audioCtx.close();}catch(e){} audioCtx=null; }
+    analyser=null;
+    btnStart.disabled=false; btnStop.disabled=true; selFFT.disabled=false; btnHold.disabled=false;
+    toast('측정이 자동으로 종료되었습니다. 결과가 고정되었습니다.','ok');
+  }else{
+    setStatus('weak','결과 불안정 — 재측정 권장','UNSTABLE');
+    toast('측정이 완료되었으나 안정성이 낮습니다 (Confidence '+Math.round(confidence)+'%).','warn');
+  }
+}
+
+/* ================================================================
+   11.6 스펙트럼 그래프 (canvas 직접 렌더링, 10~5000Hz)
+   ================================================================ */
+function setupCanvas(){
+  const dpr=window.devicePixelRatio||1;
+  const w=canvas.clientWidth, h=200;
+  canvas.width=Math.round(w*dpr);
+  canvas.height=Math.round(h*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+function drawSpectrum(byte, binHz, minBin, maxBin, peakBin){
+  const W=canvas.clientWidth, H=200;
+  ctx.clearRect(0,0,W,H);
+  if(!byte || byte.length===0){ return; }
+
+  // 격자 (주요 주파수 눈금)
+  ctx.strokeStyle='rgba(100,116,139,.22)'; ctx.fillStyle='#94a3b8';
+  ctx.font='11px "JetBrains Mono", monospace'; ctx.textAlign='center'; ctx.lineWidth=1;
+  const grids=[10,500,1000,2000,3000,4000,5000];
+  grids.forEach(fr=>{
+    const x=(fr-MIN_FREQ)/(MAX_FREQ-MIN_FREQ)*W;
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H-14); ctx.stroke();
+    ctx.fillText(fr>=1000?(fr/1000)+'k':fr, x, H-2);
+  });
+
+  // ★ 측정 대상 고정 밴드 음영 + 중심선 표시
+  if(lockLoBin>=0 && lockHiBin>lockLoBin){
+    const lx=((lockLoBin*binHz)-MIN_FREQ)/(MAX_FREQ-MIN_FREQ)*W;
+    const rx=((lockHiBin*binHz)-MIN_FREQ)/(MAX_FREQ-MIN_FREQ)*W;
+    ctx.fillStyle='rgba(12,169,154,.10)';
+    ctx.fillRect(lx,0,Math.max(2,rx-lx),H-14);
+    ctx.strokeStyle='rgba(12,169,154,.45)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(lx,0); ctx.lineTo(lx,H-14); ctx.moveTo(rx,0); ctx.lineTo(rx,H-14); ctx.stroke();
+    if(isFinite(lockCenter)){
+      const cx=(lockCenter-MIN_FREQ)/(MAX_FREQ-MIN_FREQ)*W;
+      ctx.setLineDash([3,3]); ctx.strokeStyle='rgba(12,169,154,.75)';
+      ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx,H-14); ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+  // 스펙트럼 면적 그래프 (시각화는 항상 전체 대역)
+  const fMin=Math.max(1,Math.floor(MIN_FREQ/binHz));
+  const fMax=Math.min(byte.length-2,Math.ceil(MAX_FREQ/binHz));
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'rgba(12,169,154,.55)');
+  grad.addColorStop(1,'rgba(12,169,154,.04)');
+  ctx.fillStyle=grad;
+  ctx.beginPath(); ctx.moveTo(0,H-14);
+  const usableH=H-22;
+  for(let i=fMin;i<=fMax;i++){
+    const f=i*binHz;
+    const x=(f-MIN_FREQ)/(MAX_FREQ-MIN_FREQ)*W;
+    const y=(H-14)-(byte[i]/255)*usableH;
+    ctx.lineTo(x,y);
+  }
+  ctx.lineTo(W,H-14); ctx.closePath(); ctx.fill();
+
+  // 검출 피크 위치에 세로선 + 값 표시
+  if(peakBin>=minBin && peakBin<=maxBin){
+    const pf=peakBin*binHz;
+    const px=(pf-MIN_FREQ)/(MAX_FREQ-MIN_FREQ)*W;
+    ctx.strokeStyle='#d97706'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(px,0); ctx.lineTo(px,H-14); ctx.stroke();
+    // 라벨 박스
+    const label=Math.round(pf)+' Hz';
+    ctx.font='700 12px "JetBrains Mono", monospace';
+    const tw=ctx.measureText(label).width+12;
+    let bx=px-tw/2; bx=Math.max(2,Math.min(bx,W-tw-2));
+    ctx.fillStyle='rgba(217,119,6,.14)';
+    ctx.fillRect(bx,4,tw,18);
+    ctx.fillStyle='#b45309'; ctx.textAlign='center';
+    ctx.fillText(label, bx+tw/2, 17);
+  }
+}
+
+/* ================================================================
+   측정값 고정 (11.3) — 현재 표시값 유지
+   ================================================================ */
+function toggleHold(){
+  if(!measuring) return;
+  held=!held;
+  btnHold.classList.toggle('active',held);
+  if(held){
+    btnHold.innerHTML='<span class="ico">▶</span> 고정 해제';
+    setStatus('good','측정값 고정됨','HOLD');
+    toast('현재 측정값을 고정했습니다.', 'warn');
+  }else{
+    btnHold.innerHTML='<span class="ico">⏸</span> 측정값 고정';
+    setStatus('listen','측정 중 — 벨트를 튕겨주세요','LISTENING');
+  }
+}
+
+/* ================================================================
+   16. 결과 저장 → 기록 표에 누적
+   ================================================================ */
+function saveResult(){
+  if(!currentResult || !isFinite(currentResult.freq)){
+    toast('유효한 주파수를 찾지 못했습니다. 다시 측정해주세요.', 'err');
+    return;
+  }
+  // enforce save conditions
+  const conf = currentResult.confidence || 0;
+  const varp = currentResult.rangePercent || 999;
+  if(conf < 90 || varp > 3){
+    toast('저장 조건을 만족하지 않습니다. Confidence >=90% 및 주파수 변동률 ≤3%이어야 합니다.','err');
+    return;
+  }
+  records.push({...currentResult, time:new Date()});
+  renderHistory();
+  toast('측정 결과를 저장했습니다. (총 '+records.length+'건)', 'ok');
+}
+function targetLabel(r){
+  if(!isFinite(r.targetN) || !isFinite(r.tolPct)) return '--';
+  return r.targetN.toFixed(1)+' N ±'+r.tolPct.toFixed(0)+'%';
+}
+function judgeLabel(r){
+  if(!isFinite(r.targetN) || !isFinite(r.tolPct)) return '--';
+  const lower = r.targetN * (1 - r.tolPct/100);
+  const upper = r.targetN * (1 + r.tolPct/100);
+  return (r.corrN >= lower && r.corrN <= upper) ? 'OK' : 'NG';
+}
+function renderHistory(){
+  const body=$('histBody');
+  if(!records.length){
+    body.innerHTML='<tr class="empty-row"><td colspan="11">저장된 측정 기록이 없습니다.</td></tr>';
+    return;
+  }
+  body.innerHTML=records.map((r,i)=>`
+    <tr>
+      <td>${i+1}</td>
+      <td>${fmtTime(r.time)}</td>
+      <td>${r.mass}</td>
+      <td>${r.width}</td>
+      <td>${r.span}</td>
+      <td>${r.freq.toFixed(1)}</td>
+      <td>${r.rawN.toFixed(1)}</td>
+      <td class="tens-cell">${r.corrN.toFixed(1)}</td>
+      <td>${r.kgf.toFixed(2)}</td>
+      <td>${targetLabel(r)}</td>
+      <td>${judgeLabel(r)}</td>
+    </tr>`).join('');
+}
+function clearHistory(){
+  if(!records.length){ toast('초기화할 기록이 없습니다.'); return; }
+  if(confirm('측정 기록을 모두 삭제할까요?')){
+    records=[]; renderHistory(); toast('측정 기록을 초기화했습니다.', 'warn');
+  }
+}
+
+/* ================================================================
+   16. CSV 다운로드 (한글 깨짐 방지 위해 UTF-8 BOM 포함)
+   ================================================================ */
+function downloadCSV(){
+  if(!records.length){ toast('다운로드할 기록이 없습니다.', 'err'); return; }
+  const header=['No','Time','Mass(g/m)','Width(mm/R)','Span(mm)','Frequency(Hz)','Tension(N)','Tension_Corrected(N)','Tension(kgf)','Target','Judge'];
+  const rows=records.map((r,i)=>[
+    i+1, fmtTime(r.time,true), r.mass, r.width, r.span,
+    r.freq.toFixed(2), r.rawN.toFixed(2), r.corrN.toFixed(2), r.kgf.toFixed(3), targetLabel(r), judgeLabel(r)
+  ]);
+  const csv='\uFEFF'+[header, ...rows].map(line=>line.join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const stamp=fmtTime(new Date(),true).replace(/[: ]/g,'-');
+  a.href=url; a.download='belt_tension_'+stamp+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('CSV 파일을 다운로드했습니다.', 'ok');
+}
+
+/* ---------- 시간 포맷 ---------- */
+function fmtTime(d, withDate=false){
+  const p=n=>String(n).padStart(2,'0');
+  const t=p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+  if(!withDate) return t;
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+t;
+}
+
+/* ================================================================
+   이벤트 바인딩 & 초기화
+   ================================================================ */
+btnStart.addEventListener('click', startMeasure);
+btnStop.addEventListener('click', stopMeasure);
+btnHold.addEventListener('click', toggleHold);
+btnSave.addEventListener('click', saveResult);
+btnClear.addEventListener('click', clearHistory);
+btnCSV.addEventListener('click', downloadCSV);
+btnPreset500.addEventListener('click', ()=>setPreset({
+  label:'500N ±10% / 리프팅 벨트 텐션',
+  mass:4.2,
+  width:35,
+  span:147,
+  targetN:500,
+  tolPct:10,
+  button:btnPreset500
+}));
+btnPreset170.addEventListener('click', ()=>setPreset({
+  label:'170N ±20% / 구동모듈 벨트 텐션',
+  mass:2.8,
+  width:20,
+  span:88,
+  targetN:170,
+  tolPct:20,
+  button:btnPreset170
+}));
+btnEstimate.addEventListener('click', ()=>{
+  const span = parseFloat(inSpan.value);
+  const k = parseFloat(kconst.value)||1000;
+  if(!isFinite(span) || span<=0){ toast('Span 값을 입력해주세요.','err'); return; }
+  const est = k / span;
+  estFreq.value = est.toFixed(2);
+  toast('예상 주파수를 계산했습니다: '+estFreq.value+' Hz','ok');
+});
+['input','change'].forEach(evt=>{
+  inMass.addEventListener(evt, refreshPresetEstimate);
+  inWidth.addEventListener(evt, refreshPresetEstimate);
+  inSpan.addEventListener(evt, refreshPresetEstimate);
+  inCF.addEventListener(evt, refreshPresetEstimate);
+  inTargetN.addEventListener(evt, refreshPresetEstimate);
+});
+
+/* ---------- ★ 측정 보조 토글 (노이즈 저감 / 측정 대상 고정) ---------- */
+const swNoise=$('swNoise'), swLock=$('swLock'), btnRelearn=$('btnRelearn'),
+      selLockWidth=$('selLockWidth'), lockWidthWrap=$('lockWidthWrap');
+function setSwitch(btn,on){ btn.setAttribute('aria-pressed', on?'true':'false'); }
+function updateAssistInfo(){
+  const el=document.getElementById('lockDesc');
+  if(!el) return;
+  if(!targetLock.enabled){
+    el.textContent='예상 주파수 주변의 좁은 대역만 탐색해 엉뚱한 피크를 무시합니다.'; return;
+  }
+  const c=computeLockCenter();
+  el.textContent=(isFinite(c)&&c>0)
+    ? ('중심 ≈ '+c.toFixed(1)+' Hz · ±'+targetLock.widthPct+'% 대역만 탐색합니다.')
+    : '예상 주파수나 목표 장력을 입력하면 중심이 설정됩니다.';
+}
+swNoise.addEventListener('click', ()=>{
+  noiseReduction.enabled=!noiseReduction.enabled;
+  setSwitch(swNoise, noiseReduction.enabled);
+  btnRelearn.style.display = noiseReduction.enabled?'inline-flex':'none';
+  if(noiseReduction.enabled){
+    noiseProfile=null; noiseProfileReady=false; setNoiseChip('학습 중');
+    toast('노이즈 저감 ON — 조용한 상태에서 주변 소음을 자동 학습합니다.','ok');
+  }else{ setNoiseChip(''); toast('노이즈 저감 OFF','warn'); }
+});
+btnRelearn.addEventListener('click', ()=>{
+  noiseProfile=null; noiseProfileReady=false; setNoiseChip('학습 중');
+  toast('소음 프로파일을 다시 학습합니다.','ok');
+});
+swLock.addEventListener('click', ()=>{
+  targetLock.enabled=!targetLock.enabled;
+  setSwitch(swLock, targetLock.enabled);
+  lockWidthWrap.style.display = targetLock.enabled?'inline-flex':'none';
+  if(targetLock.enabled){
+    const c=computeLockCenter();
+    if(isFinite(c)&&c>0) toast('측정 대상 고정 ON — 중심 ≈ '+c.toFixed(1)+' Hz','ok');
+    else toast('측정 대상 고정 ON — 예상 주파수나 목표 장력을 입력하면 정확해집니다.','warn');
+  }else toast('측정 대상 고정 OFF','warn');
+  updateAssistInfo();
+});
+selLockWidth.addEventListener('change', ()=>{
+  targetLock.widthPct=parseInt(selLockWidth.value,10)||30; updateAssistInfo();
+});
+['input','change'].forEach(evt=>{
+  [inMass,inWidth,inSpan,inCF,inTargetN,estFreq,kconst].forEach(el=>el.addEventListener(evt, updateAssistInfo));
+});
+
+window.addEventListener('resize', setupCanvas);
+window.addEventListener('beforeunload', ()=>{ if(measuring) stopMeasure(); });
+
+// 페이지가 백그라운드로 가면 측정 자동 중지 (마이크 자원 보호)
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden && measuring) stopMeasure();
+});
+
+// HTTPS / localhost 환경 체크 (마이크는 보안 컨텍스트에서만 동작)
+window.addEventListener('load', ()=>{
+  setupCanvas();
+  drawSpectrum(new Uint8Array(0),1,1,0,-1); // 빈 그래프
+  if(!canUseMicrophone()){
+    toast(micUnavailableMessage(), 'err');
+    btnStart.disabled=true;
+  }
+});
+
+/* ====================================================================
+   디자인 훅: 목표 허용밴드 게이지 / Confidence 링
+   (측정 로직과 분리된 표시 전용 함수 — getElementById 직접 사용)
+   ==================================================================== */
+function renderTargetGauge(corrN, targetN, tolPct, judgeOk){
+  var wrap=document.getElementById('gaugeWrap');
+  var zone=document.getElementById('gaugeZone');
+  var marker=document.getElementById('gaugeMarker');
+  var low=document.getElementById('gaugeLow');
+  var high=document.getElementById('gaugeHigh');
+  if(!zone||!marker) return;
+  var ok = isFinite(targetN) && isFinite(tolPct) && targetN>0 && tolPct>0;
+  if(!ok){
+    if(wrap) wrap.classList.add('no-target');
+    zone.style.left='30%'; zone.style.width='40%';
+    marker.style.left='50%'; marker.classList.remove('ok','ng');
+    if(low) low.textContent='–'; if(high) high.textContent='–';
+    return;
+  }
+  if(wrap) wrap.classList.remove('no-target');
+  var lower=targetN*(1-tolPct/100), upper=targetN*(1+tolPct/100);
+  // 도메인: 목표 ± (허용오차 × 2.4) 까지 보여줘 허용밴드가 가운데에 오도록
+  var pad=tolPct/100*2.4;
+  var domMin=targetN*(1-pad), domMax=targetN*(1+pad), span=domMax-domMin;
+  if(span<=0) span=1;
+  zone.style.left=((lower-domMin)/span*100)+'%';
+  zone.style.width=((upper-lower)/span*100)+'%';
+  var mk=(corrN-domMin)/span*100; mk=Math.max(0,Math.min(100,mk));
+  marker.style.left=mk+'%';
+  marker.classList.toggle('ok', judgeOk===true);
+  marker.classList.toggle('ng', judgeOk===false);
+  if(low) low.textContent=Math.round(lower);
+  if(high) high.textContent=Math.round(upper);
+}
+
+function renderConfidenceRing(pct){
+  var arc=document.getElementById('confArc');
+  if(!arc) return;
+  var circ=2*Math.PI*26; // r=26
+  var p=Math.max(0,Math.min(100, isFinite(pct)?pct:0));
+  arc.style.strokeDasharray=circ.toFixed(2);
+  arc.style.strokeDashoffset=(circ*(1-p/100)).toFixed(2);
+  arc.style.stroke = p>=90 ? 'var(--green)' : (p>=60 ? 'var(--warn)' : (p>0 ? 'var(--red)' : 'var(--line-2)'));
+}
+
+window.addEventListener('load', function(){
+  renderConfidenceRing(0);
+  renderTargetGauge(NaN, NaN, NaN, null);
+});
+</script>
+</body>
+</html>

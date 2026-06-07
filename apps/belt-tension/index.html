@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#edf0f5">
-<title>음파식 벨트 텐션 측정기 · U-550</title>
+<title>음파식 벨트 텐션 측정기</title>
 
 <!-- Pretendard(한글/UI) + JetBrains Mono(수치/계측 표기) -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -383,7 +383,7 @@ tbody tr:nth-child(even){background:rgba(22,42,80,.025);}
       </div>
       <div class="brand-text">
         <div class="brand-title">벨트 텐션 측정기</div>
-        <div class="brand-sub">Sonic · U-550 Method</div>
+        <div class="brand-sub">Sonic Belt Tensioning Meter</div>
       </div>
     </div>
     <span id="statusPill" class="status-pill">READY</span>
@@ -633,7 +633,7 @@ tbody tr:nth-child(even){background:rgba(22,42,80,.025);}
 
 "use strict";
 /* ================================================================
-   음파식 벨트 텐션 측정기 (U-550 방식)
+   음파식 벨트 텐션 측정기
    - 마이크 입력 → FFT → 10~5000Hz 피크 검출 → 장력 계산
    ================================================================ */
 
@@ -746,7 +746,7 @@ function validateInputs(){
 }
 
 /* ================================================================
-   U-550 방식 장력 계산 (6. 장력 계산 로직 / 19. 보정계수)
+    장력 계산 (6. 장력 계산 로직 / 19. 보정계수)
    T_N = 4 × Mass × Width × Span² × Frequency² × 1e-9
    T_corrected = T_N × CF ,  T_kgf = T_corrected / 9.80665
    ================================================================ */

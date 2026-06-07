@@ -1,1 +1,1420 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SoundGuard Pro — 데시벨 측정기</title>
+  <meta name="description" content="산업현장용 실시간 데시벨 측정 애플리케이션" />
+  <meta name="theme-color" content="#f0f6ff" />
 
+  <!-- PWA Manifest (inline via JS) -->
+  <link rel="manifest" href="#" id="manifest-link" />
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <!-- SheetJS (xlsx) CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- jsPDF CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- jsPDF AutoTable CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.7.1/jspdf.plugin.autotable.min.js"></script>
+
+  <style>
+    /* =============================================
+       CSS 변수 & 테마
+    ============================================= */
+    :root {
+      /* ── 밝은 기본 테마 ── */
+      --bg-primary:   #f0f6ff;
+      --bg-secondary: #e4edf9;
+      --bg-card:      #ffffff;
+      --bg-glass:     rgba(255, 255, 255, 0.88);
+      --border:       rgba(100, 140, 210, 0.18);
+      --border-glow:  rgba(37, 120, 255, 0.28);
+
+      --text-primary:   #0e1f40;
+      --text-secondary: #2e4a80;
+      --text-muted:     #7a99c8;
+
+      --accent:      #2578ff;
+      --accent-soft: rgba(37, 120, 255, 0.10);
+      --green:       #00b96b;
+      --yellow:      #f5a800;
+      --red:         #e8203a;
+      --orange:      #f26d00;
+
+      --green-glow:  rgba(0, 185, 107, 0.25);
+      --yellow-glow: rgba(245, 168, 0, 0.3);
+      --red-glow:    rgba(232, 32, 58, 0.3);
+
+      --font-display: 'Courier New', 'Lucida Console', monospace;
+      --font-body:    'Segoe UI', system-ui, sans-serif;
+
+      --radius:    12px;
+      --radius-lg: 20px;
+      --shadow:    0 4px 24px rgba(37,120,255,0.10);
+      --transition: 0.25s cubic-bezier(0.4,0,0.2,1);
+    }
+
+    /* 다크 모드 (토글) */
+    body.dark-mode {
+      --bg-primary:   #0a0e1a;
+      --bg-secondary: #111827;
+      --bg-card:      #161d2e;
+      --bg-glass:     rgba(22, 29, 46, 0.85);
+      --border:       rgba(255,255,255,0.07);
+      --border-glow:  rgba(0, 212, 255, 0.3);
+      --text-primary:   #e8f4ff;
+      --text-secondary: #8ba3c4;
+      --text-muted:     #4a6080;
+      --accent:      #00d4ff;
+      --accent-soft: rgba(0, 212, 255, 0.12);
+      --green:       #00e676;
+      --yellow:      #ffea00;
+      --red:         #ff3d57;
+      --shadow:    0 8px 32px rgba(0,0,0,0.5);
+    }
+
+    /* =============================================
+       전체 레이아웃
+    ============================================= */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: var(--font-body);
+      min-height: 100vh;
+      overflow-x: hidden;
+      transition: background-color var(--transition), color var(--transition);
+    }
+
+    /* 배경: 밝고 부드러운 그라디언트 + 격자 */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(180deg, #ddeeff 0%, #f0f6ff 40%, #eaf1ff 100%),
+        linear-gradient(rgba(37,120,255,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(37,120,255,0.04) 1px, transparent 1px);
+      background-size: 100% 100%, 36px 36px, 36px 36px;
+      pointer-events: none;
+      z-index: 0;
+    }
+    body.dark-mode::before {
+      background-image:
+        linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+      background-size: 40px 40px, 40px 40px;
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    /* =============================================
+       헤더
+    ============================================= */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      background: var(--bg-glass);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      margin-bottom: 16px;
+      box-shadow: 0 2px 16px rgba(37,120,255,0.08);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo-icon {
+      width: 38px; height: 38px;
+      background: linear-gradient(135deg, var(--accent), #0040ff);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+    .logo-text {
+      font-family: var(--font-display);
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+    }
+    .logo-sub {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .header-actions { display: flex; gap: 8px; align-items: center; }
+
+    /* 토글 버튼 */
+    .btn-icon {
+      width: 38px; height: 38px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-secondary);
+      border-radius: 10px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      transition: all var(--transition);
+    }
+    .btn-icon:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+    /* 날짜/시간 */
+    #datetime {
+      font-family: var(--font-display);
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+      text-align: right;
+    }
+
+    /* =============================================
+       메인 그리드
+    ============================================= */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    @media (max-width: 700px) {
+      .main-grid { grid-template-columns: 1fr; }
+    }
+
+    /* =============================================
+       카드 공통
+    ============================================= */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color var(--transition);
+      box-shadow: 0 2px 16px rgba(37,120,255,0.07);
+    }
+    .card::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: 0.5;
+    }
+    .card-title {
+      font-size: 0.65rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 14px;
+      font-weight: 600;
+    }
+
+    /* =============================================
+       원형 게이지 (메인 dB 표시)
+    ============================================= */
+    .gauge-card {
+      grid-column: span 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .gauge-wrapper {
+      position: relative;
+      width: 220px; height: 220px;
+      margin: 0 auto;
+    }
+
+    /* SVG 원형 게이지 */
+    .gauge-svg {
+      width: 100%; height: 100%;
+      transform: rotate(-135deg);
+    }
+    .gauge-track {
+      fill: none;
+      stroke: rgba(255,255,255,0.05);
+      stroke-width: 14;
+      stroke-linecap: round;
+    }
+    .gauge-fill {
+      fill: none;
+      stroke: var(--green);
+      stroke-width: 14;
+      stroke-linecap: round;
+      stroke-dasharray: 565; /* 2π × r(90) × (270/360) ≈ 565 */
+      stroke-dashoffset: 565;
+      transition: stroke-dashoffset 0.4s ease, stroke 0.4s ease;
+      filter: drop-shadow(0 0 8px var(--green));
+    }
+
+    .gauge-center {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .db-value {
+      font-family: var(--font-display);
+      font-size: 3.4rem;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--green);
+      transition: color 0.4s ease;
+      text-shadow: 0 0 20px currentColor;
+      letter-spacing: -2px;
+    }
+    .db-unit {
+      font-family: var(--font-display);
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      letter-spacing: 0.1em;
+      margin-top: 2px;
+    }
+    .db-status {
+      font-size: 0.65rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-top: 4px;
+      color: var(--green);
+      transition: color 0.4s;
+    }
+
+    /* =============================================
+       수평 바 게이지
+    ============================================= */
+    .bar-gauge {
+      margin-top: 18px;
+      width: 100%;
+    }
+    .bar-gauge-track {
+      height: 10px;
+      background: rgba(37,120,255,0.08);
+      border-radius: 5px;
+      overflow: hidden;
+      position: relative;
+    }
+    .bar-gauge-fill {
+      height: 100%;
+      border-radius: 5px;
+      background: linear-gradient(90deg, var(--green) 0%, var(--yellow) 60%, var(--red) 100%);
+      width: 0%;
+      transition: width 0.35s ease;
+      position: relative;
+    }
+    .bar-gauge-fill::after {
+      content: '';
+      position: absolute;
+      right: 0; top: 0; bottom: 0;
+      width: 4px;
+      background: white;
+      border-radius: 2px;
+      box-shadow: 0 0 8px white;
+    }
+    .bar-gauge-labels {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 4px;
+      font-family: var(--font-display);
+      font-size: 0.6rem;
+      color: var(--text-muted);
+    }
+
+    /* =============================================
+       통계 카드
+    ============================================= */
+    .stats-card { display: flex; flex-direction: column; gap: 10px; }
+
+    .stat-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .stat-icon {
+      width: 36px; height: 36px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; flex-shrink: 0;
+    }
+    .stat-icon.min { background: rgba(0, 212, 255, 0.15); color: var(--accent); }
+    .stat-icon.max { background: rgba(255, 61, 87, 0.15); color: var(--red); }
+    .stat-icon.avg { background: rgba(0, 230, 118, 0.15); color: var(--green); }
+    .stat-icon.time { background: rgba(255, 234, 0, 0.15); color: var(--yellow); }
+
+    .stat-label { font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase; }
+    .stat-val {
+      font-family: var(--font-display);
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1;
+    }
+    .stat-val span { font-size: 0.7rem; color: var(--text-muted); margin-left: 2px; }
+
+    /* =============================================
+       보정(Calibration) & 컨트롤
+    ============================================= */
+    .controls-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 12px 22px;
+      border: none; border-radius: var(--radius);
+      font-family: var(--font-body);
+      font-size: 0.85rem; font-weight: 600;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      transition: all var(--transition);
+      flex: 1; min-width: 130px;
+      justify-content: center;
+    }
+    .btn:active { transform: scale(0.97); }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #0055cc);
+      color: white;
+      box-shadow: 0 4px 20px rgba(0,212,255,0.3);
+    }
+    .btn-primary:hover { box-shadow: 0 4px 28px rgba(0,212,255,0.5); }
+
+    .btn-danger {
+      background: linear-gradient(135deg, var(--red), #cc0030);
+      color: white;
+      box-shadow: 0 4px 20px rgba(255,61,87,0.3);
+    }
+    .btn-danger:hover { box-shadow: 0 4px 28px rgba(255,61,87,0.5); }
+
+    .btn-secondary {
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+    .btn-success {
+      background: linear-gradient(135deg, var(--green), #007a30);
+      color: #0a1a0a;
+      font-weight: 700;
+    }
+    .btn-warning {
+      background: linear-gradient(135deg, var(--yellow), #cc9900);
+      color: #1a1500;
+      font-weight: 700;
+    }
+
+    /* 보정 슬라이더 영역 */
+    .calibration-card {
+      margin-bottom: 16px;
+    }
+    .calib-row {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    .calib-label { font-size: 0.78rem; color: var(--text-secondary); white-space: nowrap; }
+    input[type="range"] {
+      flex: 1; min-width: 100px;
+      -webkit-appearance: none; appearance: none;
+      height: 6px; border-radius: 3px;
+      background: rgba(37,120,255,0.12);
+      outline: none; cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      cursor: pointer;
+    }
+    .calib-val {
+      font-family: var(--font-display);
+      font-size: 0.85rem; color: var(--accent);
+      min-width: 50px; text-align: right;
+    }
+
+    /* =============================================
+       차트 영역
+    ============================================= */
+    .chart-card { margin-bottom: 16px; }
+    .chart-wrapper {
+      position: relative;
+      height: 180px;
+    }
+
+    /* =============================================
+       측정 기록 테이블
+    ============================================= */
+    .table-card { margin-bottom: 16px; }
+
+    .table-actions {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;
+    }
+
+    .table-wrapper {
+      overflow-x: auto;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+    thead tr {
+      background: rgba(37,120,255,0.06);
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      padding: 10px 12px;
+      font-family: var(--font-display);
+      font-size: 0.65rem; letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      text-align: left; white-space: nowrap;
+    }
+    td {
+      padding: 9px 12px;
+      color: var(--text-secondary);
+      border-bottom: 1px solid rgba(37,120,255,0.06);
+      white-space: nowrap;
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: rgba(37,120,255,0.04); }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px; border-radius: 20px;
+      font-size: 0.68rem; font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+    .badge-green  { background: rgba(0,230,118,0.15); color: var(--green); }
+    .badge-yellow { background: rgba(255,234,0,0.15); color: var(--yellow); }
+    .badge-red    { background: rgba(255,61,87,0.15);  color: var(--red); }
+
+    /* 빈 테이블 */
+    .table-empty {
+      padding: 40px; text-align: center;
+      color: var(--text-muted); font-size: 0.82rem;
+    }
+
+    /* =============================================
+       Status 라이트 (실시간 표시기)
+    ============================================= */
+    .status-indicator {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.72rem; color: var(--text-muted);
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text-muted);
+      transition: background var(--transition);
+    }
+    .status-dot.active {
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.85); }
+    }
+
+    /* =============================================
+       알림 토스트
+    ============================================= */
+    #toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px);
+      background: var(--bg-card);
+      border: 1px solid var(--accent);
+      color: var(--text-primary);
+      padding: 12px 24px; border-radius: 30px;
+      font-size: 0.82rem;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1);
+      z-index: 1000; pointer-events: none;
+      white-space: nowrap;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* =============================================
+       스크롤바
+    ============================================= */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(0,212,255,0.3); }
+
+    /* =============================================
+       반응형
+    ============================================= */
+    @media (max-width: 500px) {
+      .db-value { font-size: 2.6rem; }
+      .gauge-wrapper { width: 180px; height: 180px; }
+      .btn { padding: 12px 14px; font-size: 0.8rem; }
+      .logo-text { font-size: 0.9rem; }
+    }
+
+    /* 다크모드 오버라이드 */
+    body.dark-mode .card::after {
+      background: linear-gradient(90deg, transparent, #00d4ff, transparent);
+    }
+    body.dark-mode tbody tr:hover td { background: rgba(0,212,255,0.04); }
+    body.dark-mode thead tr { background: rgba(0,212,255,0.06); }
+    body.dark-mode td { border-bottom-color: rgba(255,255,255,0.03); }
+    body.dark-mode .stat-item { background: rgba(255,255,255,0.03); }
+    body.dark-mode .bar-gauge-track { background: rgba(255,255,255,0.05); }
+    body.dark-mode input[type="range"] { background: rgba(255,255,255,0.1); }
+    body.dark-mode .card { box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+    body.dark-mode header { box-shadow: none; }
+  </style>
+</head>
+<body>
+
+<!-- 토스트 메시지 -->
+<div id="toast"></div>
+
+<div class="container">
+
+  <!-- ===== 헤더 ===== -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🎙</div>
+      <div>
+        <div class="logo-text">SoundGuard Pro</div>
+        <div class="logo-sub">Industrial Sound Level Meter</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div id="datetime"></div>
+      <button class="btn-icon" id="themeBtn" title="테마 전환">🌙</button>
+      <button class="btn-icon" id="installBtn" title="홈화면에 추가" style="display:none">📲</button>
+    </div>
+  </header>
+
+  <!-- ===== 제어 버튼 ===== -->
+  <div class="controls-row">
+    <button class="btn btn-primary" id="startBtn">▶ 측정 시작</button>
+    <button class="btn btn-danger" id="stopBtn" disabled>⏹ 측정 정지</button>
+    <div class="status-indicator" style="flex:1; justify-content:flex-end;">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">대기중</span>
+    </div>
+  </div>
+
+  <!-- ===== 메인 계측 그리드 ===== -->
+  <div class="main-grid">
+
+    <!-- 원형 게이지 -->
+    <div class="card gauge-card">
+      <div class="card-title">현재 소음 레벨</div>
+
+      <div class="gauge-wrapper">
+        <svg class="gauge-svg" viewBox="0 0 200 200">
+          <!-- 배경 트랙: 135도~405도 (270도 호) -->
+          <circle class="gauge-track" cx="100" cy="100" r="82"
+            stroke-dasharray="348 565"
+            stroke-dashoffset="-87"
+          />
+          <!-- 실제 채움 -->
+          <circle class="gauge-fill" id="gaugeFill" cx="100" cy="100" r="82"
+            stroke-dasharray="0 565"
+            stroke-dashoffset="-87"
+          />
+        </svg>
+        <div class="gauge-center">
+          <div class="db-value" id="dbValue">--</div>
+          <div class="db-unit">dB SPL</div>
+          <div class="db-status" id="dbStatus">IDLE</div>
+        </div>
+      </div>
+
+      <!-- 수평 바 -->
+      <div class="bar-gauge">
+        <div class="bar-gauge-track">
+          <div class="bar-gauge-fill" id="barFill"></div>
+        </div>
+        <div class="bar-gauge-labels">
+          <span>0</span><span>30</span><span>60</span><span>90</span><span>120dB</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 통계 -->
+    <div class="card stats-card">
+      <div class="card-title">측정 통계</div>
+
+      <div class="stat-item">
+        <div class="stat-icon min">↓</div>
+        <div>
+          <div class="stat-label">최솟값 (MIN)</div>
+          <div class="stat-val" id="statMin">--<span>dB</span></div>
+        </div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-icon max">↑</div>
+        <div>
+          <div class="stat-label">최댓값 (MAX)</div>
+          <div class="stat-val" id="statMax">--<span>dB</span></div>
+        </div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-icon avg">≈</div>
+        <div>
+          <div class="stat-label">평균값 (AVG)</div>
+          <div class="stat-val" id="statAvg">--<span>dB</span></div>
+        </div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-icon time">⏱</div>
+        <div>
+          <div class="stat-label">측정 시간</div>
+          <div class="stat-val" id="statTime">00:00:00</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 보정(Calibration) ===== -->
+  <div class="card calibration-card">
+    <div class="card-title">마이크 보정 (Calibration)</div>
+    <div class="calib-row">
+      <span class="calib-label">보정 오프셋:</span>
+      <input type="range" id="calibSlider" min="-30" max="30" value="0" step="1" />
+      <span class="calib-val" id="calibVal">+0 dB</span>
+      <button class="btn btn-secondary" style="flex:0;min-width:80px;padding:8px 14px;"
+        onclick="document.getElementById('calibSlider').value=0; updateCalib();">초기화</button>
+    </div>
+    <div style="margin-top:8px; font-size:0.72rem; color:var(--text-muted);">
+      💡 브라우저에서의 dB 측정은 상대값입니다. 실제 소음계와 비교해 오프셋을 조정하세요.
+    </div>
+  </div>
+
+  <!-- ===== 실시간 차트 ===== -->
+  <div class="card chart-card">
+    <div class="card-title">실시간 소음 파형</div>
+    <div class="chart-wrapper">
+      <canvas id="waveChart"></canvas>
+    </div>
+  </div>
+
+  <!-- ===== 측정 기록 테이블 ===== -->
+  <div class="card table-card">
+    <div class="card-title">측정 기록</div>
+    <div class="table-actions">
+      <button class="btn btn-success" onclick="downloadXLSX()" style="min-width:110px;">📊 Excel 저장</button>
+      <button class="btn btn-warning" onclick="downloadPDF()" style="min-width:110px;">📄 PDF 저장</button>
+      <button class="btn btn-secondary" onclick="clearRecords()" style="min-width:110px;">🗑 기록 초기화</button>
+    </div>
+    <div class="table-wrapper">
+      <table id="recordTable">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>날짜/시간</th>
+            <th>dB 값</th>
+            <th>상태</th>
+            <th>측정 경과</th>
+          </tr>
+        </thead>
+        <tbody id="recordBody">
+          <tr><td colspan="5" class="table-empty">측정을 시작하면 기록이 저장됩니다.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<!-- ===== 마이크 권한 안내 모달 ===== -->
+<div id="micModal" style="
+  display:none; position:fixed; inset:0; z-index:2000;
+  background:rgba(14,31,64,0.55); backdrop-filter:blur(6px);
+  align-items:center; justify-content:center; padding:20px;
+">
+  <div style="
+    background:#fff; border-radius:20px; max-width:400px; width:100%;
+    padding:32px 28px; box-shadow:0 16px 60px rgba(37,120,255,0.18);
+    border:1px solid rgba(37,120,255,0.15); text-align:center;
+    font-family:'Segoe UI',system-ui,sans-serif;
+  ">
+    <div style="font-size:3rem; margin-bottom:12px;">🎙️</div>
+    <h2 style="font-size:1.15rem; color:#0e1f40; margin-bottom:10px; font-weight:700;">마이크 접근 권한 필요</h2>
+    <p style="font-size:0.85rem; color:#3a5070; line-height:1.65; margin-bottom:20px;">
+      실시간 소음 측정을 위해 <strong>마이크 사용 권한</strong>이 필요합니다.<br>
+      아래 버튼을 누르면 브라우저의 권한 요청 팝업이 표시됩니다.<br>
+      팝업에서 <strong style="color:#2578ff;">허용</strong>을 선택해 주세요.
+    </p>
+
+    <!-- 브라우저별 허용 방법 안내 -->
+    <div style="
+      background:#f0f6ff; border-radius:12px; padding:14px 16px;
+      text-align:left; margin-bottom:22px; font-size:0.78rem; color:#2e4a80; line-height:1.7;
+    ">
+      <strong>📌 권한 허용 방법</strong><br>
+      • <b>Chrome/Edge:</b> 주소창 왼쪽 🔒 아이콘 → 마이크 → 허용<br>
+      • <b>Safari:</b> 환경설정 → 웹사이트 → 마이크 → 허용<br>
+      • <b>모바일:</b> 팝업에서 "허용" 탭
+    </div>
+
+    <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+      <button id="micAllowBtn" style="
+        padding:12px 28px; border:none; border-radius:12px; cursor:pointer;
+        background:linear-gradient(135deg,#2578ff,#0040cc);
+        color:#fff; font-size:0.9rem; font-weight:700;
+        box-shadow:0 4px 16px rgba(37,120,255,0.35);
+        transition:opacity .2s;
+      ">🎙️ 마이크 허용하기</button>
+      <button id="micCancelBtn" style="
+        padding:12px 20px; border:1px solid rgba(37,120,255,0.2); border-radius:12px; cursor:pointer;
+        background:#f0f6ff; color:#2e4a80; font-size:0.9rem; font-weight:600;
+        transition:opacity .2s;
+      ">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 권한 거부 안내 모달 ===== -->
+<div id="micDeniedModal" style="
+  display:none; position:fixed; inset:0; z-index:2000;
+  background:rgba(14,31,64,0.55); backdrop-filter:blur(6px);
+  align-items:center; justify-content:center; padding:20px;
+">
+  <div style="
+    background:#fff; border-radius:20px; max-width:420px; width:100%;
+    padding:32px 28px; box-shadow:0 16px 60px rgba(232,32,58,0.15);
+    border:1px solid rgba(232,32,58,0.2); text-align:center;
+    font-family:'Segoe UI',system-ui,sans-serif;
+  ">
+    <div style="font-size:3rem; margin-bottom:12px;">🚫</div>
+    <h2 style="font-size:1.15rem; color:#0e1f40; margin-bottom:10px; font-weight:700;">마이크 권한이 차단되었습니다</h2>
+    <p style="font-size:0.85rem; color:#3a5070; line-height:1.65; margin-bottom:20px;">
+      마이크 접근이 거부되어 측정을 시작할 수 없습니다.<br>
+      아래 안내에 따라 브라우저 설정에서 권한을 허용한 뒤 <strong>페이지를 새로고침</strong>해 주세요.
+    </p>
+
+    <div style="
+      background:#fff5f6; border:1px solid rgba(232,32,58,0.15); border-radius:12px;
+      padding:14px 16px; text-align:left; margin-bottom:22px;
+      font-size:0.78rem; color:#8a1020; line-height:1.8;
+    ">
+      <strong>🔧 권한 복구 방법</strong><br>
+      <b>Chrome / Edge:</b><br>
+      &nbsp; 주소창 왼쪽 🔒 자물쇠 아이콘 클릭<br>
+      &nbsp; → 마이크 → <b>허용</b> 선택 → 새로고침<br><br>
+      <b>모바일 Chrome:</b><br>
+      &nbsp; 주소창 오른쪽 ⋮ 메뉴 → 사이트 설정<br>
+      &nbsp; → 마이크 → <b>허용</b> 선택
+    </div>
+
+    <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+      <button onclick="location.reload()" style="
+        padding:12px 24px; border:none; border-radius:12px; cursor:pointer;
+        background:linear-gradient(135deg,#e8203a,#aa0020);
+        color:#fff; font-size:0.9rem; font-weight:700;
+        box-shadow:0 4px 16px rgba(232,32,58,0.3);
+      ">🔄 페이지 새로고침</button>
+      <button id="micDeniedCloseBtn" style="
+        padding:12px 20px; border:1px solid rgba(37,120,255,0.2); border-radius:12px; cursor:pointer;
+        background:#f0f6ff; color:#2e4a80; font-size:0.9rem; font-weight:600;
+      ">닫기</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =====================================================
+   SoundGuard Pro — 데시벨 측정기
+   Web Audio API 기반 실시간 소음 측정 애플리케이션
+===================================================== */
+
+// ── 전역 상태 ──────────────────────────────────────
+let audioCtx    = null;
+let analyser    = null;
+let mediaStream = null;
+let rafId       = null;       // requestAnimationFrame ID
+let intervalId  = null;       // 0.5초 기록 인터벌
+let timerIntervalId = null;   // 1초 타이머 인터벌
+
+let isRunning   = false;
+let calibOffset = 0;          // 보정 오프셋 (dB)
+let currentDB   = 0;
+
+// 통계 데이터
+let dbValues    = [];         // 측정값 배열
+let startTime   = null;       // 측정 시작 시각
+let elapsedSec  = 0;          // 경과 초
+
+// 테이블 기록
+let records     = [];
+let recordCount = 0;
+
+// Chart.js 인스턴스
+let waveChart   = null;
+const CHART_MAX_POINTS = 60;  // 최대 30초치 (0.5초 간격)
+let chartLabels = [];
+let chartData   = [];
+
+// PWA 설치 프롬프트
+let deferredPrompt = null;
+
+// ── DOM 요소 ────────────────────────────────────────
+const dbValueEl  = document.getElementById('dbValue');
+const dbStatusEl = document.getElementById('dbStatus');
+const gaugeFill  = document.getElementById('gaugeFill');
+const barFill    = document.getElementById('barFill');
+const statMin    = document.getElementById('statMin');
+const statMax    = document.getElementById('statMax');
+const statAvg    = document.getElementById('statAvg');
+const statTime   = document.getElementById('statTime');
+const statusDot  = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const recordBody = document.getElementById('recordBody');
+const startBtn   = document.getElementById('startBtn');
+const stopBtn    = document.getElementById('stopBtn');
+const calibSlider= document.getElementById('calibSlider');
+const calibValEl = document.getElementById('calibVal');
+
+// ── 날짜/시간 실시간 업데이트 ────────────────────────
+(function updateDatetime() {
+  const el = document.getElementById('datetime');
+  function tick() {
+    const now = new Date();
+    el.innerHTML =
+      now.toLocaleDateString('ko-KR', {year:'numeric',month:'2-digit',day:'2-digit'})
+      + '<br>' +
+      now.toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+
+// ── 보정 슬라이더 ────────────────────────────────────
+function updateCalib() {
+  calibOffset = parseInt(calibSlider.value, 10);
+  calibValEl.textContent = (calibOffset >= 0 ? '+' : '') + calibOffset + ' dB';
+}
+calibSlider.addEventListener('input', updateCalib);
+
+// ── Chart.js 초기화 ──────────────────────────────────
+function initChart() {
+  const ctx = document.getElementById('waveChart').getContext('2d');
+  const isDark = !document.body.classList.contains('light-mode');
+
+  waveChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: chartLabels,
+      datasets: [{
+        label: 'dB SPL',
+        data: chartData,
+        borderColor: '#2578ff',
+        backgroundColor: 'rgba(37,120,255,0.08)',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.4,
+        fill: true,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 0 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(255,255,255,0.97)',
+          borderColor: 'rgba(37,120,255,0.25)',
+          borderWidth: 1,
+          titleColor: '#7a99c8',
+          bodyColor: '#0e1f40',
+          callbacks: {
+            label: ctx => ` ${ctx.parsed.y.toFixed(1)} dB`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(37,120,255,0.07)' },
+          ticks: { color: '#7a99c8', maxTicksLimit: 8, font: { family: 'Courier New', size: 10 } }
+        },
+        y: {
+          min: 20, max: 110,
+          grid: { color: 'rgba(37,120,255,0.07)' },
+          ticks: { color: '#7a99c8', font: { family: 'Courier New', size: 10 },
+            callback: v => v + ' dB' }
+        }
+      }
+    }
+  });
+}
+
+// ── 원형 게이지 계산 ──────────────────────────────────
+// 게이지 SVG: r=82, 호 길이 = 2π×82×(270/360) ≈ 434.9 → 스케일에 맞게 설정
+// stroke-dasharray="348 565" 에서 348 = 434.9 * (200/200) 비율 조정
+// 실제로 사용: 전체 호 길이 = 2πr = 515; 270도 = 515 * 0.75 = 386.25
+// 여기서는 svg transform rotate(-135deg) 이후 0~120dB 범위를 270도 맵핑
+
+const GAUGE_CIRC = 2 * Math.PI * 82; // ≈ 515.2
+const GAUGE_ARC  = GAUGE_CIRC * 0.75; // 270도 호 = 386.4
+
+function updateGauge(db) {
+  const pct = Math.min(Math.max((db - 20) / 100, 0), 1); // 20~120 dB → 0~1
+  const dash = GAUGE_ARC * pct;
+
+  // stroke-dasharray 업데이트: "fill_len rest_len", offset=-CIRC*0.125
+  gaugeFill.style.strokeDasharray = `${dash} ${GAUGE_CIRC}`;
+
+  // 색상
+  let color;
+  if (db <= 60)      color = 'var(--green)';
+  else if (db <= 80) color = 'var(--yellow)';
+  else               color = 'var(--red)';
+
+  gaugeFill.style.stroke = color;
+  gaugeFill.style.filter = `drop-shadow(0 0 10px ${color})`;
+  dbValueEl.style.color  = color;
+  dbStatusEl.style.color = color;
+
+  // 바 게이지
+  barFill.style.width = (pct * 100) + '%';
+}
+
+// ── dB 상태 텍스트 ─────────────────────────────────
+function getStatusText(db) {
+  if (db <= 40)      return 'QUIET';
+  else if (db <= 60) return 'NORMAL';
+  else if (db <= 70) return 'MODERATE';
+  else if (db <= 80) return 'LOUD';
+  else if (db <= 90) return 'VERY LOUD';
+  else               return '⚠ DANGER';
+}
+function getStatusBadge(db) {
+  if (db <= 60) return 'badge-green';
+  else if (db <= 80) return 'badge-yellow';
+  else return 'badge-red';
+}
+
+// ── Web Audio API: 실시간 분석 ────────────────────────
+function getInstantDB() {
+  if (!analyser) return 0;
+  const bufLen = analyser.frequencyBinCount;
+  const data   = new Float32Array(bufLen);
+  analyser.getFloatTimeDomainData(data);
+
+  // RMS 계산
+  let sum = 0;
+  for (let i = 0; i < bufLen; i++) sum += data[i] * data[i];
+  const rms = Math.sqrt(sum / bufLen);
+
+  // dBFS → dB SPL 변환 (기준값 + 보정)
+  // 브라우저 마이크의 기준: -90~0 dBFS → 적절한 오프셋으로 SPL 근사
+  const dbFS  = rms > 0 ? 20 * Math.log10(rms) : -90;
+  const dbSPL = dbFS + 90 + calibOffset; // 기준 +90dB 오프셋으로 SPL 근사
+  return Math.max(0, Math.min(130, dbSPL));
+}
+
+// RAF 루프: 부드러운 실시간 UI 갱신
+function rafLoop() {
+  if (!isRunning) return;
+  currentDB = getInstantDB();
+
+  // 표시 갱신
+  dbValueEl.textContent = currentDB.toFixed(1);
+  dbStatusEl.textContent = getStatusText(currentDB);
+  updateGauge(currentDB);
+
+  rafId = requestAnimationFrame(rafLoop);
+}
+
+// 0.5초마다 통계/차트/테이블 갱신
+function onInterval() {
+  const db = currentDB;
+  dbValues.push(db);
+
+  // 통계 계산
+  const min = Math.min(...dbValues);
+  const max = Math.max(...dbValues);
+  const avg = dbValues.reduce((a,b)=>a+b,0) / dbValues.length;
+
+  statMin.innerHTML = min.toFixed(1) + '<span>dB</span>';
+  statMax.innerHTML = max.toFixed(1) + '<span>dB</span>';
+  statAvg.innerHTML = avg.toFixed(1) + '<span>dB</span>';
+
+  // 차트 갱신
+  const label = formatElapsed(elapsedSec);
+  chartLabels.push(label);
+  chartData.push(parseFloat(db.toFixed(1)));
+  if (chartLabels.length > CHART_MAX_POINTS) {
+    chartLabels.shift();
+    chartData.shift();
+  }
+  waveChart.update('none');
+
+  // 테이블 기록 추가 (매 5초마다 = 10번 인터벌)
+  if (dbValues.length % 10 === 0 || dbValues.length === 1) {
+    addTableRecord(db);
+  }
+}
+
+function addTableRecord(db) {
+  recordCount++;
+  const now  = new Date();
+  const dt   = now.toLocaleString('ko-KR');
+  const elapsed = formatElapsed(elapsedSec);
+  const status = getStatusText(db);
+  const badge  = getStatusBadge(db);
+
+  records.push({ no: recordCount, dt, db: db.toFixed(1), status, elapsed });
+
+  // 기존 empty 메시지 제거
+  const emptyRow = recordBody.querySelector('td[colspan]');
+  if (emptyRow) emptyRow.parentElement.remove();
+
+  // 행 삽입 (최신이 위)
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${recordCount}</td>
+    <td>${dt}</td>
+    <td style="font-family:var(--font-display);font-weight:700;">${db.toFixed(1)} dB</td>
+    <td><span class="badge ${badge}">${status}</span></td>
+    <td>${elapsed}</td>
+  `;
+  recordBody.insertBefore(tr, recordBody.firstChild);
+}
+
+// ── 타이머 ───────────────────────────────────────────
+function formatElapsed(sec) {
+  const h = String(Math.floor(sec/3600)).padStart(2,'0');
+  const m = String(Math.floor((sec%3600)/60)).padStart(2,'0');
+  const s = String(sec%60).padStart(2,'0');
+  return `${h}:${m}:${s}`;
+}
+
+function startTimer() {
+  startTime = Date.now();
+  elapsedSec = 0;
+  timerIntervalId = setInterval(() => {
+    elapsedSec++;
+    statTime.textContent = formatElapsed(elapsedSec);
+  }, 1000);
+}
+
+// ── 마이크 권한 모달 제어 ────────────────────────────
+const micModal      = document.getElementById('micModal');
+const micDeniedModal= document.getElementById('micDeniedModal');
+
+function showModal(el)  { el.style.display = 'flex'; }
+function hideModal(el)  { el.style.display = 'none'; }
+
+document.getElementById('micCancelBtn').addEventListener('click', () => hideModal(micModal));
+document.getElementById('micDeniedCloseBtn').addEventListener('click', () => hideModal(micDeniedModal));
+
+// 모달 배경 클릭 시 닫기
+micModal.addEventListener('click', e => { if (e.target === micModal) hideModal(micModal); });
+micDeniedModal.addEventListener('click', e => { if (e.target === micDeniedModal) hideModal(micDeniedModal); });
+
+// "마이크 허용하기" 버튼 → 실제 권한 요청
+document.getElementById('micAllowBtn').addEventListener('click', async () => {
+  hideModal(micModal);
+  await requestMicAndStart();
+});
+
+// ── 측정 시작 버튼 ───────────────────────────────────
+startBtn.addEventListener('click', async () => {
+  // Permissions API로 현재 권한 상태 먼저 확인
+  if (navigator.permissions) {
+    try {
+      const perm = await navigator.permissions.query({ name: 'microphone' });
+      if (perm.state === 'denied') {
+        // 명시적으로 차단된 경우에만 거부 안내 모달
+        showModal(micDeniedModal);
+        return;
+      }
+      // 'granted' 또는 'prompt' 모두 → 바로 getUserMedia 호출
+      // (이미 허용된 경우 팝업 없이 바로 연결, prompt 상태면 브라우저가 팝업 띄움)
+    } catch(_) { /* Permissions API 미지원 시 무시하고 계속 진행 */ }
+  }
+  await requestMicAndStart();
+});
+
+// ── 실제 마이크 획득 및 측정 시작 ────────────────────
+async function requestMicAndStart() {
+  // MediaDevices API 지원 여부 확인
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showToast('❌ 이 브라우저는 마이크 API를 지원하지 않습니다. Chrome/Edge를 사용해 주세요.');
+    return;
+  }
+
+  try {
+    // 마이크 스트림 요청
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+
+    // Web Audio API 설정
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioCtx.createMediaStreamSource(mediaStream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.8;
+    source.connect(analyser);
+
+    isRunning = true;
+
+    // UI 상태 변경
+    startBtn.disabled = true;
+    stopBtn.disabled  = false;
+    statusDot.classList.add('active');
+    statusText.textContent = '측정중';
+
+    // 루프 시작
+    rafLoop();
+    startTimer();
+    intervalId = setInterval(onInterval, 500);
+
+    showToast('✅ 마이크 연결 완료! 측정을 시작합니다.');
+
+  } catch (err) {
+    console.error('마이크 오류:', err);
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      showModal(micDeniedModal);
+    } else if (err.name === 'NotFoundError') {
+      showToast('❌ 마이크 장치를 찾을 수 없습니다. 마이크가 연결되어 있는지 확인하세요.');
+    } else if (err.name === 'NotReadableError') {
+      showToast('❌ 마이크가 다른 앱에서 사용 중입니다. 다른 앱을 닫고 다시 시도하세요.');
+    } else {
+      showToast('❌ 마이크 오류: ' + err.message);
+    }
+  }
+}
+function stopMeasurement() {
+  if (!isRunning) return;
+  isRunning = false;
+
+  cancelAnimationFrame(rafId);
+  clearInterval(intervalId);
+  clearInterval(timerIntervalId);
+
+  // 스트림 정지
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(t => t.stop());
+    mediaStream = null;
+  }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  analyser = null;
+
+  // UI 복원
+  startBtn.disabled = false;
+  stopBtn.disabled  = true;
+  statusDot.classList.remove('active');
+  statusText.textContent = '정지됨';
+
+  showToast('⏹ 측정이 정지되었습니다.');
+}
+stopBtn.addEventListener('click', stopMeasurement);
+
+// ── 기록 초기화 ─────────────────────────────────────
+function clearRecords() {
+  records = [];
+  recordCount = 0;
+  dbValues = [];
+  elapsedSec = 0;
+  statMin.innerHTML = '--<span>dB</span>';
+  statMax.innerHTML = '--<span>dB</span>';
+  statAvg.innerHTML = '--<span>dB</span>';
+  statTime.textContent = '00:00:00';
+  chartLabels.length = 0;
+  chartData.length   = 0;
+  if (waveChart) waveChart.update('none');
+  recordBody.innerHTML = '<tr><td colspan="5" class="table-empty">측정을 시작하면 기록이 저장됩니다.</td></tr>';
+  showToast('🗑 기록이 초기화되었습니다.');
+}
+
+// ── Excel (xlsx) 다운로드 ────────────────────────────
+function downloadXLSX() {
+  if (records.length === 0) { showToast('⚠ 저장할 데이터가 없습니다.'); return; }
+
+  const wsData = [
+    ['SoundGuard Pro — 데시벨 측정 기록'],
+    ['내보낸 시각: ' + new Date().toLocaleString('ko-KR')],
+    [],
+    ['#', '날짜/시간', 'dB 값', '상태', '경과시간'],
+    ...records.map(r => [r.no, r.dt, parseFloat(r.db), r.status, r.elapsed])
+  ];
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  // 열 너비 설정
+  ws['!cols'] = [{wch:5},{wch:22},{wch:10},{wch:12},{wch:12}];
+
+  // 헤더 병합
+  ws['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:4} }];
+
+  XLSX.utils.book_append_sheet(wb, ws, '측정기록');
+  XLSX.writeFile(wb, `soundguard_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('📊 Excel 파일이 저장되었습니다.');
+}
+
+// ── PDF 다운로드 ─────────────────────────────────────
+function downloadPDF() {
+  if (records.length === 0) { showToast('⚠ 저장할 데이터가 없습니다.'); return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+
+  // 한글 폰트 문제: 영문으로 표시 (jsPDF 기본 폰트는 한글 미지원)
+  doc.setFontSize(16);
+  doc.setTextColor(0, 180, 220);
+  doc.text('SoundGuard Pro - Decibel Measurement Report', 14, 18);
+
+  doc.setFontSize(9);
+  doc.setTextColor(100);
+  doc.text('Exported: ' + new Date().toLocaleString('ko-KR'), 14, 26);
+
+  // 통계 요약
+  const dbs = records.map(r => parseFloat(r.db));
+  const mn  = Math.min(...dbs).toFixed(1);
+  const mx  = Math.max(...dbs).toFixed(1);
+  const av  = (dbs.reduce((a,b)=>a+b,0)/dbs.length).toFixed(1);
+
+  doc.setFontSize(10);
+  doc.setTextColor(0);
+  doc.text(`Records: ${records.length}   MIN: ${mn} dB   MAX: ${mx} dB   AVG: ${av} dB`, 14, 34);
+
+  // 테이블
+  doc.autoTable({
+    startY: 40,
+    head: [['#', 'Date/Time', 'dB', 'Status', 'Elapsed']],
+    body: records.map(r => [r.no, r.dt, r.db + ' dB', r.status, r.elapsed]),
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [0, 130, 180], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [245, 250, 255] },
+    columnStyles: {
+      0: { cellWidth: 10 },
+      1: { cellWidth: 52 },
+      2: { cellWidth: 22 },
+      3: { cellWidth: 28 },
+      4: { cellWidth: 28 },
+    }
+  });
+
+  doc.save(`soundguard_${new Date().toISOString().slice(0,10)}.pdf`);
+  showToast('📄 PDF 파일이 저장되었습니다.');
+}
+
+// ── 토스트 알림 ─────────────────────────────────────
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// ── 다크모드 토글 ────────────────────────────────────
+document.getElementById('themeBtn').addEventListener('click', () => {
+  document.body.classList.toggle('dark-mode');
+  const isDark = document.body.classList.contains('dark-mode');
+  document.getElementById('themeBtn').textContent = isDark ? '☀️' : '🌙';
+
+  // 차트 색상 재조정
+  if (waveChart) {
+    const gridColor = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(37,120,255,0.07)';
+    const tickColor = isDark ? '#4a6080' : '#7a99c8';
+    const lineColor = isDark ? '#00d4ff' : '#2578ff';
+    const fillColor = isDark ? 'rgba(0,212,255,0.07)' : 'rgba(37,120,255,0.08)';
+    waveChart.options.scales.x.grid.color = gridColor;
+    waveChart.options.scales.y.grid.color = gridColor;
+    waveChart.options.scales.x.ticks.color = tickColor;
+    waveChart.options.scales.y.ticks.color = tickColor;
+    waveChart.data.datasets[0].borderColor = lineColor;
+    waveChart.data.datasets[0].backgroundColor = fillColor;
+    waveChart.update('none');
+  }
+});
+
+// ── PWA: 홈화면 추가 ────────────────────────────────
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  document.getElementById('installBtn').style.display = 'flex';
+});
+
+document.getElementById('installBtn').addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  if (outcome === 'accepted') showToast('📲 홈화면에 추가되었습니다!');
+  deferredPrompt = null;
+  document.getElementById('installBtn').style.display = 'none';
+});
+
+// PWA Manifest 동적 생성
+(function createManifest() {
+  const manifest = {
+    name: 'SoundGuard Pro',
+    short_name: 'SoundGuard',
+    description: '산업현장용 실시간 데시벨 측정기',
+    start_url: '.',
+    display: 'standalone',
+    background_color: '#f0f6ff',
+    theme_color: '#2578ff',
+    icons: [
+      { src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="%230a0e1a"/><text y=".9em" font-size="80">🎙</text></svg>', sizes: '192x192', type: 'image/svg+xml' }
+    ]
+  };
+  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+  document.getElementById('manifest-link').href = URL.createObjectURL(blob);
+})();
+
+// ── 초기화 ──────────────────────────────────────────
+initChart();
+
+// Service Worker (PWA 오프라인 지원)
+if ('serviceWorker' in navigator) {
+  const swCode = `
+    const CACHE = 'soundguard-v1';
+    self.addEventListener('install', e => {
+      self.skipWaiting();
+    });
+    self.addEventListener('fetch', e => {
+      e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+    });
+  `;
+  const blob = new Blob([swCode], { type: 'application/javascript' });
+  navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(() => {});
+}
+</script>
+</body>
+</html>
+
+<a href="../../index.html">
+메인으로
+</a>

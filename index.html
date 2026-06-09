@@ -1,3 +1,18 @@
+<!--
+ * SMART Maintenance Platform — 메인 포털
+ *
+ * 주요 기능
+ * - 앱 목록 카드 그리드: 등록된 점검 도구를 카드 형식으로 나열하며, 클릭 시 해당 앱으로 이동합니다.
+ * - 앱 상태 표시: 사용 가능(초록) / 개발 중(회색) 배지로 각 앱의 배포 상태를 표시합니다.
+ * - 실시간 날짜·시간: 우측 상단에 현재 시각을 30초마다 갱신합니다.
+ * - 반응형 레이아웃: 680px 이하 모바일 화면에서는 1열 그리드로 전환됩니다.
+ *
+ * 만든 사람
+ * - 이름: 김지훈
+ * - 이메일: hljihun98@gmail.com
+ *
+ * 만든 날짜: 2026-06-03
+ -->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -9,36 +24,38 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css"/>
 <style>
+  /* ── 디자인 토큰: 전체 색상·그림자·폰트 변수 정의 ── */
   :root{
-    --page:#F4F6F8;
-    --card:#FFFFFF;
-    --border:#E5E8EC;
-    --border-soft:#EEF0F3;
-    --ink:#1B1F24;
-    --ink-2:#3D4450;
-    --muted:#6B7280;
-    --dim:#9AA3AF;
-    --blue:#2563EB;
-    --blue-bg:#EAF1FE;
-    --teal:#0EA5A4;
-    --green:#15803D;
-    --green-bg:#E7F6EE;
-    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
-    --shadow-hi:0 6px 16px rgba(16,24,40,.08), 0 2px 6px rgba(16,24,40,.05);
-    --body:'Pretendard Variable',Pretendard,-apple-system,'Inter',sans-serif;
-    --latin:'Inter','Pretendard Variable',sans-serif;
+    --page:#F4F6F8;       /* 페이지 배경색 */
+    --card:#FFFFFF;       /* 카드 배경색 */
+    --border:#E5E8EC;     /* 기본 테두리 색 */
+    --border-soft:#EEF0F3;/* 연한 테두리 색 (카드 하단 구분선 등) */
+    --ink:#1B1F24;        /* 주요 텍스트 색 */
+    --ink-2:#3D4450;      /* 보조 텍스트 색 */
+    --muted:#6B7280;      /* 흐린 텍스트 색 (설명, 레이블) */
+    --dim:#9AA3AF;        /* 매우 흐린 텍스트 색 (시간, 푸터) */
+    --blue:#2563EB;       /* 주요 강조색 (파란색) */
+    --blue-bg:#EAF1FE;    /* 파란색 배경 (포커스 링 등) */
+    --teal:#0EA5A4;       /* 청록색 (벨트 장력 앱용) */
+    --green:#15803D;      /* 녹색 (사용 가능 배지) */
+    --green-bg:#E7F6EE;   /* 녹색 배경 (사용 가능 배지 배경) */
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);       /* 기본 그림자 */
+    --shadow-hi:0 6px 16px rgba(16,24,40,.08), 0 2px 6px rgba(16,24,40,.05);  /* 호버 시 강조 그림자 */
+    --body:'Pretendard Variable',Pretendard,-apple-system,'Inter',sans-serif;  /* 한글+영문 본문 폰트 */
+    --latin:'Inter','Pretendard Variable',sans-serif;                           /* 숫자·영문 전용 폰트 */
   }
+  /* 모든 요소의 box-sizing을 border-box로 통일하고 기본 여백 제거 */
   *{box-sizing:border-box;margin:0;padding:0;}
   body{
     font-family:var(--body);
     background:var(--page);
     color:var(--ink);
-    -webkit-font-smoothing:antialiased;
+    -webkit-font-smoothing:antialiased; /* macOS/iOS 폰트 안티앨리어싱 */
     line-height:1.5;
     min-height:100vh;
   }
 
-  /* ---------- top bar ---------- */
+  /* ── 상단 앱바: 로고·제목·버전·날짜 표시줄 ── */
   .appbar{
     background:var(--card);
     border-bottom:1px solid var(--border);
@@ -51,10 +68,12 @@
     align-items:center;
     gap:16px;
   }
+  /* 로고 링크: 포커스 시 파란 테두리 표시 */
   .logo{display:inline-flex;align-items:center;text-decoration:none;border-radius:6px;}
   .logo:focus-visible{outline:none;box-shadow:0 0 0 3px var(--blue-bg);}
   .logo-mark{height:22px;width:auto;display:block;}
 
+  /* 구분선(세로선) / 컨텍스트 텍스트 / 버전 뱃지 */
   .appbar .sep{width:1px;height:18px;background:var(--border);}
   .appbar .ctx{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:10px;}
   .vpill{
@@ -66,6 +85,7 @@
     border-radius:999px;
     padding:3px 9px;
   }
+  /* 우측 끝 날짜·시간 표시 */
   .appbar .when{
     margin-left:auto;
     font-family:var(--latin);
@@ -75,13 +95,15 @@
     white-space:nowrap;
   }
 
-  /* ---------- content ---------- */
+  /* ── 메인 컨텐츠 래퍼 ── */
   .wrap{max-width:1040px;margin:0 auto;padding:30px 28px 64px;}
 
+  /* 페이지 헤딩: 제목 + 부제목 */
   .pagehead{margin-bottom:6px;}
   .pagehead h1{font-size:22px;font-weight:700;letter-spacing:-.015em;}
   .pagehead p{font-size:13.5px;color:var(--muted);margin-top:5px;}
 
+  /* 앱 목록 헤더: "앱 목록" 레이블 + 앱 개수 뱃지 */
   .list-head{
     display:flex;align-items:center;justify-content:space-between;
     margin:26px 2px 14px;
@@ -94,8 +116,10 @@
     border-radius:999px;padding:5px 12px;font-weight:500;
   }
 
+  /* 앱 카드 2열 그리드 */
   .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
 
+  /* ── 개별 앱 카드 ── */
   .card{
     position:relative;
     display:flex;flex-direction:column;gap:16px;
@@ -108,11 +132,13 @@
     overflow:hidden;
     transition:box-shadow .18s ease, transform .18s ease, border-color .18s ease;
   }
+  /* 카드 좌측의 강조 세로 줄무늬 (각 앱 테마 색상 사용) */
   .card::before{
     content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
     background:var(--accent,var(--blue));
     border-radius:14px 0 0 14px;
   }
+  /* 호버/포커스 시 카드 살짝 위로 뜨는 효과 */
   .card:hover,.card:focus-visible{
     box-shadow:var(--shadow-hi);
     transform:translateY(-2px);
@@ -121,6 +147,7 @@
   }
   .card:focus-visible{box-shadow:0 0 0 3px var(--blue-bg),var(--shadow-hi);}
 
+  /* 카드 상단: 아이콘 + 카테고리 태그 */
   .card-top{display:flex;align-items:center;justify-content:space-between;}
   .ico{
     width:40px;height:40px;border-radius:11px;
@@ -129,6 +156,7 @@
     color:var(--accent,var(--blue));
   }
   .ico svg{width:21px;height:21px;stroke:currentColor;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round;}
+  /* 카드 우측 상단 카테고리 태그 */
   .tag{
     font-size:11.5px;font-weight:600;letter-spacing:.01em;
     color:var(--accent,var(--blue));
@@ -136,9 +164,11 @@
     border-radius:999px;padding:5px 11px;
   }
 
+  /* 카드 본문: 앱 이름 + 설명 */
   .card-body .name{font-size:16.5px;font-weight:700;letter-spacing:-.01em;margin-bottom:5px;}
   .card-body .desc{font-size:13px;color:var(--muted);line-height:1.55;}
 
+  /* 카드 하단: 상태 배지(사용 가능/개발 중) + "열기 →" 링크 */
   .card-foot{
     display:flex;align-items:center;justify-content:space-between;
     padding-top:14px;border-top:1px solid var(--border-soft);
@@ -148,9 +178,10 @@
     font-size:12px;font-weight:600;
     padding:4px 10px;border-radius:999px;
   }
-  .pill.ok{color:var(--green);background:var(--green-bg);}
-  .pill.dev{color:var(--muted);background:#F1F3F5;}
+  .pill.ok{color:var(--green);background:var(--green-bg);}  /* 사용 가능 상태 */
+  .pill.dev{color:var(--muted);background:#F1F3F5;}          /* 개발 중 상태 */
   .pill svg{width:13px;height:13px;stroke:currentColor;stroke-width:2.2;fill:none;stroke-linecap:round;stroke-linejoin:round;}
+  /* "열기 →" 텍스트: 호버 시 화살표 간격이 넓어지는 애니메이션 */
   .open{
     font-size:13px;font-weight:600;color:var(--blue);
     display:inline-flex;align-items:center;gap:5px;
@@ -158,18 +189,21 @@
   }
   .card:hover .open,.card:focus-visible .open{gap:9px;}
 
+  /* 페이지 하단 푸터 */
   .foot{
     margin-top:30px;font-size:12px;color:var(--dim);
     display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;
     border-top:1px solid var(--border);padding-top:18px;
   }
 
+  /* 모바일(680px 이하): 1열 그리드로 전환 */
   @media (max-width:680px){
     .appbar-inner{padding:14px 18px;flex-wrap:wrap;}
     .appbar .when{width:100%;margin:6px 0 0;order:3;}
     .wrap{padding:24px 18px 52px;}
     .grid{grid-template-columns:1fr;}
   }
+  /* 시스템에서 애니메이션 축소를 요청하면 모든 전환 효과 비활성화 */
   @media (prefers-reduced-motion:reduce){*{transition:none!important;}}
 </style>
 </head>
@@ -178,19 +212,11 @@
   <div class="appbar">
     <div class="appbar-inner">
       <a class="logo" href="./" aria-label="HL Robotics 홈">
-        <!-- 공식 로고 파일이 있으면 아래 SVG를 <img src="./assets/hl-robotics-logo.svg" alt="HL Robotics"> 로 교체하세요 -->
-        <svg class="logo-mark" viewBox="0 0 220 34" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="HL Robotics">
-          <rect x="0"  y="2"  width="8"  height="30" fill="#111418"/>
-          <rect x="18" y="2"  width="8"  height="30" fill="#111418"/>
-          <rect x="6"  y="13" width="14" height="7"  fill="#111418"/>
-          <rect x="34" y="2"  width="8"  height="23" fill="#111418"/>
-          <rect x="34" y="25" width="22" height="7"  fill="#2BAADD"/>
-          <text x="63" y="29" font-family="Inter,sans-serif" font-size="30" font-weight="800" letter-spacing="-1" fill="#111418">Robotics</text>
-        </svg>
+        <img src="./logo.png" alt="HL Robotics" class="logo-mark">
       </a>
       <span class="sep"></span>
       <span class="ctx">SMART Maintenance Platform <span class="vpill">v1.0.0</span></span>
-      <span class="when" id="when">2026-06-09 09:46</span>
+      <span class="when" id="when"></span>
     </div>
   </div>
 
@@ -202,88 +228,78 @@
 
     <div class="list-head">
       <span class="label">앱 목록</span>
-      <span class="count">앱 4개</span>
+      <span class="count" id="app-count"></span>
     </div>
 
-    <div class="grid">
-
-      <a class="card" href="./apps/sensor-report/" style="--accent:#2563EB;--accent-bg:#EAF1FE;">
-        <div class="card-top">
-          <span class="ico"><svg viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M5 8V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2"/><path d="M8 13l2.5 3 2-2.5L16 18"/></svg></span>
-          <span class="tag">진동 · 온도</span>
-        </div>
-        <div class="card-body">
-          <div class="name">센서 보고서</div>
-          <div class="desc">설비 진동·온도 데이터를 수집해 상태 리포트로 정리합니다.</div>
-        </div>
-        <div class="card-foot">
-          <span class="pill ok"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>사용 가능</span>
-          <span class="open">열기 &rarr;</span>
-        </div>
-      </a>
-
-      <a class="card" href="./apps/belt-tension/" style="--accent:#0EA5A4;--accent-bg:#E3F6F5;">
-        <div class="card-top">
-          <span class="ico"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="12" r="3"/><path d="M6 9h12"/><path d="M6 15h12"/></svg></span>
-          <span class="tag">장력 N</span>
-        </div>
-        <div class="card-body">
-          <div class="name">벨트 장력계</div>
-          <div class="desc">컨베이어 벨트의 장력을 측정하고 기준값과 비교합니다.</div>
-        </div>
-        <div class="card-foot">
-          <span class="pill ok"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>사용 가능</span>
-          <span class="open">열기 &rarr;</span>
-        </div>
-      </a>
-
-      <a class="card" href="./apps/decibel-meter/" style="--accent:#7C3AED;--accent-bg:#F1ECFE;">
-        <div class="card-top">
-          <span class="ico" style="color:#7C3AED;background:#F1ECFE;"><svg viewBox="0 0 24 24"><path d="M4 10v4"/><path d="M8 7v10"/><path d="M12 4v16"/><path d="M16 8v8"/><path d="M20 11v2"/></svg></span>
-          <span class="tag" style="color:#7C3AED;background:#F1ECFE;">소음 dB</span>
-        </div>
-        <div class="card-body">
-          <div class="name">데시벨 측정</div>
-          <div class="desc">설비 가동 소음 레벨을 실시간으로 측정합니다.</div>
-        </div>
-        <div class="card-foot">
-          <span class="pill ok"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>사용 가능</span>
-          <span class="open">열기 &rarr;</span>
-        </div>
-      </a>
-
-      <a class="card" href="./apps/test/" style="--accent:#94A3B8;--accent-bg:#EEF1F4;">
-        <div class="card-top">
-          <span class="ico" style="color:#64748B;background:#EEF1F4;"><svg viewBox="0 0 24 24"><path d="M9 3h6"/><path d="M10 3v6l-4.5 8a2 2 0 0 0 1.8 3h9.4a2 2 0 0 0 1.8-3L14 9V3"/><path d="M7 14h10"/></svg></span>
-          <span class="tag" style="color:#64748B;background:#EEF1F4;">SANDBOX</span>
-        </div>
-        <div class="card-body">
-          <div class="name">테스트 앱</div>
-          <div class="desc">신규 기능을 점검하는 샌드박스 환경입니다.</div>
-        </div>
-        <div class="card-foot">
-          <span class="pill dev">개발 중</span>
-          <span class="open" style="color:#64748B;">열기 &rarr;</span>
-        </div>
-      </a>
-
-    </div>
+    <div class="grid" id="app-grid"></div>
 
     <div class="foot">
       <span>SMART Maintenance Platform</span>
-      <span>v1.0.0 · 4 apps</span>
+      <span id="foot-ver"></span>
     </div>
   </main>
 
 <script>
+  /* ── 등록된 앱 목록 ──
+     각 항목: href(경로), accent(강조색), icon(SVG 패스), tag(카테고리), name(앱 이름),
+              desc(설명), ready(사용 가능 여부) */
+  var APPS = [
+    { href:'./apps/sensor-report/', accent:'#2563EB', accentBg:'#EAF1FE',
+      icon:'<path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M5 8V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2"/><path d="M8 13l2.5 3 2-2.5L16 18"/>',
+      tag:'진동 · 온도', name:'센서 보고서', desc:'설비 진동·온도 데이터를 수집해 상태 리포트로 정리합니다.', ready:true },
+    { href:'./apps/belt-tension/', accent:'#0EA5A4', accentBg:'#E3F6F5',
+      icon:'<circle cx="6" cy="12" r="3"/><circle cx="18" cy="12" r="3"/><path d="M6 9h12"/><path d="M6 15h12"/>',
+      tag:'장력 N', name:'벨트 장력계', desc:'컨베이어 벨트의 장력을 측정하고 기준값과 비교합니다.', ready:true },
+    { href:'./apps/decibel-meter/', accent:'#7C3AED', accentBg:'#F1ECFE',
+      icon:'<path d="M4 10v4"/><path d="M8 7v10"/><path d="M12 4v16"/><path d="M16 8v8"/><path d="M20 11v2"/>',
+      tag:'소음 dB', name:'데시벨 측정', desc:'설비 가동 소음 레벨을 실시간으로 측정합니다.', ready:true },
+    { href:'./apps/test/', accent:'#94A3B8', accentBg:'#EEF1F4', icoColor:'#64748B', tagColor:'#64748B',
+      icon:'<path d="M9 3h6"/><path d="M10 3v6l-4.5 8a2 2 0 0 0 1.8 3h9.4a2 2 0 0 0 1.8-3L14 9V3"/><path d="M7 14h10"/>',
+      tag:'SANDBOX', name:'테스트 앱', desc:'신규 기능을 점검하는 샌드박스 환경입니다.', ready:false }
+  ];
+
+  /* 즉시실행 함수(IIFE): 페이지 로드 시 앱 카드 그리드를 동적으로 렌더링 */
   (function(){
-    var el=document.getElementById('when');
-    function p(n){return String(n).padStart(2,'0');}
+    /* 체크 아이콘 SVG (사용 가능 배지에 사용) */
+    var CHECK = '<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>';
+
+    /* APPS 배열을 순회하며 각 앱의 HTML 카드 문자열을 생성하고 그리드에 삽입 */
+    document.getElementById('app-grid').innerHTML = APPS.map(function(a){
+      /* 아이콘/태그에 커스텀 색상이 있을 때만 인라인 스타일 추가 */
+      var icoS = a.icoColor ? ' style="color:'+a.icoColor+';background:'+a.accentBg+';"' : '';
+      var tagS = a.tagColor ? ' style="color:'+a.tagColor+';background:'+a.accentBg+';"' : '';
+      /* 개발 중 앱의 "열기" 링크는 회색으로 처리 */
+      var openS = a.ready ? '' : ' style="color:#64748B;"';
+      /* 사용 가능 여부에 따라 배지 HTML 결정 */
+      var pill = a.ready
+        ? '<span class="pill ok">'+CHECK+'사용 가능</span>'
+        : '<span class="pill dev">개발 중</span>';
+      /* CSS 커스텀 속성으로 각 카드의 강조색을 개별 설정 */
+      return '<a class="card" href="'+a.href+'" style="--accent:'+a.accent+';--accent-bg:'+a.accentBg+';">'+
+        '<div class="card-top">'+
+          '<span class="ico"'+icoS+'><svg viewBox="0 0 24 24">'+a.icon+'</svg></span>'+
+          '<span class="tag"'+tagS+'>'+a.tag+'</span>'+
+        '</div>'+
+        '<div class="card-body">'+
+          '<div class="name">'+a.name+'</div>'+
+          '<div class="desc">'+a.desc+'</div>'+
+        '</div>'+
+        '<div class="card-foot">'+pill+'<span class="open"'+openS+'>열기 &rarr;</span></div>'+
+      '</a>';
+    }).join('');
+
+    /* 앱 개수 뱃지와 푸터 버전 텍스트 갱신 */
+    document.getElementById('app-count').textContent = '앱 '+APPS.length+'개';
+    document.getElementById('foot-ver').textContent = 'v1.0.0 · '+APPS.length+' apps';
+
+    /* 우측 상단 날짜·시간 실시간 표시 (30초마다 갱신) */
+    var el = document.getElementById('when');
+    function p(n){return String(n).padStart(2,'0');}  /* 한 자리 숫자를 두 자리로 패딩 */
     function tick(){
-      var d=new Date();
-      el.textContent=d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
+      var d = new Date();
+      el.textContent = d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
     }
-    tick();setInterval(tick,30000);
+    tick(); setInterval(tick, 30000);
   })();
 </script>
 </body>

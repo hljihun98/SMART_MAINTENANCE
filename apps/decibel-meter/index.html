@@ -1,3 +1,22 @@
+<!--
+ * SoundGuard Pro — 데시벨 측정기
+ *
+ * 주요 기능
+ * - 실시간 dB SPL 측정: Web Audio API의 RMS를 이용해 마이크 입력을 dB SPL로 변환하여 실시간 표시합니다.
+ * - 원형·수평 바 게이지: SVG 원형 게이지와 수평 바 게이지로 소음 레벨을 직관적으로 표현합니다.
+ * - 통계 표시: MIN/MAX/AVG 및 측정 경과 시간을 실시간으로 계산합니다.
+ * - 실시간 차트: Chart.js를 사용해 최근 30초치 소음 파형을 시계열 차트로 표시합니다.
+ * - 마이크 보정: -30~+30 dB 슬라이더로 환경에 맞게 보정값을 조정할 수 있습니다.
+ * - Excel/PDF 내보내기: SheetJS로 .xlsx, jsPDF로 .pdf 형식으로 측정 기록을 저장합니다.
+ * - 다크모드: 라이트/다크 테마를 토글 버튼으로 전환할 수 있습니다.
+ * - PWA 지원: Service Worker를 이용한 오프라인 캐싱 및 홈화면 추가(설치)를 지원합니다.
+ *
+ * 만든 사람
+ * - 이름: 김지훈
+ * - 이메일: hljihun98@gmail.com
+ *
+ * 만든 날짜: 2026-06-03
+ -->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -855,54 +874,54 @@
    Web Audio API 기반 실시간 소음 측정 애플리케이션
 ===================================================== */
 
-// ── 전역 상태 ──────────────────────────────────────
-let audioCtx    = null;
-let analyser    = null;
-let mediaStream = null;
-let rafId       = null;       // requestAnimationFrame ID
-let intervalId  = null;       // 0.5초 기록 인터벌
-let timerIntervalId = null;   // 1초 타이머 인터벌
+/* ─ 전역 상태 변수 ─ */
+let audioCtx    = null;        // Web Audio API 컨텍스트 객체
+let analyser    = null;        // FFT 분석기 노드
+let mediaStream = null;        // 마이크 MediaStream 객체
+let rafId       = null;        // requestAnimationFrame 루프 ID (cancelAnimationFrame 취소용)
+let intervalId  = null;        // 0.5초 마다 통계·차트·테이블 갱신하는 인터벌 ID
+let timerIntervalId = null;    // 1초 마다 경과 시간을 갱신하는 타이머 인터벌 ID
 
-let isRunning   = false;
-let calibOffset = 0;          // 보정 오프셋 (dB)
-let currentDB   = 0;
+let isRunning   = false;       // 측정 실행 중 여부
+let calibOffset = 0;           // 마이크 보정 슬라이더 오프셋 값 (dB, -30~+30)
+let currentDB   = 0;           // RAF 루프에서 계산된 현재 순간 dB 값
 
-// 통계 데이터
-let dbValues    = [];         // 측정값 배열
-let startTime   = null;       // 측정 시작 시각
-let elapsedSec  = 0;          // 경과 초
+/* 측정 통계 데이터 */
+let dbValues    = [];          // 0.5초 간격으로 누적된 측정값 배열 (MIN/MAX/AVG 계산용)
+let startTime   = null;        // 측정 시작 Date.now() 타임스탬프
+let elapsedSec  = 0;           // 측정 시작 후 경과 초
 
-// 테이블 기록
-let records     = [];
-let recordCount = 0;
+/* 측정 기록 테이블 데이터 */
+let records     = [];          // 테이블에 표시된 기록 객체 배열
+let recordCount = 0;           // 기록 일련번호 카운터
 
-// Chart.js 인스턴스
-let waveChart   = null;
-const CHART_MAX_POINTS = 60;  // 최대 30초치 (0.5초 간격)
-let chartLabels = [];
-let chartData   = [];
+/* Chart.js 실시간 파형 차트 */
+let waveChart   = null;        // Chart.js 차트 인스턴스
+const CHART_MAX_POINTS = 60;   // 차트에 표시할 최대 데이터 포인트 수 (0.5초 간격이므로 30초치)
+let chartLabels = [];          // 차트 X축 레이블 배열 (경과 시간 문자열)
+let chartData   = [];          // 차트 Y축 데이터 배열 (dB 값)
 
-// PWA 설치 프롬프트
+/* PWA 홈화면 추가 프롬프트 이벤트 보관 */
 let deferredPrompt = null;
 
-// ── DOM 요소 ────────────────────────────────────────
-const dbValueEl  = document.getElementById('dbValue');
-const dbStatusEl = document.getElementById('dbStatus');
-const gaugeFill  = document.getElementById('gaugeFill');
-const barFill    = document.getElementById('barFill');
-const statMin    = document.getElementById('statMin');
-const statMax    = document.getElementById('statMax');
-const statAvg    = document.getElementById('statAvg');
-const statTime   = document.getElementById('statTime');
-const statusDot  = document.getElementById('statusDot');
-const statusText = document.getElementById('statusText');
-const recordBody = document.getElementById('recordBody');
-const startBtn   = document.getElementById('startBtn');
-const stopBtn    = document.getElementById('stopBtn');
-const calibSlider= document.getElementById('calibSlider');
-const calibValEl = document.getElementById('calibVal');
+/* ─ DOM 요소 캐시 (매번 querySelector 대신 변수로 재사용) ─ */
+const dbValueEl  = document.getElementById('dbValue');   // 원형 게이지 중앙의 dB 숫자
+const dbStatusEl = document.getElementById('dbStatus');  // 게이지 중앙의 상태 텍스트(QUIET 등)
+const gaugeFill  = document.getElementById('gaugeFill'); // SVG 원형 게이지 채움 원호
+const barFill    = document.getElementById('barFill');   // 수평 바 게이지 채움
+const statMin    = document.getElementById('statMin');   // 최솟값 표시 요소
+const statMax    = document.getElementById('statMax');   // 최댓값 표시 요소
+const statAvg    = document.getElementById('statAvg');   // 평균값 표시 요소
+const statTime   = document.getElementById('statTime');  // 측정 경과 시간 표시 요소
+const statusDot  = document.getElementById('statusDot');  // 상태 표시등 점
+const statusText = document.getElementById('statusText'); // 상태 텍스트 (측정중/정지됨)
+const recordBody = document.getElementById('recordBody'); // 측정 기록 테이블 tbody
+const startBtn   = document.getElementById('startBtn');   // 측정 시작 버튼
+const stopBtn    = document.getElementById('stopBtn');    // 측정 정지 버튼
+const calibSlider= document.getElementById('calibSlider');// 마이크 보정 슬라이더
+const calibValEl = document.getElementById('calibVal');   // 현재 보정 오프셋 수치 표시
 
-// ── 날짜/시간 실시간 업데이트 ────────────────────────
+/* ─ 헤더 날짜·시간 실시간 업데이트 (1초 간격) ─ */
 (function updateDatetime() {
   const el = document.getElementById('datetime');
   function tick() {
@@ -916,14 +935,16 @@ const calibValEl = document.getElementById('calibVal');
   setInterval(tick, 1000);
 })();
 
-// ── 보정 슬라이더 ────────────────────────────────────
+/* ─ 마이크 보정 슬라이더 입력 처리 ─
+   슬라이더 값(-30~+30 dB)을 calibOffset에 반영하고 수치 레이블을 갱신 */
 function updateCalib() {
   calibOffset = parseInt(calibSlider.value, 10);
   calibValEl.textContent = (calibOffset >= 0 ? '+' : '') + calibOffset + ' dB';
 }
 calibSlider.addEventListener('input', updateCalib);
 
-// ── Chart.js 초기화 ──────────────────────────────────
+/* ─ Chart.js 실시간 파형 차트 초기화 ─
+   dB 값을 시계열로 표시하는 라인 차트를 생성 */
 function initChart() {
   const ctx = document.getElementById('waveChart').getContext('2d');
   const isDark = !document.body.classList.contains('light-mode');
@@ -977,90 +998,90 @@ function initChart() {
   });
 }
 
-// ── 원형 게이지 계산 ──────────────────────────────────
-// 게이지 SVG: r=82, 호 길이 = 2π×82×(270/360) ≈ 434.9 → 스케일에 맞게 설정
-// stroke-dasharray="348 565" 에서 348 = 434.9 * (200/200) 비율 조정
-// 실제로 사용: 전체 호 길이 = 2πr = 515; 270도 = 515 * 0.75 = 386.25
-// 여기서는 svg transform rotate(-135deg) 이후 0~120dB 범위를 270도 맵핑
+/* ─ 원형 게이지 SVG 계산 상수 ─
+   SVG r=82, rotate(-135deg) 적용 후 270도 호를 0~120 dB 범위에 매핑 */
+const GAUGE_CIRC = 2 * Math.PI * 82; // 전체 원 둘레 ≈ 515.2
+const GAUGE_ARC  = GAUGE_CIRC * 0.75; // 270도(3/4) 호 길이 ≈ 386.4
 
-const GAUGE_CIRC = 2 * Math.PI * 82; // ≈ 515.2
-const GAUGE_ARC  = GAUGE_CIRC * 0.75; // 270도 호 = 386.4
-
+/* dB 값에 따라 원형 게이지·수평 바 게이지·색상을 갱신 */
 function updateGauge(db) {
-  const pct = Math.min(Math.max((db - 20) / 100, 0), 1); // 20~120 dB → 0~1
+  const pct = Math.min(Math.max((db - 20) / 100, 0), 1); // 20~120 dB → 0~1 정규화
   const dash = GAUGE_ARC * pct;
 
-  // stroke-dasharray 업데이트: "fill_len rest_len", offset=-CIRC*0.125
+  /* stroke-dasharray로 원호 길이 설정 — fill_len과 나머지 gap으로 채움 비율 표현 */
   gaugeFill.style.strokeDasharray = `${dash} ${GAUGE_CIRC}`;
 
-  // 색상
+  /* dB 범위에 따른 색상 분기 */
   let color;
-  if (db <= 60)      color = 'var(--green)';
-  else if (db <= 80) color = 'var(--yellow)';
-  else               color = 'var(--red)';
+  if (db <= 60)      color = 'var(--green)';   // 정상 구간 (녹색)
+  else if (db <= 80) color = 'var(--yellow)';  // 주의 구간 (노란색)
+  else               color = 'var(--red)';     // 위험 구간 (빨간색)
 
   gaugeFill.style.stroke = color;
-  gaugeFill.style.filter = `drop-shadow(0 0 10px ${color})`;
+  gaugeFill.style.filter = `drop-shadow(0 0 10px ${color})`; // 발광 효과
   dbValueEl.style.color  = color;
   dbStatusEl.style.color = color;
 
-  // 바 게이지
+  /* 수평 바 게이지도 같은 비율로 갱신 */
   barFill.style.width = (pct * 100) + '%';
 }
 
-// ── dB 상태 텍스트 ─────────────────────────────────
+/* dB 값을 사람이 읽기 좋은 소음 수준 텍스트로 변환 */
 function getStatusText(db) {
-  if (db <= 40)      return 'QUIET';
-  else if (db <= 60) return 'NORMAL';
-  else if (db <= 70) return 'MODERATE';
-  else if (db <= 80) return 'LOUD';
-  else if (db <= 90) return 'VERY LOUD';
-  else               return '⚠ DANGER';
+  if (db <= 40)      return 'QUIET';       // 조용한 사무실 수준
+  else if (db <= 60) return 'NORMAL';      // 일반 대화 수준
+  else if (db <= 70) return 'MODERATE';    // 소음이 있는 환경
+  else if (db <= 80) return 'LOUD';        // 시끄러운 공장
+  else if (db <= 90) return 'VERY LOUD';   // 청력 손상 주의
+  else               return '⚠ DANGER';   // 즉각적인 청력 손상 위험
 }
+/* dB 값에 따른 테이블 배지 CSS 클래스 반환 */
 function getStatusBadge(db) {
   if (db <= 60) return 'badge-green';
   else if (db <= 80) return 'badge-yellow';
   else return 'badge-red';
 }
 
-// ── Web Audio API: 실시간 분석 ────────────────────────
+/* ─ Web Audio API 기반 순간 dB SPL 계산 ─
+   시간영역 데이터를 읽어 RMS를 구하고, dBFS → dB SPL로 변환 */
 function getInstantDB() {
   if (!analyser) return 0;
   const bufLen = analyser.frequencyBinCount;
   const data   = new Float32Array(bufLen);
-  analyser.getFloatTimeDomainData(data);
+  analyser.getFloatTimeDomainData(data);  // 시간영역 PCM 데이터 읽기
 
-  // RMS 계산
+  /* RMS(제곱평균제곱근) 계산 */
   let sum = 0;
   for (let i = 0; i < bufLen; i++) sum += data[i] * data[i];
   const rms = Math.sqrt(sum / bufLen);
 
-  // dBFS → dB SPL 변환 (기준값 + 보정)
-  // 브라우저 마이크의 기준: -90~0 dBFS → 적절한 오프셋으로 SPL 근사
+  /* dBFS(풀스케일 데시벨) 계산 후 dB SPL로 근사 변환
+     브라우저 마이크는 상대값(dBFS)이므로 +90 오프셋으로 SPL에 근사시킴 */
   const dbFS  = rms > 0 ? 20 * Math.log10(rms) : -90;
-  const dbSPL = dbFS + 90 + calibOffset; // 기준 +90dB 오프셋으로 SPL 근사
-  return Math.max(0, Math.min(130, dbSPL));
+  const dbSPL = dbFS + 90 + calibOffset;
+  return Math.max(0, Math.min(130, dbSPL)); // 0~130 dB 범위로 클램핑
 }
 
-// RAF 루프: 부드러운 실시간 UI 갱신
+/* ─ requestAnimationFrame 루프: 화면 주사율에 맞춰 dB 표시 실시간 갱신 ─ */
 function rafLoop() {
   if (!isRunning) return;
   currentDB = getInstantDB();
 
-  // 표시 갱신
+  /* UI 즉시 갱신 (숫자·상태 텍스트·게이지) */
   dbValueEl.textContent = currentDB.toFixed(1);
   dbStatusEl.textContent = getStatusText(currentDB);
   updateGauge(currentDB);
 
-  rafId = requestAnimationFrame(rafLoop);
+  rafId = requestAnimationFrame(rafLoop); // 다음 프레임에도 실행
 }
 
-// 0.5초마다 통계/차트/테이블 갱신
+/* ─ 0.5초 인터벌: 통계·차트·테이블 갱신 ─
+   RAF 루프보다 느린 주기로 통계 계산과 차트 데이터를 추가 */
 function onInterval() {
   const db = currentDB;
   dbValues.push(db);
 
-  // 통계 계산
+  /* MIN/MAX/AVG 통계 계산 및 표시 */
   const min = Math.min(...dbValues);
   const max = Math.max(...dbValues);
   const avg = dbValues.reduce((a,b)=>a+b,0) / dbValues.length;
@@ -1069,7 +1090,7 @@ function onInterval() {
   statMax.innerHTML = max.toFixed(1) + '<span>dB</span>';
   statAvg.innerHTML = avg.toFixed(1) + '<span>dB</span>';
 
-  // 차트 갱신
+  /* 차트 데이터 포인트 추가 (초과 시 오래된 데이터 제거 — 슬라이딩 윈도우) */
   const label = formatElapsed(elapsedSec);
   chartLabels.push(label);
   chartData.push(parseFloat(db.toFixed(1)));
@@ -1077,9 +1098,9 @@ function onInterval() {
     chartLabels.shift();
     chartData.shift();
   }
-  waveChart.update('none');
+  waveChart.update('none');  // 'none' 옵션으로 애니메이션 없이 즉시 갱신
 
-  // 테이블 기록 추가 (매 5초마다 = 10번 인터벌)
+  /* 테이블 기록 추가: 첫 번째 기록 또는 매 5초(10번 인터벌)마다 */
   if (dbValues.length % 10 === 0 || dbValues.length === 1) {
     addTableRecord(db);
   }
@@ -1111,7 +1132,8 @@ function addTableRecord(db) {
   recordBody.insertBefore(tr, recordBody.firstChild);
 }
 
-// ── 타이머 ───────────────────────────────────────────
+/* ─ 경과 시간 포맷 유틸리티 ─ */
+/* 초(sec)를 'HH:MM:SS' 형식의 문자열로 변환 */
 function formatElapsed(sec) {
   const h = String(Math.floor(sec/3600)).padStart(2,'0');
   const m = String(Math.floor((sec%3600)/60)).padStart(2,'0');
@@ -1119,6 +1141,7 @@ function formatElapsed(sec) {
   return `${h}:${m}:${s}`;
 }
 
+/* 측정 시작 시 타이머 초기화 및 1초 인터벌 시작 */
 function startTimer() {
   startTime = Date.now();
   elapsedSec = 0;
@@ -1128,73 +1151,74 @@ function startTimer() {
   }, 1000);
 }
 
-// ── 마이크 권한 모달 제어 ────────────────────────────
-const micModal      = document.getElementById('micModal');
-const micDeniedModal= document.getElementById('micDeniedModal');
+/* ─ 마이크 권한 안내·거부 모달 제어 ─ */
+const micModal      = document.getElementById('micModal');       // 권한 요청 안내 모달
+const micDeniedModal= document.getElementById('micDeniedModal'); // 권한 거부 안내 모달
 
+/* 모달 표시/숨김 유틸리티 */
 function showModal(el)  { el.style.display = 'flex'; }
 function hideModal(el)  { el.style.display = 'none'; }
 
+/* 취소·닫기 버튼 이벤트 */
 document.getElementById('micCancelBtn').addEventListener('click', () => hideModal(micModal));
 document.getElementById('micDeniedCloseBtn').addEventListener('click', () => hideModal(micDeniedModal));
 
-// 모달 배경 클릭 시 닫기
+/* 모달 배경(오버레이) 클릭 시 닫기 */
 micModal.addEventListener('click', e => { if (e.target === micModal) hideModal(micModal); });
 micDeniedModal.addEventListener('click', e => { if (e.target === micDeniedModal) hideModal(micDeniedModal); });
 
-// "마이크 허용하기" 버튼 → 실제 권한 요청
+/* "마이크 허용하기" 버튼: 모달 닫고 실제 권한 요청 진행 */
 document.getElementById('micAllowBtn').addEventListener('click', async () => {
   hideModal(micModal);
   await requestMicAndStart();
 });
 
-// ── 측정 시작 버튼 ───────────────────────────────────
+/* ─ 측정 시작 버튼 클릭 처리 ─
+   Permissions API로 현재 권한 상태를 먼저 조회하고:
+   - 'denied': 복구 안내 모달 표시
+   - 'granted'/'prompt': getUserMedia 직접 호출 */
 startBtn.addEventListener('click', async () => {
-  // Permissions API로 현재 권한 상태 먼저 확인
   if (navigator.permissions) {
     try {
       const perm = await navigator.permissions.query({ name: 'microphone' });
       if (perm.state === 'denied') {
-        // 명시적으로 차단된 경우에만 거부 안내 모달
         showModal(micDeniedModal);
         return;
       }
-      // 'granted' 또는 'prompt' 모두 → 바로 getUserMedia 호출
-      // (이미 허용된 경우 팝업 없이 바로 연결, prompt 상태면 브라우저가 팝업 띄움)
-    } catch(_) { /* Permissions API 미지원 시 무시하고 계속 진행 */ }
+    } catch(_) { /* Permissions API 미지원 브라우저는 그냥 진행 */ }
   }
   await requestMicAndStart();
 });
 
-// ── 실제 마이크 획득 및 측정 시작 ────────────────────
+/* ─ 마이크 스트림 획득 및 측정 시작 ─
+   getUserMedia → AudioContext → AnalyserNode 연결 후 루프 시작 */
 async function requestMicAndStart() {
-  // MediaDevices API 지원 여부 확인
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     showToast('❌ 이 브라우저는 마이크 API를 지원하지 않습니다. Chrome/Edge를 사용해 주세요.');
     return;
   }
 
   try {
-    // 마이크 스트림 요청
+    /* 마이크 오디오 스트림 요청 (비디오 불필요) */
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
 
-    // Web Audio API 설정
+    /* Web Audio API 파이프라인: 마이크 → 분석기 (스피커 연결 안 함 → 하울링 방지) */
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const source = audioCtx.createMediaStreamSource(mediaStream);
     analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.8;
+    analyser.fftSize = 2048;           // FFT 크기 (주파수 해상도)
+    analyser.smoothingTimeConstant = 0.8; // 평활화 계수 (0=순간값, 1=완전평활)
     source.connect(analyser);
 
     isRunning = true;
 
-    // UI 상태 변경
+    /* UI 상태: 시작 버튼 비활성화, 정지 버튼 활성화, 상태 표시등 켜기 */
     startBtn.disabled = true;
     stopBtn.disabled  = false;
     statusDot.classList.add('active');
     statusText.textContent = '측정중';
 
-    // 루프 시작
+    /* 루프 시작: RAF(부드러운 dB 갱신) + 타이머 + 0.5초 통계 인터벌 */
     rafLoop();
     startTimer();
     intervalId = setInterval(onInterval, 500);
@@ -1203,8 +1227,9 @@ async function requestMicAndStart() {
 
   } catch (err) {
     console.error('마이크 오류:', err);
+    /* 오류 유형별 사용자 안내 메시지 분기 */
     if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-      showModal(micDeniedModal);
+      showModal(micDeniedModal);           // 권한 거부 → 복구 안내 모달
     } else if (err.name === 'NotFoundError') {
       showToast('❌ 마이크 장치를 찾을 수 없습니다. 마이크가 연결되어 있는지 확인하세요.');
     } else if (err.name === 'NotReadableError') {
@@ -1214,15 +1239,17 @@ async function requestMicAndStart() {
     }
   }
 }
+
+/* ─ 측정 정지: 모든 오디오 리소스·루프·인터벌 정리 ─ */
 function stopMeasurement() {
   if (!isRunning) return;
   isRunning = false;
 
-  cancelAnimationFrame(rafId);
-  clearInterval(intervalId);
-  clearInterval(timerIntervalId);
+  cancelAnimationFrame(rafId);       // RAF 루프 취소
+  clearInterval(intervalId);         // 0.5초 통계 인터벌 해제
+  clearInterval(timerIntervalId);    // 1초 타이머 인터벌 해제
 
-  // 스트림 정지
+  /* 마이크 트랙 정지 및 AudioContext 닫기 */
   if (mediaStream) {
     mediaStream.getTracks().forEach(t => t.stop());
     mediaStream = null;
@@ -1230,7 +1257,7 @@ function stopMeasurement() {
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
   analyser = null;
 
-  // UI 복원
+  /* UI 복원: 버튼 상태 원래대로, 상태 표시등 끄기 */
   startBtn.disabled = false;
   stopBtn.disabled  = true;
   statusDot.classList.remove('active');
@@ -1240,7 +1267,8 @@ function stopMeasurement() {
 }
 stopBtn.addEventListener('click', stopMeasurement);
 
-// ── 기록 초기화 ─────────────────────────────────────
+/* ─ 측정 기록 전체 초기화 ─
+   통계·차트·테이블·dbValues 배열을 모두 초기 상태로 리셋 */
 function clearRecords() {
   records = [];
   recordCount = 0;
@@ -1257,7 +1285,8 @@ function clearRecords() {
   showToast('🗑 기록이 초기화되었습니다.');
 }
 
-// ── Excel (xlsx) 다운로드 ────────────────────────────
+/* ─ Excel(xlsx) 파일 다운로드 ─
+   SheetJS(XLSX) 라이브러리로 측정 기록을 .xlsx 파일로 내보냄 */
 function downloadXLSX() {
   if (records.length === 0) { showToast('⚠ 저장할 데이터가 없습니다.'); return; }
 
@@ -1283,7 +1312,9 @@ function downloadXLSX() {
   showToast('📊 Excel 파일이 저장되었습니다.');
 }
 
-// ── PDF 다운로드 ─────────────────────────────────────
+/* ─ PDF 보고서 다운로드 ─
+   jsPDF + AutoTable 플러그인으로 측정 기록을 A4 PDF 파일로 내보냄
+   (jsPDF 기본 폰트가 한글을 지원하지 않아 헤더는 영문으로 처리) */
 function downloadPDF() {
   if (records.length === 0) { showToast('⚠ 저장할 데이터가 없습니다.'); return; }
 
@@ -1330,7 +1361,8 @@ function downloadPDF() {
   showToast('📄 PDF 파일이 저장되었습니다.');
 }
 
-// ── 토스트 알림 ─────────────────────────────────────
+/* ─ 하단 토스트 알림 표시 ─
+   2.8초 후 자동으로 사라지는 일시적 상태 메시지 */
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -1338,7 +1370,8 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 2800);
 }
 
-// ── 다크모드 토글 ────────────────────────────────────
+/* ─ 다크모드 / 라이트모드 토글 ─
+   body에 dark-mode 클래스를 추가/제거하며 차트 색상도 함께 변경 */
 document.getElementById('themeBtn').addEventListener('click', () => {
   document.body.classList.toggle('dark-mode');
   const isDark = document.body.classList.contains('dark-mode');
@@ -1360,11 +1393,12 @@ document.getElementById('themeBtn').addEventListener('click', () => {
   }
 });
 
-// ── PWA: 홈화면 추가 ────────────────────────────────
+/* ─ PWA 홈화면 추가 기능 ─
+   beforeinstallprompt 이벤트를 저장했다가 사용자가 버튼 클릭 시 표시 */
 window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault();
   deferredPrompt = e;
-  document.getElementById('installBtn').style.display = 'flex';
+  document.getElementById('installBtn').style.display = 'flex'; // 설치 버튼 노출
 });
 
 document.getElementById('installBtn').addEventListener('click', async () => {
@@ -1373,10 +1407,11 @@ document.getElementById('installBtn').addEventListener('click', async () => {
   const { outcome } = await deferredPrompt.userChoice;
   if (outcome === 'accepted') showToast('📲 홈화면에 추가되었습니다!');
   deferredPrompt = null;
-  document.getElementById('installBtn').style.display = 'none';
+  document.getElementById('installBtn').style.display = 'none'; // 설치 후 버튼 숨김
 });
 
-// PWA Manifest 동적 생성
+/* PWA Manifest를 Blob으로 동적 생성하여 <link rel="manifest">에 연결
+   - 별도 manifest.json 파일 없이 오프라인에서도 PWA 설치 지원 */
 (function createManifest() {
   const manifest = {
     name: 'SoundGuard Pro',
@@ -1394,10 +1429,12 @@ document.getElementById('installBtn').addEventListener('click', async () => {
   document.getElementById('manifest-link').href = URL.createObjectURL(blob);
 })();
 
-// ── 초기화 ──────────────────────────────────────────
+/* ─ 앱 초기화: 페이지 로드 시 Chart.js 차트 생성 ─ */
 initChart();
 
-// Service Worker (PWA 오프라인 지원)
+/* Service Worker 등록: PWA 오프라인 지원
+   - install: skipWaiting으로 즉시 활성화
+   - fetch: 네트워크 실패 시 캐시에서 응답 */
 if ('serviceWorker' in navigator) {
   const swCode = `
     const CACHE = 'soundguard-v1';
@@ -1408,13 +1445,10 @@ if ('serviceWorker' in navigator) {
       e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
     });
   `;
+  /* Service Worker 코드를 Blob URL로 등록 (외부 sw.js 파일 없이 인라인으로 처리) */
   const blob = new Blob([swCode], { type: 'application/javascript' });
   navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(() => {});
 }
 </script>
 </body>
 </html>
-
-<a href="../../index.html">
-메인으로
-</a>

@@ -7,11 +7,18 @@ function doLogin(){
   const id=document.getElementById('inp-id').value.trim().toUpperCase();
   const pw=document.getElementById('inp-pw').value;
   const err=document.getElementById('l-err');
+  const authStatus=typeof getAuthConfigStatus==='function' ? getAuthConfigStatus() : {ok:true,message:''};
+  if(!authStatus.ok){
+    err.textContent=authStatus.message;
+    err.style.display='block';
+    return;
+  }
   const user=getUser(id);
   if(authenticateUser(id,pw)&&user){
     CU={id,...user};
     loginTimes[id]=new Date().toLocaleString('ko-KR');
     logActivity(id,user.name,'LOGIN',`로그인`);
+    err.textContent='사번 또는 비밀번호가 올바르지 않습니다.';
     err.style.display='none';
     document.getElementById('ls').style.opacity='0';
     setTimeout(()=>{
@@ -19,7 +26,10 @@ function doLogin(){
       document.getElementById('app').style.display='block';
       initApp();
     },380);
-  } else { err.style.display='block'; }
+  } else {
+    err.textContent='사번 또는 비밀번호가 올바르지 않습니다.';
+    err.style.display='block';
+  }
 }
 document.getElementById('inp-pw').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 document.getElementById('inp-id').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('inp-pw').focus();});

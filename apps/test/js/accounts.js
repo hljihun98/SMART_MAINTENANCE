@@ -9,7 +9,13 @@
   'use strict';
 
   function cloneUsers(src) {
-    return JSON.parse(JSON.stringify(src || {}));
+    if (!src || typeof src !== 'object') return {};
+    try {
+      return JSON.parse(JSON.stringify(src));
+    } catch (e) {
+      console.warn('[ROBOSTOCK] 계정 시드 복제 실패, 빈 계정으로 초기화합니다.', e);
+      return {};
+    }
   }
 
   function sanitizeUser(user) {
@@ -21,7 +27,8 @@
     };
   }
 
-  let USERS = cloneUsers(window.DEFAULT_USERS);
+  const INITIAL_DEFAULT_USERS = cloneUsers(window.DEFAULT_USERS);
+  let USERS = cloneUsers(INITIAL_DEFAULT_USERS);
 
   window.getUsers = function () {
     return USERS;
@@ -38,6 +45,24 @@
   window.authenticateUser = function (id, pw) {
     const user = window.getUser(id);
     return !!(user && user.pw === pw);
+  };
+
+  window.getAuthConfigStatus = function () {
+    if (!window.DEFAULT_USERS || typeof window.DEFAULT_USERS !== 'object') {
+      return {
+        ok: false,
+        code: 'missing-config',
+        message: '로그인 계정 파일(js/config.accounts.js)을 찾지 못했습니다. GitHub 업로드 시 이 파일이 포함되어 있는지 확인하세요.'
+      };
+    }
+    if (!Object.keys(USERS).length) {
+      return {
+        ok: false,
+        code: 'empty-users',
+        message: '등록된 로그인 계정이 없습니다. js/config.accounts.js 또는 브라우저 저장 데이터를 확인하세요.'
+      };
+    }
+    return { ok: true, code: 'ok', message: '' };
   };
 
   window.createUser = function (id, userData) {
@@ -70,7 +95,7 @@
   };
 
   window.resetUsersFromSeed = function () {
-    USERS = cloneUsers(window.DEFAULT_USERS);
+    USERS = cloneUsers(INITIAL_DEFAULT_USERS);
     return USERS;
   };
 })();

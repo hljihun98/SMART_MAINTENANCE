@@ -192,6 +192,7 @@ let changelogData=[
   {date:'2026-06-11',ver:'v0.8.21',type:'버그수정',body:'로봇 상세의 "대시보드에 표시" 토글을 setRobotDashShow 함수로 분리해 즉시 저장되도록 보강하고, 깨진 토글 스위치 CSS 규칙을 수정해 활성 상태가 정상 표시되도록 개선.',author:'Codex'},
   {date:'2026-06-11',ver:'v0.8.22',type:'UI개선',body:'토글 스위치 ON 상태 색상을 초록색으로 조정해 사용자가 활성 상태를 더 직관적으로 인식할 수 있도록 개선.',author:'Codex'},
   {date:'2026-06-11',ver:'v0.8.23',type:'UI개선',body:'로봇 상세 화면의 빠른 액션 버튼을 rd-quick-actions 그룹으로 묶고, 좁은 폭에서 토글은 한 줄 전체를 사용하고 입고/출고 버튼은 같은 줄·같은 높이의 2열로 정렬되도록 개선.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.24',type:'버그수정',body:'GitHub 배포 환경에서 js/config.accounts.js 누락 시 accounts.js 초기화가 깨지던 문제를 수정. 로그인 화면에 계정 파일 누락/빈 계정 상태를 구체적으로 안내하도록 보강.',author:'Codex'},
 ];
 
 // Technician

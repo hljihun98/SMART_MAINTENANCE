@@ -1,10 +1,10 @@
-/* ===== data.js : 전역 상태/데이터: USERS·CU·bom[]·changelogData·asmEntries·robotGoals 등 + 호기범위 헬퍼 ===== */
+/* ===== data.js : 전역 상태/데이터: CU·bom[]·changelogData·asmEntries·robotGoals 등 + 호기범위 헬퍼 ===== */
 /* (원본 robot_inventory__44_.html 1420-1730 줄을 그대로 분리) */
 // ════════════════════════════════════════
 // DATA
 // ════════════════════════════════════════
-/* USERS(로그인 계정)는 js/config.accounts.js 로 분리되었습니다.
-   해당 파일이 이 data.js 보다 먼저 로드되어야 합니다. (index.html 스크립트 순서 참고) */
+/* 계정 초기 시드는 js/config.accounts.js, 런타임 계정 관리는 js/accounts.js 에 있습니다.
+   두 파일이 이 data.js 보다 먼저 로드되어야 합니다. (index.html 스크립트 순서 참고) */
 let CU=null, loginTimes={}, pendPh=[], scanTarget='in', scannedCode=null, scanStream=null;
 let bomFilter='PARKIE', calYear=new Date().getFullYear(), calMonth=new Date().getMonth();
 let asmCalYear=new Date().getFullYear(), asmCalMonth=new Date().getMonth();
@@ -101,6 +101,25 @@ let activityLog=[];   // {ts, userId, userName, type, detail}
 let actualRecords=[];  // {ts, robot, module, task, planH, actualH, memo, userId, userName}
 let alertTabFilter='PARKIE';
 
+function changelogVerParts(ver){
+  const m=String(ver||'').match(/v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/i);
+  return m?[parseInt(m[1])||0,parseInt(m[2])||0,parseInt(m[3])||0]:[0,0,0];
+}
+function changelogCompare(a,b){
+  const date=(b.date||'').localeCompare(a.date||'');
+  if(date)return date;
+  const av=changelogVerParts(a.ver),bv=changelogVerParts(b.ver);
+  return (bv[0]-av[0])||(bv[1]-av[1])||(bv[2]-av[2]);
+}
+function latestChangelog(){
+  return [...changelogData].sort(changelogCompare)[0]||null;
+}
+function nextChangelogVersion(){
+  const latest=latestChangelog();
+  const v=changelogVerParts(latest?.ver);
+  return `v${v[0]||0}.${v[1]||1}.${(v[2]||0)+1}`;
+}
+
 // ────────────────────────────────────────────────────────
 // 개발 로그 데이터
 // AI가 새 작업을 완료하면 이 배열에 항목을 추가합니다.
@@ -108,54 +127,71 @@ let alertTabFilter='PARKIE';
 // ────────────────────────────────────────────────────────
 let changelogData=[
   // ── 1일차 (4/23) ──────────────────────────────────────
-  {date:'2026-04-23',ver:'V1.1',type:'기능추가',body:'프로젝트 초기 생성. 로그인(사번/비밀번호)·대시보드·BOM 관리·입출고 기본 구조 구현.',author:'Claude'},
-  {date:'2026-04-23',ver:'V1.2',type:'기능추가',body:'BOM 이미지 드래그&드롭 업로드. 입출고 모달(입고/출고). 로봇별 현황 페이지(PARKIE/CARRIE/GOALIE).',author:'Claude'},
-  {date:'2026-04-23',ver:'V1.3',type:'기능추가',body:'공수 산정 기본 구조. 모듈·작업 항목 관리. 하루 작업시간·인원·시작일 설정. 1대 소요일 자동 계산.',author:'Claude'},
-  {date:'2026-04-23',ver:'V1.4',type:'기능추가',body:'작업 인원 일정관리 초기 버전. 주간 시간표 그리드. 작업 인원 추가·예약 등록 기능.',author:'Claude'},
+  {date:'2026-04-23',ver:'v0.1.1',type:'기능추가',body:'프로젝트 초기 생성. 로그인(사번/비밀번호)·대시보드·BOM 관리·입출고 기본 구조 구현.',author:'Claude'},
+  {date:'2026-04-23',ver:'v0.1.2',type:'기능추가',body:'BOM 이미지 드래그&드롭 업로드. 입출고 모달(입고/출고). 로봇별 현황 페이지(PARKIE/CARRIE/GOALIE).',author:'Claude'},
+  {date:'2026-04-23',ver:'v0.1.3',type:'기능추가',body:'공수 산정 기본 구조. 모듈·작업 항목 관리. 하루 작업시간·인원·시작일 설정. 1대 소요일 자동 계산.',author:'Claude'},
+  {date:'2026-04-23',ver:'v0.1.4',type:'기능추가',body:'작업 인원 일정관리 초기 버전. 주간 시간표 그리드. 작업 인원 추가·예약 등록 기능.',author:'Claude'},
   // ── 2일차 (4/24) ──────────────────────────────────────
-  {date:'2026-04-24',ver:'V2.1',type:'기능추가',body:'공수산정 조립 달력 추가. 납기 역산 기능(달력 더블클릭). 호기별 완료 예상일 시각화.',author:'Claude'},
-  {date:'2026-04-24',ver:'V2.2',type:'기능추가',body:'BOM Level 0~6 컬럼 추가. Rev.(버전) 컬럼 추가. 부품 상세 모달에서 레벨/Rev 수정 가능.',author:'Claude'},
-  {date:'2026-04-24',ver:'V2.3',type:'UI개선',body:'재고 부족 알림에 PARKIE/CARRIE/GOALIE/전체 탭 필터 추가. 기본값 PARKIE. BOM 탭 순서 재정렬.',author:'Claude'},
-  {date:'2026-04-24',ver:'V2.4',type:'기능추가',body:'직접 입력 이상여부 컬럼(정상/확인필요/이상). 신규 부품 일괄 엑셀 붙이기 테이블. Part Number 대시 무시 검색(normPN).',author:'Claude'},
+  {date:'2026-04-24',ver:'v0.2.1',type:'기능추가',body:'공수산정 조립 달력 추가. 납기 역산 기능(달력 더블클릭). 호기별 완료 예상일 시각화.',author:'Claude'},
+  {date:'2026-04-24',ver:'v0.2.2',type:'기능추가',body:'BOM Level 0~6 컬럼 추가. Rev.(버전) 컬럼 추가. 부품 상세 모달에서 레벨/Rev 수정 가능.',author:'Claude'},
+  {date:'2026-04-24',ver:'v0.2.3',type:'UI개선',body:'재고 부족 알림에 PARKIE/CARRIE/GOALIE/전체 탭 필터 추가. 기본값 PARKIE. BOM 탭 순서 재정렬.',author:'Claude'},
+  {date:'2026-04-24',ver:'v0.2.4',type:'기능추가',body:'직접 입력 이상여부 컬럼(정상/확인필요/이상). 신규 부품 일괄 엑셀 붙이기 테이블. Part Number 대시 무시 검색(normPN).',author:'Claude'},
   // ── 3일차 (4/25) ──────────────────────────────────────
-  {date:'2026-04-25',ver:'V3.1',type:'기능추가',body:'작업 인원 일정 페이지 전면 개편. 월간 캘린더 + 날짜 클릭 시 하단 30분 드래그 타임그리드. 예약자 표시.',author:'Claude'},
-  {date:'2026-04-25',ver:'V3.2',type:'보안',body:'사용자 관리(pg-admin) 관리자 전용 접근 제한. go() 함수에 role 체크 추가. 일반 사용자 접근 시 차단.',author:'Claude'},
-  {date:'2026-04-25',ver:'V3.3',type:'보안',body:'BOM stock 직접 수정 차단. updPart()에서 stock 키 수정 시 오류 반환. 변경 내역 activityLog에 기록.',author:'Claude'},
-  {date:'2026-04-25',ver:'V3.4',type:'버그수정',body:'공수산정 달력 더블클릭 역산 미작동 수정. new Date(str) 시간대 오프셋 버그 제거.',author:'Claude'},
+  {date:'2026-04-25',ver:'v0.3.1',type:'기능추가',body:'작업 인원 일정 페이지 전면 개편. 월간 캘린더 + 날짜 클릭 시 하단 30분 드래그 타임그리드. 예약자 표시.',author:'Claude'},
+  {date:'2026-04-25',ver:'v0.3.2',type:'보안',body:'사용자 관리(pg-admin) 관리자 전용 접근 제한. go() 함수에 role 체크 추가. 일반 사용자 접근 시 차단.',author:'Claude'},
+  {date:'2026-04-25',ver:'v0.3.3',type:'보안',body:'BOM stock 직접 수정 차단. updPart()에서 stock 키 수정 시 오류 반환. 변경 내역 activityLog에 기록.',author:'Claude'},
+  {date:'2026-04-25',ver:'v0.3.4',type:'버그수정',body:'공수산정 달력 더블클릭 역산 미작동 수정. new Date(str) 시간대 오프셋 버그 제거.',author:'Claude'},
   // ── 4일차 (4/26) ──────────────────────────────────────
-  {date:'2026-04-26',ver:'V4.1',type:'버그수정',body:'작업 인원 드래그 함수 완전 재작성. startDrag2/moveDrag2/endDrag2 (data-* 속성 기반). 인용부호 충돌 해결.',author:'Claude'},
-  {date:'2026-04-26',ver:'V4.2',type:'기능추가',body:'타임그리드 예약 더블클릭으로 취소(cancelBooking). 작업 인원 삭제 관리자 전용(deleteTech).',author:'Claude'},
-  {date:'2026-04-26',ver:'V4.3',type:'기능추가',body:'월간 달력 날짜 범위 드래그 → 타임그리드 드래그 시 범위 전체 일괄 예약.',author:'Claude'},
+  {date:'2026-04-26',ver:'v0.4.1',type:'버그수정',body:'작업 인원 드래그 함수 완전 재작성. startDrag2/moveDrag2/endDrag2 (data-* 속성 기반). 인용부호 충돌 해결.',author:'Claude'},
+  {date:'2026-04-26',ver:'v0.4.2',type:'기능추가',body:'타임그리드 예약 더블클릭으로 취소(cancelBooking). 작업 인원 삭제 관리자 전용(deleteTech).',author:'Claude'},
+  {date:'2026-04-26',ver:'v0.4.3',type:'기능추가',body:'월간 달력 날짜 범위 드래그 → 타임그리드 드래그 시 범위 전체 일괄 예약.',author:'Claude'},
   // ── 5일차 (4/27) ──────────────────────────────────────
-  {date:'2026-04-27',ver:'V5.1',type:'데이터구조',body:'BOM parentPartNo 필드 추가. flattenTree() 재귀 함수로 부모→자식 순서 렌더링.',author:'Claude'},
-  {date:'2026-04-27',ver:'V5.2',type:'기능추가',body:'공수산정 달력 호기 등록 UI 개편. 로봇별 시작~끝 호기 입력(중복 불가). 달력 태그 상세화.',author:'Claude'},
-  {date:'2026-04-27',ver:'V5.3',type:'기능추가',body:'BOM 상세 모달 계층 패널. 상위/현재/하위 부품 카드 표시. mo-set-parent 모달로 상위 부품 변경.',author:'Claude'},
+  {date:'2026-04-27',ver:'v0.5.1',type:'데이터구조',body:'BOM parentPartNo 필드 추가. flattenTree() 재귀 함수로 부모→자식 순서 렌더링.',author:'Claude'},
+  {date:'2026-04-27',ver:'v0.5.2',type:'기능추가',body:'공수산정 달력 호기 등록 UI 개편. 로봇별 시작~끝 호기 입력(중복 불가). 달력 태그 상세화.',author:'Claude'},
+  {date:'2026-04-27',ver:'v0.5.3',type:'기능추가',body:'BOM 상세 모달 계층 패널. 상위/현재/하위 부품 카드 표시. mo-set-parent 모달로 상위 부품 변경.',author:'Claude'},
   // ── 6일차 (4/28) ──────────────────────────────────────
-  {date:'2026-04-28',ver:'V6.1',type:'UI개선',body:'대시보드 입출고 버튼 제거. 로봇현황 카드 위치 변경. BOM 레벨 열 Lv뱃지+들여쓰기로 압축.',author:'Claude'},
-  {date:'2026-04-28',ver:'V6.2',type:'기능추가',body:'AI 개발 로그 블록 HTML 최상단 주석 삽입. 앱 내 개발 로그 뷰어 페이지 추가.',author:'Claude'},
-  {date:'2026-04-28',ver:'V6.3',type:'UI개선',body:'버전 changelogData 자동 표시. 개발로그·사용자관리 관리자 전용. 작업 시간 07-18시 22슬롯. PARKIE 배너 기본 ON.',author:'Claude'},
-  {date:'2026-04-28',ver:'V6.4',type:'UI개선',body:'납기역산 선택 로봇 카드만 표시. 호기별 조립 완료 예상 asmEntries 기반 변경.',author:'Claude'},
-  {date:'2026-04-28',ver:'V6.5',type:'버그수정',body:'중복 asmCalDblClick 제거. 개발 로그 ni-changelog onclick 따옴표 충돌 수정.',author:'Claude'},
-  {date:'2026-04-28',ver:'V6.6',type:'UI개선',body:'작업 인원 달력 Today=주황/선택=파랑 구분. 타임그리드 absolute 오버레이 방식 재작성.',author:'Claude'},
-  {date:'2026-04-28',ver:'V6.7',type:'UI개선',body:'공수산정 제작 호기+납기 역산 2열 통합 카드. 납기일 더블클릭 시 역산 결과 즉시 표시.',author:'Claude'},
-  {date:'2026-04-28',ver:'V6.8',type:'UI개선',body:'버전 체계 V{작업참여일수}.{카운팅} 확정. 공수산정 설정 카드 로봇별 고유 색상 적용.',author:'Claude'},
+  {date:'2026-04-28',ver:'v0.6.1',type:'UI개선',body:'대시보드 입출고 버튼 제거. 로봇현황 카드 위치 변경. BOM 레벨 열 Lv뱃지+들여쓰기로 압축.',author:'Claude'},
+  {date:'2026-04-28',ver:'v0.6.2',type:'기능추가',body:'AI 개발 로그 블록 HTML 최상단 주석 삽입. 앱 내 개발 로그 뷰어 페이지 추가.',author:'Claude'},
+  {date:'2026-04-28',ver:'v0.6.3',type:'UI개선',body:'버전 changelogData 자동 표시. 개발로그·사용자관리 관리자 전용. 작업 시간 07-18시 22슬롯. PARKIE 배너 기본 ON.',author:'Claude'},
+  {date:'2026-04-28',ver:'v0.6.4',type:'UI개선',body:'납기역산 선택 로봇 카드만 표시. 호기별 조립 완료 예상 asmEntries 기반 변경.',author:'Claude'},
+  {date:'2026-04-28',ver:'v0.6.5',type:'버그수정',body:'중복 asmCalDblClick 제거. 개발 로그 ni-changelog onclick 따옴표 충돌 수정.',author:'Claude'},
+  {date:'2026-04-28',ver:'v0.6.6',type:'UI개선',body:'작업 인원 달력 Today=주황/선택=파랑 구분. 타임그리드 absolute 오버레이 방식 재작성.',author:'Claude'},
+  {date:'2026-04-28',ver:'v0.6.7',type:'UI개선',body:'공수산정 제작 호기+납기 역산 2열 통합 카드. 납기일 더블클릭 시 역산 결과 즉시 표시.',author:'Claude'},
+  {date:'2026-04-28',ver:'v0.6.8',type:'UI개선',body:'버전 체계 SemVer 도입 전 마지막 내부 규칙 정리. 공수산정 설정 카드 로봇별 고유 색상 적용.',author:'Claude'},
   // ── 7일차 (4/29) ──────────────────────────────────────
-  {date:'2026-04-29',ver:'V7.1',type:'UI개선',body:'버전 체계 재확정. changelogData 전체 재정비.',author:'Claude'},
-  {date:'2026-04-29',ver:'V7.2',type:'UI개선',body:'공수산정 호기 입력 납기 역산 설정 카드로 통합(2열). 로봇 중복 선택 버그 수정. syncRevUnit 추가.',author:'Claude'},
-  {date:'2026-04-29',ver:'V7.3',type:'기능추가',body:'laborModules 실제 공수 데이터 반영(PARKIE: 준비24h·기구·전장·외주케이블·공통6h). 외주/TBD 플래그. 대시보드 공정 완료 체크 UI. 월간 달력 과거날짜 회색·선택불가.',author:'Claude'},
-  {date:'2026-04-29',ver:'V7.4',type:'기능추가',body:'달력 반영 버튼 버그 수정. PROC 상수 도입(GBC 10일·NEXT-M 10일·EOL 10일·부품여유 5일). 역산 GBC→NEXT-M→EOL→GTC 프로세스 반영.',author:'Claude'},
-  {date:'2026-04-29',ver:'V7.5',type:'버그수정',body:'asmEntries 초기값 null로 변경(하드코딩 제거). 공수산정 달력 과거날짜 회색+선택불가. 클릭=납기일 선택, 더블클릭=역산 실행 분리.',author:'Claude'},
-  {date:'2026-04-29',ver:'V7.6',type:'기능추가',body:'역산 로직 재설계: GBC N대동시(10일)→NEXT-M 2대씩 배치순차(10일×배치수)→EOL(10일). 배치별 착수일 타임라인 표시.',author:'Claude'},
-  {date:'2026-04-29',ver:'V7.7',type:'기능추가',body:'납기역산 확정 시 confirmedSchedules 생성. 작업인원 월간달력 단계별 간트 바 시각화. 간트바 더블클릭 상세모달(납품처·메모·삭제).',author:'Claude'},
-  {date:'2026-04-29',ver:'V7.8',type:'버그수정',body:'rendTechMonthGrid 간트바 data-scid 방식으로 따옴표 충돌 수정. rendCalendar confirmedSchedules 기반 교체. applyReverseSchedule에서 rendCalendar+rendDash 동기화 호출.',author:'Claude'},
-  {date:'2026-04-29',ver:'V7.9',type:'버그수정',body:'confirmReverseSchedule: _reverseDeadline null 시 asmSelectedDate fallback. 호기범위 미입력 검증 추가. EOL SM·SW 검사 2대 동시 진행으로 단일 단계 통합.',author:'Claude'},
+  {date:'2026-04-29',ver:'v0.7.1',type:'UI개선',body:'버전 체계 재확정. changelogData 전체 재정비.',author:'Claude'},
+  {date:'2026-04-29',ver:'v0.7.2',type:'UI개선',body:'공수산정 호기 입력 납기 역산 설정 카드로 통합(2열). 로봇 중복 선택 버그 수정. syncRevUnit 추가.',author:'Claude'},
+  {date:'2026-04-29',ver:'v0.7.3',type:'기능추가',body:'laborModules 실제 공수 데이터 반영(PARKIE: 준비24h·기구·전장·외주케이블·공통6h). 외주/TBD 플래그. 대시보드 공정 완료 체크 UI. 월간 달력 과거날짜 회색·선택불가.',author:'Claude'},
+  {date:'2026-04-29',ver:'v0.7.4',type:'기능추가',body:'달력 반영 버튼 버그 수정. PROC 상수 도입(GBC 10일·NEXT-M 10일·EOL 10일·부품여유 5일). 역산 GBC→NEXT-M→EOL→GTC 프로세스 반영.',author:'Claude'},
+  {date:'2026-04-29',ver:'v0.7.5',type:'버그수정',body:'asmEntries 초기값 null로 변경(하드코딩 제거). 공수산정 달력 과거날짜 회색+선택불가. 클릭=납기일 선택, 더블클릭=역산 실행 분리.',author:'Claude'},
+  {date:'2026-04-29',ver:'v0.7.6',type:'기능추가',body:'역산 로직 재설계: GBC N대동시(10일)→NEXT-M 2대씩 배치순차(10일×배치수)→EOL(10일). 배치별 착수일 타임라인 표시.',author:'Claude'},
+  {date:'2026-04-29',ver:'v0.7.7',type:'기능추가',body:'납기역산 확정 시 confirmedSchedules 생성. 작업인원 월간달력 단계별 간트 바 시각화. 간트바 더블클릭 상세모달(납품처·메모·삭제).',author:'Claude'},
+  {date:'2026-04-29',ver:'v0.7.8',type:'버그수정',body:'rendTechMonthGrid 간트바 data-scid 방식으로 따옴표 충돌 수정. rendCalendar confirmedSchedules 기반 교체. applyReverseSchedule에서 rendCalendar+rendDash 동기화 호출.',author:'Claude'},
+  {date:'2026-04-29',ver:'v0.7.9',type:'버그수정',body:'confirmReverseSchedule: _reverseDeadline null 시 asmSelectedDate fallback. 호기범위 미입력 검증 추가. EOL SM·SW 검사 2대 동시 진행으로 단일 단계 통합.',author:'Claude'},
   // ── 8일차 (4/30) ──────────────────────────────────────
-  {date:'2026-04-30',ver:'V8.1',type:'기능추가',body:'rendAsmCalendar 재작성: 확정일정(실선)+역산미리보기(점선) 동시 표시. updRevCalc 계산 시 달력 납기달로 자동이동.',author:'Claude'},
-  {date:'2026-04-30',ver:'V8.2',type:'UI개선',body:'전체 코드 최적화: 빈 함수 4개 제거. 미사용 CSS 20개 제거. CSS 변수 추가(--am-dark --gn-dark --re-dark --ac-hover). b-re 버튼 클래스 추가. 깨진 CSS 수정.',author:'Claude'},
-  {date:'2026-04-30',ver:'V8.3',type:'버그수정',body:'드래그 예약 즉시등록 → 모달 확인 후 등록(_pendingBooking 임시저장, closeMo 시 초기화). submitTechBook 범위선택 일괄등록 지원. 납기역산 달력 태그 단계별 크기/굵기 강조. 대시보드 공수효율(계획h/실적h) 복원.',author:'Claude'},
-  {date:'2026-04-30',ver:'V8.4',type:'최적화',body:'미사용 함수 5개 제거(editReverseSchedule·getWeekDates·openTechBookFromCell·toggleSiblings·updRevUnitLabel). 미사용 변수 제거(techFilterActive·_reverseConfirmed). NEXT-M 배치 착수일 계산 버그 수정: 역순 루프를 순방향으로 수정하여 같은 배치 2대가 동일 착수·완료일 공유.',author:'Claude'},
-  {date:'2026-04-30',ver:'V8.5',type:'버그수정',body:'setRevRobot ID맵 수정. 달력 반영 버튼 제거(호기 입력 자동반영). 역산결과 구동모듈 안착 제거. 달력 GBC착수·EOL착수 마커 제거. 대시보드 공수효율 재설계(큰 숫자+진행바+하루용량·효율 카드).',author:'Claude'},
-  {date:'2026-05-08',ver:'V8.6',type:'버그수정',body:'updRevCalc for루프 닫는 brace 누락 수정(핵심 오류). CSS 중복 규칙 완전 제거(35KB->25KB). 미사용 함수 제거(clickBomImg·dropBomImg·setBomImg). 미사용 변수 제거(laborRobotShow·techDragState·asmReverseDeadline). 빈 catch 주석 처리.',author:'Claude'},
+  {date:'2026-04-30',ver:'v0.8.1',type:'기능추가',body:'rendAsmCalendar 재작성: 확정일정(실선)+역산미리보기(점선) 동시 표시. updRevCalc 계산 시 달력 납기달로 자동이동.',author:'Claude'},
+  {date:'2026-04-30',ver:'v0.8.2',type:'UI개선',body:'전체 코드 최적화: 빈 함수 4개 제거. 미사용 CSS 20개 제거. CSS 변수 추가(--am-dark --gn-dark --re-dark --ac-hover). b-re 버튼 클래스 추가. 깨진 CSS 수정.',author:'Claude'},
+  {date:'2026-04-30',ver:'v0.8.3',type:'버그수정',body:'드래그 예약 즉시등록 → 모달 확인 후 등록(_pendingBooking 임시저장, closeMo 시 초기화). submitTechBook 범위선택 일괄등록 지원. 납기역산 달력 태그 단계별 크기/굵기 강조. 대시보드 공수효율(계획h/실적h) 복원.',author:'Claude'},
+  {date:'2026-04-30',ver:'v0.8.4',type:'최적화',body:'미사용 함수 5개 제거(editReverseSchedule·getWeekDates·openTechBookFromCell·toggleSiblings·updRevUnitLabel). 미사용 변수 제거(techFilterActive·_reverseConfirmed). NEXT-M 배치 착수일 계산 버그 수정: 역순 루프를 순방향으로 수정하여 같은 배치 2대가 동일 착수·완료일 공유.',author:'Claude'},
+  {date:'2026-04-30',ver:'v0.8.5',type:'버그수정',body:'setRevRobot ID맵 수정. 달력 반영 버튼 제거(호기 입력 자동반영). 역산결과 구동모듈 안착 제거. 달력 GBC착수·EOL착수 마커 제거. 대시보드 공수효율 재설계(큰 숫자+진행바+하루용량·효율 카드).',author:'Claude'},
+  {date:'2026-05-08',ver:'v0.8.6',type:'버그수정',body:'updRevCalc for루프 닫는 brace 누락 수정(핵심 오류). CSS 중복 규칙 완전 제거(35KB->25KB). 미사용 함수 제거(clickBomImg·dropBomImg·setBomImg). 미사용 변수 제거(laborRobotShow·techDragState·asmReverseDeadline). 빈 catch 주석 처리.',author:'Claude'},
+  {date:'2026-06-11',ver:'v0.8.7',type:'데이터구조',body:'계정 로직을 accounts.js 로 분리. DEFAULT_USERS 초기 시드와 런타임 계정 저장소를 분리하고, 관리자 사용자 추가/수정/삭제를 ACCOUNT 활동 로그로 기록하도록 개선.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.8',type:'UI개선',body:'휴대폰 바타입·폴드·태블릿·데스크톱 환경별 responsive.css 추가. 모바일 상단 내비게이션, 카드/폼 그리드 재배치, 표·타임그리드 가로 스크롤 보정.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.9',type:'기능추가',body:'모바일·폴드 화면에서 계정 프로필 클릭 시 내 계정 모달을 열도록 추가. 사번·성명·권한 표시, 현재 비밀번호 확인 기반 비밀번호 변경, 본인 활동 로그, 관리자 문의·로그아웃 진입 제공.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.10',type:'UI개선',body:'모바일·폴드 상단 메뉴가 자동으로 천천히 순환되도록 mobile-nav.js 추가. 사용자가 터치·스크롤·메뉴 선택 시 일시 정지 후 다시 흐르도록 개선.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.11',type:'버그수정',body:'외부 XLSX CDN defer가 로컬 앱 스크립트 실행을 지연시켜 모바일 메뉴 순환이 시작되지 않을 수 있는 문제를 수정. CDN은 비동기 로드로 변경하고 메뉴 순환 초기화와 속도를 보정.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.12',type:'버그수정',body:'로그인 전 숨겨진 앱 영역에서 모바일 메뉴 폭이 0으로 잡혀 순환이 체감되지 않을 수 있어, initApp 완료 후 startMobileNav를 명시 호출하도록 보정.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.13',type:'UI개선',body:'모바일·폴드 상단 메뉴 순환을 끊김 없는 루프 방식으로 변경. 메뉴 복제본을 모바일에서만 붙이고, 항목 터치·클릭 시 5초 정지 후 다시 회전하도록 개선.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.14',type:'UI개선',body:'모바일·폴드 공수산정 달력 전용 압축 스타일 추가. 날짜·배지·일정 태그 글자 크기와 패딩을 줄여 달력 칸이 텍스트 크기에 덜 의존하도록 개선.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.15',type:'버그수정',body:'모바일 상단 메뉴 순환 복제본이 클릭 이벤트를 가진 채 동작할 수 있는 문제를 수정. 복제본 이벤트·id 제거, pointer-events 차단, 첫 복제본 offset 기준으로 순환 폭을 계산하도록 보정.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.16',type:'UI개선',body:'모바일·폴드 작업 인원 일정관리 월간 드래그 예약 보드 전용 압축 스타일 추가. 날짜·상태 배지·간트바·작업자 pill 글자 크기와 패딩을 줄여 달력 셀을 작게 표시.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.17',type:'UI개선',body:'모바일·폴드 상단 메뉴 자동 순환 속도를 22px/s로 낮춰 목록 이동이 더 천천히 보이도록 조정.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.18',type:'문서화',body:'SemVer 기준에 맞춰 개발로그 버전 표기를 vMAJOR.MINOR.PATCH 형식으로 정비하고, README와 AI 개발 로그 블록을 현재 기능·파일 구조 기준으로 업데이트.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.19',type:'UI개선',body:'반폭 데스크톱 구간에서 상단 메뉴 관리자 라벨이 세로로 찌그러지는 문제를 수정하고, 개발 로그 버전 카드 목록을 2열로 재배치해 중간 폭 화면 가독성을 개선.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.20',type:'UI개선',body:'반폭 데스크톱과 태블릿 가로폭에서는 상단 메뉴 자동 순환을 비활성화하고, 더 작은 모바일 폭에서만 이어지는 목록 기능이 동작하도록 기준 폭을 760px로 조정.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.21',type:'버그수정',body:'로봇 상세의 "대시보드에 표시" 토글을 setRobotDashShow 함수로 분리해 즉시 저장되도록 보강하고, 깨진 토글 스위치 CSS 규칙을 수정해 활성 상태가 정상 표시되도록 개선.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.22',type:'UI개선',body:'토글 스위치 ON 상태 색상을 초록색으로 조정해 사용자가 활성 상태를 더 직관적으로 인식할 수 있도록 개선.',author:'Codex'},
+  {date:'2026-06-11',ver:'v0.8.23',type:'UI개선',body:'로봇 상세 화면의 빠른 액션 버튼을 rd-quick-actions 그룹으로 묶고, 좁은 폭에서 토글은 한 줄 전체를 사용하고 입고/출고 버튼은 같은 줄·같은 높이의 2열로 정렬되도록 개선.',author:'Codex'},
 ];
 
 // Technician
@@ -311,4 +347,3 @@ let laborModules={
   ]
 };
 let laborSettings={hpd:8,wk:3,startDate:''};
-

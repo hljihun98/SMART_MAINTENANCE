@@ -15,9 +15,11 @@ function rendRobotDetail(robot){
     <div class="ph">
       <div><div class="pt" style="color:${color}">${robot}</div><div class="ps">${robot==='PARKIE'?'주차로봇':robot==='CARRIE'?'물류로봇':'순찰로봇'} — 상세 현황</div></div>
       <div class="bg">
-        <label class="tog"><input type="checkbox" ${robotDashShow[robot]?'checked':''} onchange="robotDashShow['${robot}']=this.checked;rendDash()"><div class="tog-sl"></div><span>대시보드에 표시</span></label>
-        <button class="btn b-su" onclick="quickIO('in','')">+ 입고</button>
-        <button class="btn b-dn" onclick="quickIO('out','')">- 출고</button>
+        <label class="tog"><input type="checkbox" ${robotDashShow[robot]?'checked':''} onchange="setRobotDashShow('${robot}',this.checked)"><div class="tog-sl"></div><span>대시보드에 표시</span></label>
+        <div class="rd-quick-actions">
+          <button class="btn b-su" onclick="quickIO('in','')">+ 입고</button>
+          <button class="btn b-dn" onclick="quickIO('out','')">- 출고</button>
+        </div>
       </div>
     </div>
     <div class="sg" style="grid-template-columns:repeat(4,1fr)">
@@ -78,3 +80,9 @@ function rdTab(el,showId,hideId){
   document.getElementById(hideId).style.display='none';
 }
 
+function setRobotDashShow(robot, checked){
+  robotDashShow[robot]=!!checked;
+  if(typeof saveState==='function')saveState();
+  rendDash();
+  toast('✅',`${robot} ${checked?'표시':'숨김'} 설정이 저장되었습니다`,'ok');
+}

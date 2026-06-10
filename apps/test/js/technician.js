@@ -796,7 +796,7 @@ function markTechColor(el,color){
 function lookupUserForTech(val){
   const id=val.trim().toUpperCase();
   const hint=document.getElementById('ta-user-hint');
-  const u=USERS[id];
+  const u=getUser(id);
   if(u){
     document.getElementById('ta-name').value=u.name||'';
     if(hint){hint.textContent=`✅ ${u.name} (${u.role==='admin'?'관리자':'일반 사용자'}) 자동 입력됨`;hint.style.display='block';hint.style.color='var(--gn)';}
@@ -988,4 +988,3 @@ function rendDelayTable(){
 function populateTechSels(){
   ['tb-tech','dl-tech'].forEach(id=>{const sel=document.getElementById(id);if(!sel)return;sel.innerHTML='<option value="">작업 인원 선택</option>'+technicians.map(t=>`<option value="${t.id}">${t.name}</option>`).join('');});
 }
-

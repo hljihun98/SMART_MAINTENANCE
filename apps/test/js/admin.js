@@ -8,12 +8,12 @@
 // ────────────────────────────────────────────────────────
 function rendChangelog(){
   const typeFilter=document.getElementById('cl-filter-type')?.value||'';
-  const typeIcon={기능추가:'✨',버그수정:'🐛',UI개선:'🎨',데이터구조:'🗄️',보안:'🔒'};
-  const typeBg={기능추가:'var(--gnl)',버그수정:'var(--rel)',UI개선:'var(--pkl)',데이터구조:'var(--aml)',보안:'var(--cal)'};
-  const typeTx={기능추가:'var(--gn)',버그수정:'var(--re)',UI개선:'var(--pk)',데이터구조:'var(--am)',보안:'var(--ca)'};
+  const typeIcon={기능추가:'✨',버그수정:'🐛',UI개선:'🎨',데이터구조:'🗄️',보안:'🔒',최적화:'⚙️',문서화:'📝'};
+  const typeBg={기능추가:'var(--gnl)',버그수정:'var(--rel)',UI개선:'var(--pkl)',데이터구조:'var(--aml)',보안:'var(--cal)',최적화:'#EEF2FF',문서화:'#F3F4F6'};
+  const typeTx={기능추가:'var(--gn)',버그수정:'var(--re)',UI개선:'var(--pk)',데이터구조:'var(--am)',보안:'var(--ca)',최적화:'#4338CA',문서화:'var(--t2)'};
 
   // 버전별 최신 항목으로 카드 생성
-  const latest=[...changelogData].sort((a,b)=>b.date.localeCompare(a.date));
+  const latest=[...changelogData].sort(changelogCompare);
   const versions=[...new Set(latest.map(c=>c.ver))].slice(0,6);
   const vCards=document.getElementById('cl-version-cards');
   if(vCards){
@@ -36,7 +36,7 @@ function rendChangelog(){
   const filtered=typeFilter
     ?changelogData.filter(c=>c.type===typeFilter)
     :changelogData;
-  const sorted=[...filtered].sort((a,b)=>b.date.localeCompare(a.date)||b.ver.localeCompare(a.ver));
+  const sorted=[...filtered].sort(changelogCompare);
   const tb=document.getElementById('tb-changelog');
   if(tb){
     tb.innerHTML=sorted.length
@@ -67,7 +67,8 @@ function submitChangelog(){
 }
 
 function rendAdmin(){
-  document.getElementById('tb-admin').innerHTML=Object.entries(USERS).map(([id,u])=>`<tr>
+  const users=getUsers();
+  document.getElementById('tb-admin').innerHTML=Object.entries(users).map(([id,u])=>`<tr>
     <td class="t-m" style="font-weight:600">${id}</td>
     <td style="font-weight:500">${u.name||'-'}</td>
     <td>${u.role==='admin'?'<span class="a-badge">관리자</span>':'<span class="t-mu t-sm">일반 사용자</span>'}</td>
@@ -77,7 +78,7 @@ function rendAdmin(){
   </tr>`).join('');
   // update user filter dropdown
   const sel=document.getElementById('al-filter-user');
-  if(sel){sel.innerHTML='<option value="">전체 사용자</option>'+Object.entries(USERS).map(([id,u])=>`<option value="${id}">${u.name}(${id})</option>`).join('');}
+  if(sel){sel.innerHTML='<option value="">전체 사용자</option>'+Object.entries(users).map(([id,u])=>`<option value="${id}">${u.name}(${id})</option>`).join('');}
   rendActivityLog();
 }
 
@@ -93,17 +94,17 @@ function rendActivityLog(){
   const typeLabel={
     LOGIN:'🔑 로그인', IN:'📥 입고', OUT:'📤 출고', BOM:'📦 BOM',
     LABOR:'🏭 공수산정', TECH:'👤 작업인원', DELAY:'⚠️ 지연',
-    CHANGELOG:'📝 개발로그', INQ:'📨 문의'
+    CHANGELOG:'📝 개발로그', INQ:'📨 문의', ACCOUNT:'👤 계정관리'
   };
   const typeBg={
     LOGIN:'var(--acl)',IN:'var(--gnl)',OUT:'var(--rel)',BOM:'var(--aml)',
     LABOR:'#EDE9FF',TECH:'#E0F7FD',DELAY:'#FEF3C7',
-    CHANGELOG:'var(--s2)',INQ:'var(--cal)'
+    CHANGELOG:'var(--s2)',INQ:'var(--cal)',ACCOUNT:'#E0F2FE'
   };
   const typeTx={
     LOGIN:'var(--ac)',IN:'var(--gn)',OUT:'var(--re)',BOM:'var(--am)',
     LABOR:'#5B21B6',TECH:'#0369A1',DELAY:'#92400E',
-    CHANGELOG:'var(--t2)',INQ:'var(--ca)'
+    CHANGELOG:'var(--t2)',INQ:'var(--ca)',ACCOUNT:'#075985'
   };
 
   // 요약 통계
@@ -191,7 +192,7 @@ function submitActual(){
   closeMo('mo-actual');rendLaborSummary();toast('✅','실제 공수가 기록되었습니다','ok');
 }
 function openEditUser(id){
-  const u=USERS[id];if(!u)return;
+  const u=getUser(id);if(!u)return;
   document.getElementById('eu-id').value=id;
   document.getElementById('eu-idshow').value=id;
   document.getElementById('eu-nm').value=u.name;
@@ -201,13 +202,19 @@ function openEditUser(id){
 }
 function submitEditUser(){
   const id=document.getElementById('eu-id').value;
-  const u=USERS[id];if(!u)return;
+  const u=getUser(id);if(!u)return;
   const nm=document.getElementById('eu-nm').value.trim();
   const pw=document.getElementById('eu-pw').value;
   const rl=document.getElementById('eu-rl').value;
   if(!nm){toast('⚠️','성명을 입력하세요','wa');return;}
-  u.name=nm;if(pw)u.pw=pw;u.role=rl;
+  const changes=[];
+  if(u.name!==nm)changes.push(`이름 ${u.name}→${nm}`);
+  if(u.role!==rl)changes.push(`권한 ${u.role}→${rl}`);
+  if(pw)changes.push('비밀번호 변경');
+  updateUser(id,{name:nm,role:rl,pw:pw||u.pw});
   if(id===CU.id){CU.name=nm;CU.role=rl;document.getElementById('sb-un').textContent=nm;document.getElementById('sb-av').textContent=nm[0]||'?';}
+  logActivity(CU.id,CU.name,'ACCOUNT',`계정 수정: ${id}${changes.length?` [${changes.join(', ')}]`:''}`);
+  if(typeof saveState==='function')saveState();
   closeMo('mo-edituser');rendAdmin();toast('✅','사용자 정보가 수정되었습니다','ok');
 }
 function submitAddUser(){
@@ -216,9 +223,18 @@ function submitAddUser(){
   const pw=document.getElementById('nu-pw').value;
   const rl=document.getElementById('nu-rl').value;
   if(!id||!nm||!pw){toast('⚠️','모든 항목을 입력하세요','wa');return;}
-  if(USERS[id]){toast('⚠️','이미 존재하는 사번입니다','wa');return;}
-  USERS[id]={pw,role:rl,name:nm};
+  if(hasUser(id)){toast('⚠️','이미 존재하는 사번입니다','wa');return;}
+  createUser(id,{pw,role:rl,name:nm});
+  logActivity(CU.id,CU.name,'ACCOUNT',`계정 추가: ${nm}(${id}) [${rl}]`);
+  if(typeof saveState==='function')saveState();
   closeMo('mo-adduser');rendAdmin();toast('✅',`${nm}(${id}) 추가 완료`,'ok');
 }
-function delUser(id){if(!confirm(`${id} (${USERS[id]?.name}) 삭제하시겠습니까?`))return;delete USERS[id];rendAdmin();toast('🗑️','계정 삭제됨','ok');}
-
+function delUser(id){
+  const user=getUser(id);
+  if(!confirm(`${id} (${user?.name}) 삭제하시겠습니까?`))return;
+  deleteUserAccount(id);
+  logActivity(CU.id,CU.name,'ACCOUNT',`계정 삭제: ${user?.name||'-'}(${id})`);
+  if(typeof saveState==='function')saveState();
+  rendAdmin();
+  toast('🗑️','계정 삭제됨','ok');
+}

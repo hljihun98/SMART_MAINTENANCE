@@ -9,9 +9,7 @@ function openMo(id){
     // 오늘 날짜 자동 입력, 버전은 최신+0.1 제안
     const today=new Date().toISOString().slice(0,10);
     document.getElementById('cl-date').value=today;
-    const latest=[...changelogData].sort((a,b)=>b.ver.localeCompare(a.ver))[0];
-    const nextVer=latest?'v'+((parseFloat(latest.ver.replace('v',''))||4.8)+0.1).toFixed(1):'v4.9';
-    document.getElementById('cl-ver').value=nextVer;
+    document.getElementById('cl-ver').value=nextChangelogVersion();
     document.getElementById('cl-body').value='';
     document.getElementById('cl-author').value=CU?.name||'사용자';
   }
@@ -44,4 +42,3 @@ function closeMo(id){
   // 드래그 임시 예약 취소 (모달 닫을 때)
   if(id==='mo-tech-book') _pendingBooking=null;
 }
-

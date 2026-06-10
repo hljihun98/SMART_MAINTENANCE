@@ -1,4 +1,4 @@
-/* ===== config.accounts.js : 로그인 계정 정의 (분리본) =====
+/* ===== config.accounts.js : 로그인 계정 초기 시드 정의 =====
  *
  *  ⚠️ 보안 주의
  *  - 여기 비밀번호는 '평문(plaintext)'으로 저장됩니다.
@@ -6,13 +6,13 @@
  *    즉 이 분리는 "코드 정리/깃 관리 편의"일 뿐, 진짜 보안 수단이 아닙니다.
  *  - 실제 서비스로 전환할 때는 서버 인증(비밀번호 해시 저장)으로 교체해야 합니다.
  *
- *  ℹ️ 이 파일은 반드시 data.js 보다 '먼저' 로드되어야 합니다.
- *     (index.html 의 <script defer> 순서에서 가장 위에 위치)
+ *  ℹ️ 이 파일은 accounts.js 보다 먼저 로드되어야 합니다.
+ *     accounts.js 가 이 DEFAULT_USERS 를 복제해 런타임 USERS 를 만듭니다.
  *
  *  ℹ️ 계정을 GitHub 공개 저장소에서 숨기고 싶다면 README 의 "계정 비공개 모드"를 참고하세요.
  */
-let USERS = {
+window.DEFAULT_USERS = {
   'R00066': { pw: 'wlgns12!@', role: 'admin', name: '김관리' },
   'R00065': { pw: 'xptmxm12!@', role: 'user',  name: '이사용' },
-  'R00001': { pw: 'xptmxm12!@', role: 'user',  name: '테스트' }
+  'R00000': { pw: 'xptmxm12!@', role: 'user',  name: '김테스트' }
 };

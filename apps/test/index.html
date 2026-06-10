@@ -7,14 +7,16 @@
 ║  새로운 AI 세션에서 작업 시 반드시 이 블록을 먼저 확인하세요.               ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║  PROJECT   : ROBOSTOCK 로봇 제작 재고관리 시스템                             ║
-║  VERSION   : V8.4 (2026-04-30)                                               ║
-║  VERSION FORMAT: V{작업참여 누적일수}.{당일수정횟수}                         ║
-║    작업일: 1일=4/23, 2일=4/24, 3일=4/25, 4일=4/26, 5일=4/27, 6일=4/28, 7일=4/29║
-║    작업일: 1일=4/23, 2일=4/24, 3일=4/25, 4일=4/26, 5일=4/27, 6일=4/28      ║
-║    예: V6.3 = 6번째 작업일(4/28)의 세번째 변경                               ║
-║  STACK     : 단일 HTML 파일 · 순수 JS · 외부 의존성 없음 (XLSX.js 제외)      ║
+║  VERSION   : v0.8.20 (2026-06-11)                                            ║
+║  VERSION FORMAT: Semantic Versioning (vMAJOR.MINOR.PATCH)                    ║
+║    현재 운영: 아직 배포 전 개발 단계이므로 0.x.y 유지                        ║
+║    PATCH  : 버그 수정·문서화·작은 UI/내부 개선                               ║
+║    MINOR  : 호환성 유지 기능 추가 / MAJOR : 호환성 깨지는 변경               ║
+║  STACK     : 분리된 HTML/CSS/JS 파일 구조 · localStorage 기반 저장            ║
+║              외부 의존성은 XLSX.js(CDN) 1개                                  ║
 ║  LOGIN     : R00066 / wlgns12!@ → 관리자(김관리)                             ║
-║              R00065 / ehdgur12!@ → 일반사용자(이사용)                        ║
+║              R00065 / xptmxm12!@ → 일반사용자(이사용)                        ║
+║              R00000 / xptmxm12!@ → 일반사용자(김테스트)                      ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║  ROBOTS    : PARKIE(주차로봇) · CARRIE(물류로봇) · GOALIE(순찰로봇)          ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
@@ -41,6 +43,7 @@
 ║  pg-labor    : 공수 산정 (모듈관리·호기일정·역산달력·계획vs실제)            ║
 ║  pg-tech     : 작업 인원 일정관리 (월간캘린더·30분드래그·지연사유)           ║
 ║  pg-r-*      : 로봇별 현황 (PARKIE/CARRIE/GOALIE)                          ║
+║  pg-changelog: 개발 로그 (관리자 전용)                                       ║
 ║  pg-admin    : 사용자 관리 (관리자 전용·활동로그)                           ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║  IMPORTANT RULES FOR AI                                                      ║
@@ -58,30 +61,21 @@
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║  CHANGELOG                                                                   ║
 ║  ─────────────────────────────────────────────────────────────────────────  ║
-║  [2026-04-23] v1.0  초기 생성: 로그인·대시보드·BOM·입출고 기본 구조        ║
-║  [2026-04-23] v1.1  BOM 이미지 드래그&드롭·입출고 모달·로봇별현황          ║
-║  [2026-04-23] v1.2  공수산정 기본 구조·모듈관리·작업시간 계산               ║
-║  [2026-04-23] v1.3  작업 인원 일정관리 초기 버전 (주간 시간표)               ║
-║  [2026-04-24] v2.0  공수산정 달력 추가·납기역산 기능                        ║
-║  [2026-04-24] v2.1  BOM Level 0~6 + Rev. 컬럼 추가                         ║
-║  [2026-04-24] v2.2  재고부족알림 탭 필터·BOM 탭 순서 PARKIE 기본            ║
-║  [2026-04-24] v2.3  신규부품 일괄 엑셀 붙이기·이상여부 라디오 입고          ║
-║  [2026-04-25] v3.0  테크니션 월간캘린더 + 30분드래그 타임그리드             ║
-║  [2026-04-25] v3.1  사용자관리 관리자 전용 접근 제한                        ║
-║  [2026-04-25] v3.2  BOM stock 직접수정 차단·updPart 활동로그                ║
-║  [2026-04-25] v3.3  공수산정 달력 더블클릭 역산 (날짜파싱 버그 수정)        ║
-║  [2026-04-26] v3.4  테크니션 드래그 함수 재작성(data-* 속성 기반)           ║
-║  [2026-04-26] v3.5  예약 더블클릭 취소·테크니션 삭제 관리자 전용            ║
-║  [2026-04-26] v3.6  월간달력 날짜범위 드래그→타임그리드 일괄예약            ║
-║  [2026-04-27] v4.0  BOM parentPartNo 계층 구조·flattenTree 렌더링           ║
-║  [2026-04-27] v4.1  공수산정 호기 범위 입력(from~to)·달력 상세태그          ║
-║  [2026-04-27] v4.2  BOM 상세모달 계층패널·상위부품 변경 모달                ║
-║  [2026-04-27] v4.3  rendBOMHierarchy 카드 클릭이동 제거·정보전용            ║
-║  [2026-04-28] v4.4  대시보드 입출고버튼 제거·로봇현황카드 2번째 위치        ║
-║  [2026-04-28] v4.5  달력 "로봇제작일정" 클릭→공수산정 이동                 ║
-║  [2026-04-28] v4.6  BOM 레벨열 7개→단일Lv컬럼+들여쓰기 압축                ║
-║  [2026-04-28] v4.7  계층패널 카드 클릭이동 제거                             ║
-║  [2026-04-28] v4.8  AI 개발로그 블록 삽입·앱 내 CHANGELOG 뷰어 추가        ║
+║  전체 이력의 정본은 js/data.js 의 changelogData 배열을 따릅니다.             ║
+║  [2026-06-11] v0.8.20  반폭 데스크톱에서는 메뉴 자동 순환 비활성화          ║
+║  [2026-06-11] v0.8.19  반폭 데스크톱 개발 로그 카드/관리자 라벨 정리        ║
+║  [2026-06-11] v0.8.18  SemVer 정비, README/AI 로그 블록 최신화              ║
+║  [2026-06-11] v0.8.17  모바일 상단 메뉴 자동 순환 속도 조정                 ║
+║  [2026-06-11] v0.8.16  모바일 작업 인원 일정관리 압축 스타일 추가           ║
+║  [2026-06-11] v0.8.15  모바일 메뉴 복제본 클릭 이벤트 차단 버그 수정        ║
+║  [2026-06-11] v0.8.14  모바일 공수산정 달력 압축 스타일 추가                ║
+║  [2026-06-11] v0.8.13  모바일 메뉴 순환을 끊김 없는 루프로 개선             ║
+║  [2026-06-11] v0.8.12  initApp 이후 모바일 메뉴 순환 재시작 보정            ║
+║  [2026-06-11] v0.8.11  XLSX CDN 비동기 로드로 메뉴 초기화 지연 보정         ║
+║  [2026-06-11] v0.8.10  mobile-nav.js 추가, 모바일 메뉴 자동 순환            ║
+║  [2026-06-11] v0.8.9   내 계정 모달·비밀번호 변경·본인 활동 로그 추가       ║
+║  [2026-06-11] v0.8.8   responsive.css 추가, 모바일·폴드·태블릿 대응         ║
+║  [2026-06-11] v0.8.7   accounts.js 분리, 관리자 계정 변경 로그 기록         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
   AI_CONTEXT_END — 이 줄 이후는 일반 HTML입니다.
@@ -97,6 +91,7 @@
 <link rel="stylesheet" href="css/layout.css">
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/pages.css">
+<link rel="stylesheet" href="css/responsive.css">
 </head>
 <body>
 
@@ -113,7 +108,10 @@
           <div class="ll-ri"><div class="ll-rd" style="background:var(--go)"></div><div><div class="ll-rn">GOALIE</div><div class="ll-rs">순찰로봇</div></div></div>
         </div>
       </div>
-      <div class="ll-f">© 2026 ROBOSTOCK <span id="footer-version"></span></div>
+      <div class="ll-f ll-f2">
+        <span>© 2026 ROBOSTOCK <span id="footer-version"></span></span>
+        <button class="mini-reset" type="button" onclick="confirmResetRobostock()" title="브라우저 저장 데이터 초기화">초기화</button>
+      </div>
     </div>
     <div class="lr">
       <div class="lr-t">로그인</div>
@@ -130,7 +128,7 @@
 <div id="app">
   <nav class="sb">
     <div class="sb-logo" onclick="go('dash')" style="cursor:pointer" title="대시보드로 이동"><div class="sb-lt">ROBOSTOCK</div><div class="sb-ls" id="app-version">재고관리 시스템</div></div>
-    <div class="sb-user"><div class="sb-av" id="sb-av">--</div><div><div class="sb-un" id="sb-un">--</div><div class="sb-ui" id="sb-ui">--</div></div></div>
+    <div class="sb-user" onclick="openProfile()" title="내 계정 보기"><div class="sb-av" id="sb-av">--</div><div><div class="sb-un" id="sb-un">--</div><div class="sb-ui" id="sb-ui">--</div></div></div>
     <div class="sb-nav">
       <div class="ns">메뉴</div>
       <div class="ni act" data-pg="dash" onclick="go('dash',this)"><svg viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1.5" fill="currentColor" opacity=".4"/><rect x="1" y="9" width="6" height="6" rx="1.5" fill="currentColor" opacity=".4"/><rect x="9" y="9" width="6" height="6" rx="1.5" fill="currentColor"/></svg>대시보드</div>
@@ -562,6 +560,8 @@
             <option value="UI개선">UI 개선</option>
             <option value="데이터구조">데이터 구조</option>
             <option value="보안">보안</option>
+            <option value="최적화">최적화</option>
+            <option value="문서화">문서화</option>
           </select>
         </div>
         <table><thead><tr><th style="width:110px">날짜</th><th style="width:70px">버전</th><th style="width:80px">유형</th><th>변경 내용</th><th style="width:80px">작성자</th></tr></thead>
@@ -571,7 +571,13 @@
 
     <!-- ═══ ADMIN ═══ -->
     <div class="pg" id="pg-admin">
-      <div class="ph"><div><div class="pt">사용자 관리 <span class="a-badge">ADMIN</span></div><div class="ps">접속 계정 및 권한 관리</div></div><button class="btn b-pr" onclick="openMo('mo-adduser')">+ 사용자 추가</button></div>
+      <div class="ph">
+        <div><div class="pt">사용자 관리 <span class="a-badge">ADMIN</span></div><div class="ps">접속 계정 및 권한 관리</div></div>
+        <div class="bg">
+          <button class="btn b-se b-xs" type="button" onclick="confirmResetRobostock()">저장 초기화</button>
+          <button class="btn b-pr" onclick="openMo('mo-adduser')">+ 사용자 추가</button>
+        </div>
+      </div>
       <div class="sec"><table><thead><tr><th>사번</th><th>성명</th><th>권한</th><th>최근 접속</th><th>상태</th><th>액션</th></tr></thead><tbody id="tb-admin"></tbody></table></div>
       <!-- 전체 사용자 활동 로그 -->
       <div class="sec" style="margin-top:14px">
@@ -750,6 +756,46 @@
   </div>
 </div>
 
+<!-- 내 계정 -->
+<div class="mo" id="mo-profile">
+  <div class="md md-lg profile-md">
+    <div class="mc2" onclick="closeMo('mo-profile')">✕</div>
+    <div class="profile-head">
+      <div class="profile-avatar" id="pf-av">--</div>
+      <div>
+        <div class="md-t">내 계정</div>
+        <div class="md-s">계정 정보와 활동 기록을 확인합니다</div>
+      </div>
+    </div>
+
+    <div class="profile-info">
+      <div class="profile-card"><div class="profile-label">사번</div><div class="profile-value t-m" id="pf-id">--</div></div>
+      <div class="profile-card"><div class="profile-label">성명</div><div class="profile-value" id="pf-name">--</div></div>
+      <div class="profile-card"><div class="profile-label">권한</div><div class="profile-value" id="pf-role">--</div></div>
+    </div>
+
+    <div class="profile-actions">
+      <button class="btn b-se" id="pf-inq-btn" onclick="closeMo('mo-profile');openMo('mo-inq')">관리자 문의</button>
+      <button class="btn b-dn" onclick="closeMo('mo-profile');doLogout()">로그아웃</button>
+    </div>
+
+    <div class="profile-block">
+      <div class="profile-block-title">비밀번호 수정</div>
+      <div class="f3">
+        <div class="fl"><label>현재 비밀번호</label><input class="fi" type="password" id="pf-pw-current" autocomplete="current-password"></div>
+        <div class="fl"><label>새 비밀번호</label><input class="fi" type="password" id="pf-pw-new" autocomplete="new-password"></div>
+        <div class="fl"><label>새 비밀번호 확인</label><input class="fi" type="password" id="pf-pw-confirm" autocomplete="new-password"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end"><button class="btn b-pr" onclick="submitProfilePw()">비밀번호 변경</button></div>
+    </div>
+
+    <div class="profile-block">
+      <div class="profile-block-title">본인 활동 로그</div>
+      <div class="profile-log" id="pf-log"></div>
+    </div>
+  </div>
+</div>
+
 <!-- 사용자 추가 -->
 <div class="mo" id="mo-adduser">
   <div class="md md-sm">
@@ -846,6 +892,8 @@
         <option value="UI개선">🎨 UI 개선</option>
         <option value="데이터구조">🗄️ 데이터 구조</option>
         <option value="보안">🔒 보안</option>
+        <option value="최적화">⚙️ 최적화</option>
+        <option value="문서화">📝 문서화</option>
       </select>
     </div>
     <div class="fl"><label>변경 내용</label><textarea class="ft" id="cl-body" placeholder="변경된 기능이나 수정 내용을 상세히 기술하세요" style="min-height:80px"></textarea></div>
@@ -1039,12 +1087,10 @@
 <div class="tst" id="tst"><div id="tst-i"></div><div id="tst-m" style="font-size:13px"></div></div>
 
 
-<!-- ===== 외부 라이브러리: XLSX (엑셀 입출력) — 앱 스크립트보다 먼저 ===== -->
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-
 <!-- ===== 분리된 JS (원본 등장 순서 = 로드 순서, 전역 함수 공유, defer로 순서 보장) ===== -->
 <!-- 계정 정의: data.js 보다 먼저 로드되어야 함 -->
 <script defer src="js/config.accounts.js"></script>
+<script defer src="js/accounts.js"></script>
 <script defer src="js/data.js"></script>
 <script defer src="js/auth.js"></script>
 <script defer src="js/navigation.js"></script>
@@ -1062,8 +1108,12 @@
 <script defer src="js/admin.js"></script>
 <script defer src="js/inquiry.js"></script>
 <script defer src="js/modal-helpers.js"></script>
+<script defer src="js/profile.js"></script>
+<script defer src="js/mobile-nav.js"></script>
 <script defer src="js/excel.js"></script>
 <!-- 영속 저장: 모든 데이터 정의 이후 가장 마지막에 로드 -->
 <script defer src="js/persistence.js"></script>
+<!-- ===== 외부 라이브러리: XLSX (엑셀 입출력) — 앱 초기 구동을 막지 않도록 비동기 로드 ===== -->
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </body>
 </html>

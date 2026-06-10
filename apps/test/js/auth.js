@@ -7,10 +7,11 @@ function doLogin(){
   const id=document.getElementById('inp-id').value.trim().toUpperCase();
   const pw=document.getElementById('inp-pw').value;
   const err=document.getElementById('l-err');
-  if(USERS[id]&&USERS[id].pw===pw){
-    CU={id,...USERS[id]};
+  const user=getUser(id);
+  if(authenticateUser(id,pw)&&user){
+    CU={id,...user};
     loginTimes[id]=new Date().toLocaleString('ko-KR');
-    logActivity(id,USERS[id].name,'LOGIN',`로그인`);
+    logActivity(id,user.name,'LOGIN',`로그인`);
     err.style.display='none';
     document.getElementById('ls').style.opacity='0';
     setTimeout(()=>{
@@ -38,7 +39,7 @@ function initApp(){
   document.getElementById('sb-ui').textContent=CU.id;
 
   // 최신 버전 표시 (changelogData에서 자동 계산)
-  const latestVer=[...changelogData].sort((a,b)=>b.date.localeCompare(a.date)||b.ver.localeCompare(a.ver))[0]?.ver||'';
+  const latestVer=latestChangelog()?.ver||'';
   if(latestVer){
     const vEl=document.getElementById('app-version');
     if(vEl)vEl.textContent=latestVer+' · 재고관리 시스템';
@@ -52,9 +53,11 @@ function initApp(){
     document.getElementById('admin-ns').style.display='block';
     document.getElementById('ni-admin').style.display='flex';
     document.getElementById('ni-changelog').style.display='flex';
+    document.getElementById('inq-btn').style.display='none';
   } else {
     document.getElementById('inq-btn').style.display='block';
     // 개발로그, 사용자관리 메뉴 숨김 (일반 사용자)
+    document.getElementById('admin-ns').style.display='none';
     document.getElementById('ni-admin').style.display='none';
     document.getElementById('ni-changelog').style.display='none';
   }
@@ -70,5 +73,5 @@ function initApp(){
   techCalWeekOffset=0;
   rendAll();
   go('dash');
+  if(typeof startMobileNav==='function')startMobileNav();
 }
-

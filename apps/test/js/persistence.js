@@ -6,7 +6,7 @@
  *
  *  로드 순서:
  *   - 이 스크립트는 index.html 에서 '가장 마지막' defer 스크립트입니다.
- *     따라서 data.js / config.accounts.js 등 모든 데이터가 정의된 뒤 실행됩니다.
+ *     따라서 data.js / accounts.js 등 모든 런타임 데이터가 정의된 뒤 실행됩니다.
  *
  *  안전 설계:
  *   - 복원 시 변수를 '재대입'하지 않고 배열/객체 '내용만 교체'합니다.
@@ -20,7 +20,7 @@
   // 저장 대상: 런타임에 실제로 변경되는 데이터만 (화면 상태값은 제외)
   function snapshot() {
     return {
-      USERS: USERS,
+      USERS: getUsers(),
       bom: bom,
       ioLogs: ioLogs,
       activityLog: activityLog,
@@ -69,7 +69,7 @@
     var d;
     try { d = JSON.parse(raw); } catch (e) { console.warn('[ROBOSTOCK] 저장 데이터 손상 — 무시'); return; }
 
-    fillObj(USERS, d.USERS);
+    if (d.USERS) replaceUsers(d.USERS);
     fillArr(bom, d.bom);
     fillArr(ioLogs, d.ioLogs);
     fillArr(activityLog, d.activityLog);
@@ -92,6 +92,10 @@
   window.resetRobostock = function () {
     try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
     location.reload();
+  };
+  window.confirmResetRobostock = function () {
+    if (!window.confirm('저장된 브라우저 데이터를 초기화하고 새로고침할까요?\n계정/입력 데이터가 현재 브라우저에서 초기 상태로 돌아갑니다.')) return;
+    window.resetRobostock();
   };
 
   // ── 1) 시작 시 복원 ─────────────────────────────

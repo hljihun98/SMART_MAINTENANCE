@@ -13,6 +13,6 @@
  */
 let USERS = {
   'R00066': { pw: 'wlgns12!@', role: 'admin', name: '김관리' },
-  'R00000': { pw: 'xptmxm12!@', role: 'user',  name: '이사용' },
+  'R00065': { pw: 'xptmxm12!@', role: 'user',  name: '이사용' },
   'R00001': { pw: 'xptmxm12!@', role: 'user',  name: '테스트' }
 };

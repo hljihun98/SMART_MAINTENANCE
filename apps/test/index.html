@@ -1,1 +1,1069 @@
+<!DOCTYPE html>
+<html lang="ko">
+<!--
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  ROBOSTOCK — AI 개발 로그 (AI DEVELOPMENT LOG)                              ║
+║  이 블록은 AI가 파일을 열 때 자동으로 읽어 컨텍스트를 파악합니다.           ║
+║  새로운 AI 세션에서 작업 시 반드시 이 블록을 먼저 확인하세요.               ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  PROJECT   : ROBOSTOCK 로봇 제작 재고관리 시스템                             ║
+║  VERSION   : V8.4 (2026-04-30)                                               ║
+║  VERSION FORMAT: V{작업참여 누적일수}.{당일수정횟수}                         ║
+║    작업일: 1일=4/23, 2일=4/24, 3일=4/25, 4일=4/26, 5일=4/27, 6일=4/28, 7일=4/29║
+║    작업일: 1일=4/23, 2일=4/24, 3일=4/25, 4일=4/26, 5일=4/27, 6일=4/28      ║
+║    예: V6.3 = 6번째 작업일(4/28)의 세번째 변경                               ║
+║  STACK     : 단일 HTML 파일 · 순수 JS · 외부 의존성 없음 (XLSX.js 제외)      ║
+║  LOGIN     : R00066 / wlgns12!@ → 관리자(김관리)                             ║
+║              R00065 / ehdgur12!@ → 일반사용자(이사용)                        ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  ROBOTS    : PARKIE(주차로봇) · CARRIE(물류로봇) · GOALIE(순찰로봇)          ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  KEY DATA STRUCTURES                                                         ║
+║  ─────────────────────────────────────────────────────────────────────────  ║
+║  bom[]          : {partNo,name,robot,unit,stock,minStock,price,imgs[],       ║
+║                    perUnit,spec,level(0~6),rev,parentPartNo}                 ║
+║  ioLogs[]       : {ts,type(IN/OUT),robot,partNo,partName,qty,unit,memo,      ║
+║                    status,issue,userId,userName,photos[]}                    ║
+║  laborModules{} : {PARKIE:[{name,tasks:[{name,note,hours,workers}]}],…}      ║
+║  laborSettings  : {hpd,wk,startDate}                                        ║
+║  robotGoals{}   : {PARKIE,CARRIE,GOALIE}  ← 목표 대수 (달력과 무관)         ║
+║  asmEntries{}   : {PARKIE:{from,to},…}    ← 호기별 제작 범위 (공수산정달력) ║
+║  technicians[]  : {id,name,userId,skill,color}                               ║
+║  techBookings[] : {id,techId,date,startSlot,endSlot,task,log,userId,…}      ║
+║  delayLogs[]    : {id,techId,date,type,title,body,hours,userId,…}            ║
+║  activityLog[]  : {ts,userId,userName,type,detail}                           ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  PAGES                                                                       ║
+║  pg-dash     : 대시보드 (배너·로봇현황·목표대수·달력·알림·최근입출고)       ║
+║  pg-bom      : BOM 관리 (레벨트리·parentPartNo 계층·상세모달)               ║
+║  pg-io       : 입출고 (입고/출고 모달·직접입력·신규부품 일괄등록)           ║
+║  pg-logs     : 입출고 로그                                                   ║
+║  pg-labor    : 공수 산정 (모듈관리·호기일정·역산달력·계획vs실제)            ║
+║  pg-tech     : 작업 인원 일정관리 (월간캘린더·30분드래그·지연사유)           ║
+║  pg-r-*      : 로봇별 현황 (PARKIE/CARRIE/GOALIE)                          ║
+║  pg-admin    : 사용자 관리 (관리자 전용·활동로그)                           ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  IMPORTANT RULES FOR AI                                                      ║
+║  1. stock(재고) 직접 수정 불가 → 입출고(ioLogs)로만 변경                    ║
+║  2. pg-admin, pg-changelog → 관리자(role==='admin')만 접근·표시             ║
+║  3. 작업 인원 삭제 → 관리자만 가능 (deleteTech 함수, CU.role 체크)          ║
+║  4. 달력(rendCalendar) → robotGoals 무관, 공수산정(laborSettings)만 참조    ║
+║  5. asmCalDblClick → 패널에서 ①로봇선택 ②호기범위 ③납기일 순서로 역산      ║
+║  6. 드래그 예약 → startDrag2/moveDrag2/endDrag2 (data-* 속성 기반)          ║
+║  7. BOM parentPartNo → 상위부품 지정, flattenTree()로 트리 순서 렌더링       ║
+║  8. 작업 슬롯: WORK_START_H=7, WORK_SLOTS=22 (07:00~18:00, 30분×22슬롯)    ║
+║  9. 버전은 changelogData 배열 최신 ver 값에서 자동 계산 (하드코딩 금지)     ║
+║  10. 새 기능 추가/버그수정 시 changelogData에 항목 추가 필수                ║
+║  11. 테크니션(technician) → UI 표시는 "작업 인원"으로 통일                  ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  CHANGELOG                                                                   ║
+║  ─────────────────────────────────────────────────────────────────────────  ║
+║  [2026-04-23] v1.0  초기 생성: 로그인·대시보드·BOM·입출고 기본 구조        ║
+║  [2026-04-23] v1.1  BOM 이미지 드래그&드롭·입출고 모달·로봇별현황          ║
+║  [2026-04-23] v1.2  공수산정 기본 구조·모듈관리·작업시간 계산               ║
+║  [2026-04-23] v1.3  작업 인원 일정관리 초기 버전 (주간 시간표)               ║
+║  [2026-04-24] v2.0  공수산정 달력 추가·납기역산 기능                        ║
+║  [2026-04-24] v2.1  BOM Level 0~6 + Rev. 컬럼 추가                         ║
+║  [2026-04-24] v2.2  재고부족알림 탭 필터·BOM 탭 순서 PARKIE 기본            ║
+║  [2026-04-24] v2.3  신규부품 일괄 엑셀 붙이기·이상여부 라디오 입고          ║
+║  [2026-04-25] v3.0  테크니션 월간캘린더 + 30분드래그 타임그리드             ║
+║  [2026-04-25] v3.1  사용자관리 관리자 전용 접근 제한                        ║
+║  [2026-04-25] v3.2  BOM stock 직접수정 차단·updPart 활동로그                ║
+║  [2026-04-25] v3.3  공수산정 달력 더블클릭 역산 (날짜파싱 버그 수정)        ║
+║  [2026-04-26] v3.4  테크니션 드래그 함수 재작성(data-* 속성 기반)           ║
+║  [2026-04-26] v3.5  예약 더블클릭 취소·테크니션 삭제 관리자 전용            ║
+║  [2026-04-26] v3.6  월간달력 날짜범위 드래그→타임그리드 일괄예약            ║
+║  [2026-04-27] v4.0  BOM parentPartNo 계층 구조·flattenTree 렌더링           ║
+║  [2026-04-27] v4.1  공수산정 호기 범위 입력(from~to)·달력 상세태그          ║
+║  [2026-04-27] v4.2  BOM 상세모달 계층패널·상위부품 변경 모달                ║
+║  [2026-04-27] v4.3  rendBOMHierarchy 카드 클릭이동 제거·정보전용            ║
+║  [2026-04-28] v4.4  대시보드 입출고버튼 제거·로봇현황카드 2번째 위치        ║
+║  [2026-04-28] v4.5  달력 "로봇제작일정" 클릭→공수산정 이동                 ║
+║  [2026-04-28] v4.6  BOM 레벨열 7개→단일Lv컬럼+들여쓰기 압축                ║
+║  [2026-04-28] v4.7  계층패널 카드 클릭이동 제거                             ║
+║  [2026-04-28] v4.8  AI 개발로그 블록 삽입·앱 내 CHANGELOG 뷰어 추가        ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 
+  AI_CONTEXT_END — 이 줄 이후는 일반 HTML입니다.
+-->
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROBOSTOCK</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+<!-- ===== 분리된 CSS (원본 <style> 순서 그대로 로드 → 캐스케이드 보존) ===== -->
+<link rel="stylesheet" href="css/reset.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/pages.css">
+</head>
+<body>
+
+<!-- ══════════ LOGIN ══════════ -->
+<div id="ls">
+  <div class="lw">
+    <div class="ll">
+      <div>
+        <div class="ll-t">ROBO<br>STOCK</div>
+        <div class="ll-s">Robot Inventory Management</div>
+        <div class="ll-rl">
+          <div class="ll-ri"><div class="ll-rd" style="background:var(--pk)"></div><div><div class="ll-rn">PARKIE</div><div class="ll-rs">주차로봇</div></div></div>
+          <div class="ll-ri"><div class="ll-rd" style="background:var(--ca)"></div><div><div class="ll-rn">CARRIE</div><div class="ll-rs">물류로봇</div></div></div>
+          <div class="ll-ri"><div class="ll-rd" style="background:var(--go)"></div><div><div class="ll-rn">GOALIE</div><div class="ll-rs">순찰로봇</div></div></div>
+        </div>
+      </div>
+      <div class="ll-f">© 2026 ROBOSTOCK <span id="footer-version"></span></div>
+    </div>
+    <div class="lr">
+      <div class="lr-t">로그인</div>
+      <div class="lr-s">사번과 비밀번호를 입력하세요</div>
+      <div class="lf"><label>사번</label><input type="text" id="inp-id" placeholder="R00000" autocomplete="off"></div>
+      <div class="lf"><label>비밀번호</label><input type="password" id="inp-pw" placeholder="••••••••"></div>
+      <button class="l-btn" onclick="doLogin()">접속하기 →</button>
+      <div class="l-err" id="l-err">사번 또는 비밀번호가 올바르지 않습니다.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ APP ══════════ -->
+<div id="app">
+  <nav class="sb">
+    <div class="sb-logo" onclick="go('dash')" style="cursor:pointer" title="대시보드로 이동"><div class="sb-lt">ROBOSTOCK</div><div class="sb-ls" id="app-version">재고관리 시스템</div></div>
+    <div class="sb-user"><div class="sb-av" id="sb-av">--</div><div><div class="sb-un" id="sb-un">--</div><div class="sb-ui" id="sb-ui">--</div></div></div>
+    <div class="sb-nav">
+      <div class="ns">메뉴</div>
+      <div class="ni act" data-pg="dash" onclick="go('dash',this)"><svg viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1.5" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1.5" fill="currentColor" opacity=".4"/><rect x="1" y="9" width="6" height="6" rx="1.5" fill="currentColor" opacity=".4"/><rect x="9" y="9" width="6" height="6" rx="1.5" fill="currentColor"/></svg>대시보드</div>
+      <div class="ni" data-pg="bom" onclick="go('bom',this)"><svg viewBox="0 0 16 16" fill="none"><path d="M2 3h12M2 7h8M2 11h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>BOM 관리</div>
+      <div class="ni" data-pg="io" onclick="go('io',this)"><svg viewBox="0 0 16 16" fill="none"><path d="M8 2v12M3 7l5-5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>입출고</div>
+      <div class="ni" data-pg="logs" onclick="go('logs',this)"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M8 5v3.5L10.5 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>입출고 로그</div>
+      <div class="ni" data-pg="labor" onclick="go('labor',this)"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M5 7h6M5 10h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>공수 산정</div>
+      <div class="ni" data-pg="tech" onclick="go('tech',this)"><svg viewBox="0 0 16 16" fill="none"><circle cx="5" cy="5" r="2.5" stroke="currentColor" stroke-width="1.5"/><circle cx="11" cy="5" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M1 13c0-2.2 1.8-4 4-4M11 9c2.2 0 4 1.8 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8 13v-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>작업 인원 일정</div>
+      <div class="ns">로봇별 현황</div>
+      <div class="ni ni-sub pk" id="ni-rp" data-pg="r-parkie" onclick="go('r-parkie',this)"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg><span>PARKIE</span></div>
+      <div class="ni ni-sub ca" id="ni-rc" data-pg="r-carrie" onclick="go('r-carrie',this)"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg><span>CARRIE</span></div>
+      <div class="ni ni-sub go" id="ni-rg" data-pg="r-goalie" onclick="go('r-goalie',this)"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg><span>GOALIE</span></div>
+      <div class="ns" id="admin-ns" style="display:none">관리자</div>
+      <div class="ni" id="ni-changelog" data-pg="changelog" style="display:none" onclick="go('changelog',this)"><svg viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h7M3 12h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>개발 로그</div>
+      <div class="ni" id="ni-admin" data-pg="admin" style="display:none" onclick="go('admin',this)"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="5.5" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M2 13c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>사용자 관리<span class="notice-dot" id="inq-dot" style="display:none"></span></div>
+    </div>
+    <div class="sb-ft">
+      <button class="inq-btn" id="inq-btn" onclick="openMo('mo-inq')">📨 관리자 문의</button>
+      <button class="lo-btn" onclick="doLogout()">로그아웃</button>
+    </div>
+  </nav>
+
+  <main class="mc">
+
+    <!-- ═══ DASHBOARD ═══ -->
+    <div class="pg act" id="pg-dash">
+      <div class="ph">
+        <div><div class="pt">대시보드</div><div class="ps">로봇 제작 재고 현황 요약</div></div>
+      </div>
+      <!-- ① 오늘의 작업 목표 배너 -->
+      <div class="dg-banner" id="dg-banner">
+        <div class="dg-top">
+          <div><div class="dg-title">📅 오늘의 작업 목표</div><div class="dg-sub" id="dg-sub">공수 산정 메뉴에서 작업 정보를 설정하세요</div></div>
+        </div>
+        <div class="dg-robots" id="dg-robots"></div>
+      </div>
+      <!-- ② 로봇별 현황 카드 (로봇별 현황 > 대시보드에 표시 토글로 제어) -->
+      <div id="dash-robot-sections"></div>
+      <!-- ③ 목표 대수 + 달력 -->
+      <div id="dash-goal-section">
+        <div class="sec"><div class="sh"><div class="st">🎯 목표 대수 — 필요 부품 재고 파악</div></div>
+          <div style="padding:14px"><div class="rg-grid" id="rg-grid"></div></div>
+        </div>
+        <div class="cal-wrap">
+          <div class="cal-head">
+            <div class="cal-nav"><button class="cal-nb" onclick="calPrev()">‹</button><div class="cal-title" id="cal-title"></div><button class="cal-nb" onclick="calNext()">›</button></div>
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+              <!-- 클릭하면 공수 산정 페이지로 이동 -->
+              <span onclick="go('labor')" style="font-size:12px;font-weight:600;color:var(--ac);cursor:pointer;text-decoration:underline;text-underline-offset:3px" title="공수 산정 페이지로 이동">🏭 로봇 제작 일정 (공수산정 역산) →</span>
+              <span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--t2)"><span style="width:10px;height:10px;background:var(--gnl);border:1px solid var(--gn);border-radius:3px;display:inline-block"></span>호기별 완료 예상일</span>
+              <span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--t2)"><span style="width:10px;height:10px;background:var(--acl);border:1px solid var(--ac);border-radius:3px;display:inline-block"></span>오늘</span>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--t2);margin-bottom:10px;padding:8px 10px;background:var(--s2);border-radius:8px">
+            공수 산정 메뉴에서 <b>작업 시간·인원·시작일·목표 대수</b>를 설정하면 호기별 완료 예상일이 달력에 자동 표시됩니다.
+          </div>
+          <div class="cal-grid" id="cal-grid"></div>
+          <div id="cal-tooltip" style="display:none;background:var(--tx);color:#fff;border-radius:8px;padding:8px 12px;font-size:12px;position:absolute;z-index:200;pointer-events:none;max-width:220px;line-height:1.6"></div>
+        </div>
+      </div>
+      <!-- ④ 재고 부족 알림 -->
+      <div class="sec">
+        <div class="sh">
+          <div class="st">⚠️ 재고 부족 알림</div>
+          <div class="tabs" style="margin-bottom:0">
+            <div class="tab act" onclick="setAlertTab('PARKIE',this)">PARKIE</div>
+            <div class="tab" onclick="setAlertTab('CARRIE',this)">CARRIE</div>
+            <div class="tab" onclick="setAlertTab('GOALIE',this)">GOALIE</div>
+            <div class="tab" onclick="setAlertTab('ALL',this)">전체</div>
+          </div>
+        </div>
+        <table><thead><tr><th>로봇</th><th>Part Number</th><th>부품명</th><th>현재</th><th>최소</th><th>상태</th></tr></thead><tbody id="tb-alert"></tbody></table>
+      </div>
+      <!-- ⑤ 최근 입출고 내역 -->
+      <div class="sec"><div class="sh"><div class="st">최근 입출고 내역</div></div>
+        <table><thead><tr><th>일시</th><th>구분</th><th>로봇</th><th>부품명</th><th>수량</th><th>담당자</th><th>메모</th><th>사진</th></tr></thead><tbody id="tb-recent"></tbody></table>
+      </div>
+    </div>
+
+    <!-- ═══ BOM ═══ -->
+    <div class="pg" id="pg-bom">
+      <div class="ph">
+        <div><div class="pt">BOM 관리</div><div class="ps">Bill of Materials — 부품 목록</div></div>
+        <div class="bg">
+          <button class="btn b-se" onclick="dlBOM()">↓ 엑셀</button>
+          <button class="btn b-pr" onclick="document.getElementById('bom-fi').click()">↑ 업로드</button>
+          <button class="btn b-su" onclick="openMo('mo-addpart')">+ 부품 추가</button>
+          <input type="file" id="bom-fi" accept=".xlsx,.xls" onchange="uplBOM(event)">
+        </div>
+      </div>
+      <div class="tabs">
+        <div class="tab act" onclick="filtBOM('PARKIE',this)">PARKIE</div>
+        <div class="tab" onclick="filtBOM('CARRIE',this)">CARRIE</div>
+        <div class="tab" onclick="filtBOM('GOALIE',this)">GOALIE</div>
+        <div class="tab" onclick="filtBOM('ALL',this)">전체</div>
+      </div>
+      <div class="sec">
+        <table style="table-layout:auto"><thead><tr>
+          <th style="width:40px;text-align:center">Lv</th>
+          <th>Part Number</th>
+          <th style="width:44px;text-align:center">Rev.</th>
+          <th>Part Name</th>
+          <th>로봇</th><th>단위</th><th>재고</th><th>최소</th><th>단가</th><th>상태</th><th>액션</th>
+        </tr></thead>
+        <tbody id="tb-bom"></tbody></table>
+      </div>
+    </div>
+
+    <!-- ═══ INOUT ═══ -->
+    <div class="pg" id="pg-io">
+      <div class="ph">
+        <div><div class="pt">입출고 처리</div><div class="ps">재고 입출고 등록 및 업로드</div></div>
+        <div class="bg"><button class="btn b-se" onclick="dlIOT()">↓ 엑셀 양식</button><button class="btn b-su" onclick="openMo('mo-in')">+ 입고</button><button class="btn b-dn" onclick="openMo('mo-out')">- 출고</button></div>
+      </div>
+      <div class="sec"><div class="sh"><div class="st">📎 엑셀 파일 업로드</div></div>
+        <div style="padding:16px">
+          <div class="uz" id="io-dz" onclick="document.getElementById('io-fi').click()" ondragover="dov(event,'io-dz')" ondragleave="dlv('io-dz')" ondrop="ddrop(event)">
+            <div style="font-size:22px;margin-bottom:6px">📋</div>
+            <div style="font-size:13px;color:var(--t2)">엑셀 파일을 드래그하거나 <span style="color:var(--ac);font-weight:500">클릭하여 업로드</span></div>
+            <div class="t-sm t-mu" style="margin-top:4px">.xlsx, .xls 지원</div>
+          </div>
+          <input type="file" id="io-fi" accept=".xlsx,.xls" onchange="uplIO(event)">
+          <div id="io-fp" style="display:none" class="fp">📄 <span id="io-fn"></span></div>
+        </div>
+      </div>
+      <div class="sec"><div class="sh"><div class="st">✏️ 직접 입력</div><div class="bg"><button class="btn b-se b-sm" onclick="addITrow()">+ 행 추가</button><button class="btn b-pr b-sm" onclick="submitIT()">일괄 적용</button><button class="btn b-dn b-sm" onclick="clearIT()">초기화</button></div></div>
+        <div style="padding:10px">
+          <div class="it-wrap"><table class="it-table" id="it-table">
+            <thead><tr><th>구분</th><th>Part Number</th><th>부품명 (자동/수동)</th><th>로봇</th><th>수량</th><th>이상여부</th><th>메모</th></tr></thead>
+            <tbody id="it-tbody"></tbody>
+          </table></div>
+          <div style="padding:8px;text-align:center"><button class="btn b-se b-sm" onclick="addITrow()" style="width:100%">+ 행 추가</button></div>
+        </div>
+      </div>
+      <!-- 신규 부품 등록 -->
+      <div class="sec"><div class="sh"><div class="st">🆕 신규 부품 등록</div><div class="t-sm t-mu">직접 입력에서 기존 BOM에 없는 Part Number를 입력 시 아래에 자동으로 표시됩니다</div></div>
+        <div style="padding:12px" id="new-part-preview"><div class="t-mu t-sm" style="text-align:center;padding:10px">신규 등록 대상 부품이 없습니다</div></div>
+        <!-- 신규 부품 일괄 엑셀 붙이기 -->
+        <div style="padding:0 12px 12px">
+          <div style="font-size:11px;color:var(--t2);font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px">
+            📋 신규 부품 일괄 등록 (엑셀 복사 붙이기)
+            <span class="t-sm t-mu" style="font-weight:400">헤더: Part Number | 부품명 | 로봇 | 단위 | 최소재고 | 단가</span>
+          </div>
+          <div class="it-wrap"><table class="it-table" id="newpart-table">
+            <thead><tr><th>Part Number</th><th>부품명</th><th>로봇</th><th>단위</th><th>레벨</th><th>최소재고</th><th>단가(원)</th></tr></thead>
+            <tbody id="newpart-tbody"></tbody>
+          </table></div>
+          <div style="padding:8px;display:flex;gap:7px"><button class="btn b-se b-sm" onclick="addNProw()" style="flex:1">+ 행 추가</button><button class="btn b-pr b-sm" onclick="submitNP()">일괄 BOM 등록</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ LOGS ═══ -->
+    <div class="pg" id="pg-logs">
+      <div class="ph"><div><div class="pt">입출고 로그</div><div class="ps">접속자별 입출고 기록</div></div><button class="btn b-se" onclick="dlLogs()">↓ 다운로드</button></div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <select class="fi" style="width:120px" id="lf-t" onchange="rendLogs()"><option value="">전체 구분</option><option value="IN">입고</option><option value="OUT">출고</option></select>
+        <select class="fi" style="width:120px" id="lf-r" onchange="rendLogs()"><option value="">전체 로봇</option><option value="PARKIE">PARKIE</option><option value="CARRIE">CARRIE</option><option value="GOALIE">GOALIE</option></select>
+        <input class="fi" style="max-width:160px" type="date" id="lf-d" onchange="rendLogs()">
+      </div>
+      <div class="sec"><table><thead><tr><th>일시</th><th>구분</th><th>로봇</th><th>Part Number</th><th>부품명</th><th>수량</th><th>담당자</th><th>사번</th><th>메모</th><th>사진</th></tr></thead><tbody id="tb-logs"></tbody></table></div>
+    </div>
+
+    <!-- ═══ LABOR ═══ -->
+    <div class="pg" id="pg-labor">
+      <div class="ph">
+        <div><div class="pt">공수 산정</div><div class="ps">로봇·모듈별 작업 공수 및 완료 예상일</div></div>
+        <div class="bg">
+          <button class="btn b-su" onclick="openMo('mo-addlabor')">+ 작업 항목</button>
+          <button class="btn b-se" onclick="openMo('mo-addmodule')">+ 모듈 추가</button>
+        </div>
+      </div>
+      <!-- settings: compact card row -->
+      <!-- 공수 설정 카드 5개 — 중립 색상 기반, 파란색 과다 탈피 -->
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px" id="lb-cfg-cards">
+        <!-- 하루 작업시간 -->
+        <div style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;box-shadow:var(--sh)">
+          <div style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;font-family:var(--fm);margin-bottom:8px;display:flex;align-items:center;gap:5px">⏱️ 하루 작업시간</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input class="fi" style="flex:1;min-width:0;font-size:16px;font-weight:700;font-family:var(--fd);text-align:center" type="number" id="l-hpd" value="8" min="1" max="24" oninput="recalcLabor()">
+            <span style="font-size:13px;color:var(--t2);font-weight:600">h</span>
+          </div>
+        </div>
+        <!-- 작업 인원 수 -->
+        <div style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;box-shadow:var(--sh)">
+          <div style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;font-family:var(--fm);margin-bottom:8px;display:flex;align-items:center;gap:5px">👤 작업 인원</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input class="fi" style="flex:1;min-width:0;font-size:16px;font-weight:700;font-family:var(--fd);text-align:center" type="number" id="l-wk" value="3" min="1" oninput="recalcLabor()">
+            <span style="font-size:13px;color:var(--t2);font-weight:600">명</span>
+          </div>
+        </div>
+        <!-- 작업 시작일 -->
+        <div style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;box-shadow:var(--sh)">
+          <div style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;font-family:var(--fm);margin-bottom:8px;display:flex;align-items:center;gap:5px">📅 작업 시작일</div>
+          <input class="fi" style="width:100%;font-size:12px" type="date" id="l-sd" oninput="recalcLabor()">
+        </div>
+        <!-- 목표 대수 대시보드 -->
+        <div style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;box-shadow:var(--sh)">
+          <div style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;font-family:var(--fm);margin-bottom:8px">📊 목표대수 표시</div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" id="tog-goal-pk" checked onchange="rendDash()" style="accent-color:var(--pk)">
+              <span style="font-size:12px;font-weight:600;color:var(--pk)">● PARKIE</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" id="tog-goal-ca" checked onchange="rendDash()" style="accent-color:var(--ca)">
+              <span style="font-size:12px;font-weight:600;color:var(--ca)">● CARRIE</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" id="tog-goal-go" checked onchange="rendDash()" style="accent-color:var(--go)">
+              <span style="font-size:12px;font-weight:600;color:var(--go)">● GOALIE</span>
+            </label>
+          </div>
+        </div>
+        <!-- 작업목표 배너 -->
+        <div style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;box-shadow:var(--sh)">
+          <div style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;font-family:var(--fm);margin-bottom:8px">🎯 작업목표 배너</div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" id="tog-labor-pk" checked onchange="rendDash()" style="accent-color:var(--pk)">
+              <span style="font-size:12px;font-weight:600;color:var(--pk)">● PARKIE</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" id="tog-labor-ca" onchange="rendDash()" style="accent-color:var(--ca)">
+              <span style="font-size:12px;font-weight:600;color:var(--ca)">● CARRIE</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" id="tog-labor-go" onchange="rendDash()" style="accent-color:var(--go)">
+              <span style="font-size:12px;font-weight:600;color:var(--go)">● GOALIE</span>
+            </label>
+          </div>
+        </div>
+      </div>
+      <!-- robot selector -->
+      <div class="lb-robot-sel" id="lb-robot-sel"></div>
+      <!-- module cards for selected robot -->
+      <div id="lb-modules"></div>
+      <!-- 조립 완료 예상 - 통합 호기별 -->
+      <div class="lb-summary-table sec">
+        <div class="sh">
+          <div class="st">🏭 호기별 조립 완료 예상</div>
+          <div class="bg">
+            <div style="font-size:11px;color:var(--t2)">완료:</div>
+            <span style="font-size:11px;color:var(--pk);font-weight:600">PK</span>
+            <input type="number" id="lb-done-pk" min="0" max="20" value="0" style="width:50px;background:var(--s2);border:1.5px solid var(--bd);border-radius:6px;padding:3px 6px;font-size:12px;font-family:var(--fm);outline:none;text-align:center" oninput="recalcLabor()">
+            <span style="font-size:11px;color:var(--ca);font-weight:600">CA</span>
+            <input type="number" id="lb-done-ca" min="0" max="20" value="0" style="width:50px;background:var(--s2);border:1.5px solid var(--bd);border-radius:6px;padding:3px 6px;font-size:12px;font-family:var(--fm);outline:none;text-align:center" oninput="recalcLabor()">
+            <span style="font-size:11px;color:var(--go);font-weight:600">GO</span>
+            <input type="number" id="lb-done-go" min="0" max="20" value="0" style="width:50px;background:var(--s2);border:1.5px solid var(--bd);border-radius:6px;padding:3px 6px;font-size:12px;font-family:var(--fm);outline:none;text-align:center" oninput="recalcLabor()">
+          </div>
+        </div>
+        <div id="lb-unit-tables" style="overflow-x:auto"></div>
+      </div>
+      <!-- 실제 공수 기록 (계획 vs 실제) -->
+      <div class="sec">
+        <div class="sh"><div class="st">📊 계획 vs 실제 공수 기록</div><button class="btn b-su b-sm" onclick="openMo('mo-actual')">+ 실제 기록 추가</button></div>
+        <table><thead><tr><th>로봇</th><th>모듈</th><th>작업명</th><th>계획(h)</th><th>실제(h)</th><th>차이</th><th>기록일</th><th>담당자</th></tr></thead><tbody id="tb-actual"></tbody></table>
+      </div>
+      <!-- assembly calendar -->
+      <div class="cal-wrap" id="asm-cal-wrap">
+        <!-- 납기 역산 카드 (2열: ① 납기 역산 설정 / ② 역산 결과) -->
+        <div style="background:var(--s2);border-radius:12px;padding:18px 20px;margin-bottom:16px;border:1px solid var(--bd)">
+          <div style="font-size:14px;font-weight:700;color:var(--tx);margin-bottom:14px">📅 납기 역산</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+
+            <!-- ① 납기 역산 설정 (로봇 선택 + 호기 범위 + 달력 반영) -->
+            <div style="background:var(--aml);border:1.5px solid #FDE68A;border-radius:10px;padding:16px 18px">
+              <div style="font-size:11px;font-weight:700;color:var(--am-dark);letter-spacing:.5px;margin-bottom:12px;text-transform:uppercase">① 납기 역산 설정</div>
+              <div style="font-size:11px;color:var(--am-dark);margin-bottom:12px;line-height:1.5">달력에서 납기일을 더블클릭하면 아래 선택 기준으로 착수일이 역산됩니다</div>
+
+              <!-- 로봇 선택 (단일 선택만 가능) -->
+              <div style="font-size:11px;font-weight:600;color:var(--am-dark);margin-bottom:7px">로봇 선택 <span style="font-weight:400;opacity:.7">(한 종류만 선택)</span></div>
+              <div style="display:flex;gap:7px;margin-bottom:16px">
+                <button id="arb-pk" onclick="setRevRobot('PARKIE')" style="padding:6px 14px;border-radius:7px;border:2px solid var(--pk);background:var(--pk);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--fn)">PARKIE</button>
+                <button id="arb-ca" onclick="setRevRobot('CARRIE')" style="padding:6px 14px;border-radius:7px;border:2px solid var(--bd);background:var(--sf);color:var(--t2);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--fn)">CARRIE</button>
+                <button id="arb-go" onclick="setRevRobot('GOALIE')" style="padding:6px 14px;border-radius:7px;border:2px solid var(--bd);background:var(--sf);color:var(--t2);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--fn)">GOALIE</button>
+              </div>
+
+              <!-- 호기 범위 (3 로봇 각각) -->
+              <div style="font-size:11px;font-weight:600;color:var(--am-dark);margin-bottom:8px">호기 지정 <span style="font-weight:400;opacity:.7">(제작 예정 호기 번호)</span></div>
+              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+                <div style="display:flex;align-items:center;gap:7px">
+                  <span style="font-size:11px;font-weight:700;color:var(--pk);width:52px">PARKIE</span>
+                  <input type="number" id="asc-pk-from" min="1" max="999" placeholder="시작" style="width:54px;background:#fff;border:1.5px solid #FDE68A;border-radius:6px;padding:4px 7px;font-size:12px;font-family:var(--fm);outline:none;text-align:center" oninput="updAsmEntry('PARKIE');syncRevUnit();applyAsmEntries(false)">
+                  <span style="color:var(--am-dark)">~</span>
+                  <input type="number" id="asc-pk-to" min="1" max="999" placeholder="끝" style="width:54px;background:#fff;border:1.5px solid #FDE68A;border-radius:6px;padding:4px 7px;font-size:12px;font-family:var(--fm);outline:none;text-align:center" oninput="updAsmEntry('PARKIE');syncRevUnit();applyAsmEntries(false)">
+                  <span style="font-size:11px;color:var(--am-dark)" id="asc-pk-label">5대</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:7px">
+                  <span style="font-size:11px;font-weight:700;color:var(--ca);width:52px">CARRIE</span>
+                  <input type="number" id="asc-ca-from" min="1" max="999" placeholder="시작" style="width:54px;background:#fff;border:1.5px solid #FDE68A;border-radius:6px;padding:4px 7px;font-size:12px;font-family:var(--fm);outline:none;text-align:center" oninput="updAsmEntry('CARRIE');syncRevUnit();applyAsmEntries(false)">
+                  <span style="color:var(--am-dark)">~</span>
+                  <input type="number" id="asc-ca-to" min="1" max="999" placeholder="끝" style="width:54px;background:#fff;border:1.5px solid #FDE68A;border-radius:6px;padding:4px 7px;font-size:12px;font-family:var(--fm);outline:none;text-align:center" oninput="updAsmEntry('CARRIE');syncRevUnit();applyAsmEntries(false)">
+                  <span style="font-size:11px;color:var(--am-dark)" id="asc-ca-label">미설정</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:7px">
+                  <span style="font-size:11px;font-weight:700;color:var(--go);width:52px">GOALIE</span>
+                  <input type="number" id="asc-go-from" min="1" max="999" placeholder="시작" style="width:54px;background:#fff;border:1.5px solid #FDE68A;border-radius:6px;padding:4px 7px;font-size:12px;font-family:var(--fm);outline:none;text-align:center" oninput="updAsmEntry('GOALIE');syncRevUnit();applyAsmEntries(false)">
+                  <span style="color:var(--am-dark)">~</span>
+                  <input type="number" id="asc-go-to" min="1" max="999" placeholder="끝" style="width:54px;background:#fff;border:1.5px solid #FDE68A;border-radius:6px;padding:4px 7px;font-size:12px;font-family:var(--fm);outline:none;text-align:center" oninput="updAsmEntry('GOALIE');syncRevUnit();applyAsmEntries(false)">
+                  <span style="font-size:11px;color:var(--am-dark)" id="asc-go-label">미설정</span>
+                </div>
+              </div>
+
+              <div style="display:flex;justify-content:flex-end">
+                <button class="btn b-se b-sm" onclick="clearAsmSelection()">초기화</button>
+              </div>
+              <div style="font-size:11px;color:var(--am-dark);margin-top:6px" id="asc-summary">미설정</div>
+              <div style="font-size:12px;font-weight:600;color:var(--am-dark);margin-top:10px;border-top:1px solid #FDE68A;padding-top:10px">📅 납기일: <span id="arp-date-label">미선택 — 아래 달력 더블클릭</span></div>
+        
+            </div>
+
+            <!-- ② 역산 결과 -->
+            <div style="background:var(--sf);border:1.5px solid var(--bd);border-radius:10px;padding:16px 18px">
+              <div style="font-size:11px;font-weight:700;color:var(--t2);letter-spacing:.5px;margin-bottom:12px;text-transform:uppercase">② 역산 결과</div>
+              <div id="arp-robots" style="min-height:80px">
+                <div style="font-size:12px;color:var(--t3);padding:12px 0">달력에서 납기일을 더블클릭하면 결과가 표시됩니다</div>
+              </div>
+              <div style="margin-top:14px">
+                <button class="btn b-wa" style="width:100%;font-size:13px;padding:9px" onclick="confirmReverseSchedule()">✅ 이 납기일로 일정 확정</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+        <!-- 역산 패널 (숨김) -->
+        <div id="asm-reverse-panel" style="display:none"></div>
+        <div class="cal-head">
+          <div class="cal-nav">
+            <button class="cal-nb" onclick="asmCalPrev()">‹</button>
+            <div class="cal-title" id="asm-cal-title" style="font-size:15px;font-weight:700"></div>
+            <button class="cal-nb" onclick="asmCalNext()">›</button>
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--t2)">
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:11px;height:11px;background:var(--pkl);border-radius:3px;display:inline-block"></span>PARKIE</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:11px;height:11px;background:var(--cal);border-radius:3px;display:inline-block"></span>CARRIE</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:11px;height:11px;background:var(--gol);border-radius:3px;display:inline-block"></span>GOALIE</span>
+            <span style="display:flex;align-items:center;gap:4px;color:var(--gn)">● 납품 예정</span>
+            <span style="color:var(--ac);font-weight:600">💡 날짜 더블클릭 → 납기 역산</span>
+          </div>
+        </div>
+        <div class="cal-grid" id="asm-cal-grid" style="font-size:12px"></div>
+      </div>
+    </div>
+
+    <!-- ═══ ROBOT DETAIL PAGES ═══ -->
+    <div class="pg" id="pg-r-parkie"><div id="rd-parkie"></div></div>
+    <div class="pg" id="pg-r-carrie"><div id="rd-carrie"></div></div>
+    <div class="pg" id="pg-r-goalie"><div id="rd-goalie"></div></div>
+
+    <!-- ═══ TECHNICIAN ═══ -->
+    <div class="pg" id="pg-tech">
+      <div class="ph">
+        <div><div class="pt">작업 인원 일정관리</div><div class="ps">월간 예약 보드 · 날짜 선택 후 드래그로 예약</div></div>
+        <div class="bg">
+          <button class="btn b-se" onclick="openMo('mo-tech-add')">+ 작업 인원 추가</button>
+          <button class="btn b-wa b-sm" onclick="openMo('mo-delay')">⚠️ 지연 사유</button>
+        </div>
+      </div>
+      <!-- 월간 캘린더 -->
+      <div class="sec" style="margin-bottom:14px">
+        <div class="sh">
+          <div style="display:flex;align-items:center;gap:10px">
+            <button class="cal-nb" onclick="techMonthPrev()">‹</button>
+            <div style="font-family:var(--fd);font-size:16px;font-weight:700" id="tech-month-title"></div>
+            <button class="cal-nb" onclick="techMonthNext()">›</button>
+          </div>
+          <div style="font-size:11px;color:var(--t2)">날짜를 먼저 선택한 뒤 아래 30분 보드에서 드래그 예약합니다.</div>
+        </div>
+        <div style="padding:14px">
+          <div id="tech-month-grid"></div>
+        </div>
+      </div>
+      <!-- 선택 날짜 드래그 예약 보드 -->
+      <div class="sec" id="tech-timegrid-wrap">
+        <div class="sh">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:16px">🗓️</span>
+            <div>
+              <div style="font-size:13px;font-weight:600" id="tech-selected-date-label">선택 날짜 30분 드래그 예약</div>
+              <div style="font-size:11px;color:var(--t2)" id="tech-selected-date-sub">날짜를 클릭하면 해당 일정을 볼 수 있습니다</div>
+            </div>
+          </div>
+          <div class="bg">
+            <input type="text" id="tech-book-task" class="fi" placeholder="예약 작업" style="width:150px;padding:5px 10px;font-size:12px">
+            <input type="text" id="tech-book-memo" class="fi" placeholder="작업 수행 메모" style="width:180px;padding:5px 10px;font-size:12px">
+            <button class="btn b-pr b-sm" onclick="submitDragBook()">드래그 예약 등록</button>
+            <button class="btn b-wa b-sm" onclick="openMo('mo-delay')">특이사항 기록</button>
+          </div>
+        </div>
+        <div style="overflow-x:auto;padding:0 0 12px 0">
+          <div id="tech-timegrid" style="min-width:900px"></div>
+        </div>
+        <div style="padding:8px 14px;font-size:11px;color:var(--t2);border-top:1px solid var(--bd)">같은 작업 인원 행에서 드래그하여 시간대를 선택합니다. 이미 예약된 구간은 초록색으로 잠깁니다.</div>
+      </div>
+      <!-- 지연 로그 -->
+      <div class="sec" style="margin-top:14px">
+        <div class="sh"><div class="st">⚠️ 제작 지연 사유 관리</div></div>
+        <table><thead><tr><th>날짜</th><th>작업 인원</th><th>지연 유형</th><th>제목</th><th>내용</th><th>영향(h)</th></tr></thead><tbody id="tb-delay"></tbody></table>
+      </div>
+    </div>
+
+    <!-- ═══ CHANGELOG ═══ -->
+    <div class="pg" id="pg-changelog">
+      <div class="ph">
+        <div><div class="pt">개발 로그</div><div class="ps">ROBOSTOCK 개발 히스토리 및 변경 내역</div></div>
+        <button class="btn b-pr b-sm" onclick="openMo('mo-add-changelog')">+ 변경사항 추가</button>
+      </div>
+      <!-- AI 안내 배너 -->
+      <div style="background:var(--acl);border:1px solid var(--ac);border-radius:10px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:flex-start;gap:12px">
+        <span style="font-size:20px;flex-shrink:0">🤖</span>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--ac);margin-bottom:4px">AI 자동 로그 안내</div>
+          <div style="font-size:12px;color:var(--t2);line-height:1.6">
+            이 파일을 Claude에게 업로드하면 상단 HTML 주석의 <code style="background:var(--s2);padding:1px 5px;border-radius:3px;font-family:var(--fm);font-size:11px">AI_CONTEXT</code> 블록을 자동으로 읽어 프로젝트 구조·규칙·변경내역을 파악합니다.<br>
+            새로운 작업 후 반드시 <b>"개발 로그에 이번 변경사항을 추가해줘"</b> 라고 요청하면 AI가 로그를 업데이트합니다.
+          </div>
+        </div>
+      </div>
+      <!-- 버전 요약 카드 -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px" id="cl-version-cards"></div>
+      <!-- 전체 로그 테이블 -->
+      <div class="sec">
+        <div class="sh"><div class="st">📋 전체 변경 내역</div>
+          <select class="fi" id="cl-filter-type" style="width:140px;padding:5px 9px;font-size:12px" onchange="rendChangelog()">
+            <option value="">전체 유형</option>
+            <option value="기능추가">기능 추가</option>
+            <option value="버그수정">버그 수정</option>
+            <option value="UI개선">UI 개선</option>
+            <option value="데이터구조">데이터 구조</option>
+            <option value="보안">보안</option>
+          </select>
+        </div>
+        <table><thead><tr><th style="width:110px">날짜</th><th style="width:70px">버전</th><th style="width:80px">유형</th><th>변경 내용</th><th style="width:80px">작성자</th></tr></thead>
+        <tbody id="tb-changelog"></tbody></table>
+      </div>
+    </div>
+
+    <!-- ═══ ADMIN ═══ -->
+    <div class="pg" id="pg-admin">
+      <div class="ph"><div><div class="pt">사용자 관리 <span class="a-badge">ADMIN</span></div><div class="ps">접속 계정 및 권한 관리</div></div><button class="btn b-pr" onclick="openMo('mo-adduser')">+ 사용자 추가</button></div>
+      <div class="sec"><table><thead><tr><th>사번</th><th>성명</th><th>권한</th><th>최근 접속</th><th>상태</th><th>액션</th></tr></thead><tbody id="tb-admin"></tbody></table></div>
+      <!-- 전체 사용자 활동 로그 -->
+      <div class="sec" style="margin-top:14px">
+        <div class="sh">
+          <div class="st">📋 전체 활동 로그</div>
+          <div class="bg">
+            <select class="fi" style="width:120px;padding:5px 9px;font-size:12px" id="al-filter-user" onchange="rendActivityLog()"><option value="">전체 사용자</option></select>
+            <select class="fi" style="width:130px;padding:5px 9px;font-size:12px" id="al-filter-type" onchange="rendActivityLog()">
+              <option value="">전체 유형</option>
+              <option value="LOGIN">🔑 로그인</option>
+              <option value="IN">📥 입고</option>
+              <option value="OUT">📤 출고</option>
+              <option value="BOM">📦 BOM</option>
+              <option value="LABOR">🏭 공수산정</option>
+              <option value="TECH">👤 작업인원</option>
+              <option value="DELAY">⚠️ 지연</option>
+              <option value="CHANGELOG">📝 개발로그</option>
+              <option value="INQ">📨 문의</option>
+            </select>
+            <input class="fi" type="date" id="al-filter-date" style="width:140px;padding:5px 9px;font-size:12px" onchange="rendActivityLog()" title="특정 날짜 필터">
+            <button class="btn b-se b-sm" onclick="document.getElementById('al-filter-date').value='';rendActivityLog()">초기화</button>
+            <button class="btn b-se b-sm" onclick="dlActivityLog()">↓ CSV</button>
+          </div>
+        </div>
+        <div id="al-summary" style="display:flex;gap:10px;padding:10px 18px;background:var(--s2);border-bottom:1px solid var(--bd);flex-wrap:wrap"></div>
+        <table><thead><tr><th style="width:140px">일시</th><th style="width:80px">사번</th><th style="width:80px">성명</th><th style="width:90px">유형</th><th>상세 내용</th></tr></thead><tbody id="tb-activity"></tbody></table>
+      </div>
+      <div style="margin-top:14px">
+        <div class="sh" style="background:var(--sf);border:1px solid var(--bd);border-radius:12px 12px 0 0;border-bottom:1px solid var(--bd)"><div class="st">📨 사용자 문의 / 수정 요청 <span class="notice-dot" id="inq-dot2" style="display:none"></span></div></div>
+        <div style="background:var(--sf);border:1px solid var(--bd);border-top:none;border-radius:0 0 12px 12px;padding:14px" id="inq-admin-list"></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ══════════ MODALS ══════════ -->
+
+<!-- 입고 -->
+<div class="mo" id="mo-in">
+  <div class="md">
+    <div class="mc2" onclick="closeMo('mo-in')">✕</div>
+    <div class="md-t">입고 등록</div><div class="md-s">부품 입고 정보를 입력하세요</div>
+    <div class="f2">
+      <div class="fl"><label>적용 로봇</label><select class="fs" id="in-robot" onchange="filtBOMSel('in')"><option value="">선택</option><option value="PARKIE">PARKIE</option><option value="CARRIE">CARRIE</option><option value="GOALIE">GOALIE</option></select></div>
+      <div class="fl"><label>부품</label><select class="fs" id="in-part"></select></div>
+    </div>
+    <div class="fl"><label>Part Number / 바코드 스캔</label><div style="display:flex;gap:7px"><input class="fi" id="in-bc" placeholder="Part Number 입력 또는 스캔" oninput="lookupPN('in',this.value)" style="flex:1"><button class="btn b-se" onclick="openScanner('in')">📷</button></div></div>
+    <div class="f2">
+      <div class="fl"><label>수량</label><input class="fi" type="number" id="in-qty" min="1" placeholder="0"></div>
+      <div class="fl"><label>단위</label><input class="fi" id="in-unit" placeholder="EA"></div>
+    </div>
+    <div class="fl"><label>메모</label><textarea class="ft" id="in-memo" placeholder="입고 사유 (정기발주, 긴급조달 등)"></textarea></div>
+    <div class="fl">
+      <label>이상 여부</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px"><input type="radio" name="in-status" id="in-status-ok" value="정상" checked> <span style="color:var(--gn);font-weight:500">✅ 정상</span></label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px"><input type="radio" name="in-status" id="in-status-check" value="확인필요"> <span style="color:var(--am);font-weight:500">⚠️ 확인 필요</span></label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px"><input type="radio" name="in-status" id="in-status-bad" value="이상"> <span style="color:var(--re);font-weight:500">❌ 이상</span></label>
+      </div>
+    </div>
+    <div class="fl" id="in-issue-wrap" style="display:none"><label>이상 내용</label><textarea class="ft" id="in-issue" placeholder="이상 내용을 상세히 기술하세요" style="min-height:55px"></textarea></div>
+    <div class="fl"><label>입고 인증사진 <span style="font-size:10px;color:var(--t3);font-weight:400;text-transform:none;letter-spacing:0">(최대 6장)</span></label><div class="pg2" id="in-pg2"></div><input type="file" id="in-pfi" accept="image/*" multiple onchange="addPh(event)"></div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-in')">취소</button><button class="btn b-pr" onclick="submitIO('in')">등록</button></div>
+  </div>
+</div>
+
+<!-- 출고 -->
+<div class="mo" id="mo-out">
+  <div class="md">
+    <div class="mc2" onclick="closeMo('mo-out')">✕</div>
+    <div class="md-t">출고 등록</div><div class="md-s">부품 출고 정보를 입력하세요</div>
+    <div class="f2">
+      <div class="fl"><label>적용 로봇</label><select class="fs" id="out-robot" onchange="filtBOMSel('out')"><option value="">선택</option><option value="PARKIE">PARKIE</option><option value="CARRIE">CARRIE</option><option value="GOALIE">GOALIE</option></select></div>
+      <div class="fl"><label>부품</label><select class="fs" id="out-part"></select></div>
+    </div>
+    <div class="fl"><label>Part Number</label><div style="display:flex;gap:7px"><input class="fi" id="out-bc" placeholder="Part Number 입력 또는 스캔" oninput="lookupPN('out',this.value)" style="flex:1"><button class="btn b-se" onclick="openScanner('out')">📷</button></div></div>
+    <div class="f2">
+      <div class="fl"><label>수량</label><input class="fi" type="number" id="out-qty" min="1" placeholder="0"></div>
+      <div class="fl"><label>단위</label><input class="fi" id="out-unit" placeholder="EA"></div>
+    </div>
+    <div class="fl"><label>메모</label><textarea class="ft" id="out-memo" placeholder="출고 사유 (조립 투입, 반품 등)"></textarea></div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-out')">취소</button><button class="btn b-pr" onclick="submitIO('out')">등록</button></div>
+  </div>
+</div>
+
+<!-- 스캐너 -->
+<div class="mo" id="mo-scan">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeScanner()">✕</div>
+    <div class="md-t">바코드 스캔</div><div class="md-s">카메라를 바코드에 대주세요</div>
+    <div class="sa"><video id="sv" autoplay playsinline></video><div class="so"><div class="sf"><div class="sfa"></div><div class="sfb"></div><div class="sl2"></div></div></div></div>
+    <div class="sr" id="s-res">스캔 대기 중...</div>
+    <div style="margin-top:10px;display:flex;gap:7px;justify-content:flex-end"><button class="btn b-se b-sm" onclick="closeScanner()">닫기</button><button class="btn b-pr b-sm" id="s-ok" onclick="confirmScan()" disabled>확인</button></div>
+  </div>
+</div>
+
+<!-- 부품 추가 -->
+<div class="mo" id="mo-addpart">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-addpart')">✕</div>
+    <div class="md-t">부품 추가</div><div class="md-s">BOM에 새 부품을 등록합니다</div>
+    <div class="f2">
+      <div class="fl"><label>Part Number</label><input class="fi" id="ap-pn" placeholder="RZ-902-037"></div>
+      <div class="fl"><label>부품명 (Part Name)</label><input class="fi" id="ap-nm" placeholder="SOCKET HEAD BOLT, M5-25"></div>
+    </div>
+    <div class="f2">
+      <div class="fl"><label>적용 로봇</label><select class="fs" id="ap-rb" onchange="updAddPartParentSel()"><option value="PARKIE">PARKIE</option><option value="CARRIE">CARRIE</option><option value="GOALIE">GOALIE</option></select></div>
+      <div class="fl"><label>단위</label><input class="fi" id="ap-u" value="EA"></div>
+    </div>
+    <div class="f2">
+      <div class="fl">
+        <label>레벨 (0~6)</label>
+        <select class="fs" id="ap-lv" onchange="updAddPartParentSel()">
+          ${[0,1,2,3,4,5,6].map(l=>`<option value="${l}">${l} — ${'L0 완성품,L1 ASSY,L2 서브어셈블리,L3 단위부품,L4 세부부품,L5 세부부품,L6 최하위'.split(',')[l]}</option>`).join('')}
+        </select>
+      </div>
+      <div class="fl"><label>Rev.</label><input class="fi" id="ap-rev" value="A" placeholder="A/B/C..."></div>
+    </div>
+    <!-- 상위 부품 선택 -->
+    <div class="fl" id="ap-parent-wrap">
+      <label>상위 부품 (Parent) <span style="font-size:10px;font-weight:400;color:var(--t2);text-transform:none;letter-spacing:0">— 이 부품이 속하는 상위 어셈블리를 선택합니다</span></label>
+      <select class="fs" id="ap-parent">
+        <option value="">없음 (최상위)</option>
+      </select>
+      <div id="ap-parent-preview" style="display:none;margin-top:6px;background:var(--acl);border:1px solid var(--ac);border-radius:7px;padding:7px 10px;font-size:12px;color:var(--ac)"></div>
+    </div>
+    <div class="f3">
+      <div class="fl"><label>현재재고 <span style="font-size:9px;color:var(--am);font-weight:400">🔒 입출고로만 변경</span></label><input class="fi" type="number" id="ap-st" value="0" readonly style="background:var(--s3);color:var(--t3);cursor:not-allowed"></div>
+      <div class="fl"><label>최소재고</label><input class="fi" type="number" id="ap-ms" value="0"></div>
+      <div class="fl"><label>단가(원)</label><input class="fi" type="number" id="ap-pr" value="0"></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-addpart')">취소</button><button class="btn b-pr" onclick="submitAddPart()">추가</button></div>
+  </div>
+</div>
+
+<!-- 부품 상세 -->
+<div class="mo" id="mo-partdetail">
+  <div class="md md-lg">
+    <div class="mc2" onclick="closeMo('mo-partdetail')">✕</div>
+    <div class="md-t" id="pd-title">부품 상세</div>
+    <div class="pd-tabs">
+      <div class="pd-tab act" onclick="pdTab(this,'pd-info')">기본 정보</div>
+      <div class="pd-tab" onclick="pdTab(this,'pd-images')">이미지</div>
+      <div class="pd-tab" onclick="pdTab(this,'pd-logs')">입출고 내역</div>
+      <div class="pd-tab" onclick="pdTab(this,'pd-photos')">인증사진</div>
+    </div>
+    <div id="pd-info"></div>
+    <div id="pd-images" style="display:none"></div>
+    <div id="pd-logs" style="display:none"></div>
+    <div id="pd-photos" style="display:none"></div>
+    <input type="file" id="pd-img-fi" accept="image/*" multiple onchange="addPartImg(event)">
+  </div>
+</div>
+
+<!-- 공수 항목 추가 -->
+<div class="mo" id="mo-addlabor">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-addlabor')">✕</div>
+    <div class="md-t">작업 항목 추가</div><div class="md-s">공수 산정에 작업 항목을 등록합니다</div>
+    <div class="f2"><div class="fl"><label>적용 로봇</label><select class="fs" id="al-rb" onchange="updModuleSel()"><option value="PARKIE">PARKIE</option><option value="CARRIE">CARRIE</option><option value="GOALIE">GOALIE</option></select></div><div class="fl"><label>모듈</label><select class="fs" id="al-mod"></select></div></div>
+    <div class="fl"><label>작업명</label><input class="fi" id="al-nm" placeholder="예: 프레임 조립"></div>
+    <div class="fl"><label>메모 (상세 설명)</label><textarea class="ft" id="al-note" placeholder="작업 상세 내용, 주의사항 등" style="min-height:55px"></textarea></div>
+    <div class="f2"><div class="fl"><label>소요 시간 (h)</label><input class="fi" type="number" id="al-h" placeholder="4" min="0.5" step="0.5"></div><div class="fl"><label>작업 인원</label><input class="fi" type="number" id="al-w" placeholder="1" min="1"></div></div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-addlabor')">취소</button><button class="btn b-pr" onclick="submitAddLabor()">추가</button></div>
+  </div>
+</div>
+
+<!-- 모듈 추가 -->
+<div class="mo" id="mo-addmodule">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-addmodule')">✕</div>
+    <div class="md-t">모듈 추가</div><div class="md-s">로봇에 새 모듈(작업 그룹)을 추가합니다</div>
+    <div class="f2"><div class="fl"><label>적용 로봇</label><select class="fs" id="am-rb"><option value="PARKIE">PARKIE</option><option value="CARRIE">CARRIE</option><option value="GOALIE">GOALIE</option></select></div><div class="fl"><label>모듈명</label><input class="fi" id="am-nm" placeholder="예: 구동 시스템"></div></div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-addmodule')">취소</button><button class="btn b-pr" onclick="submitAddModule()">추가</button></div>
+  </div>
+</div>
+
+<!-- 사용자 추가 -->
+<div class="mo" id="mo-adduser">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-adduser')">✕</div>
+    <div class="md-t">사용자 추가</div>
+    <div class="fl"><label>사번</label><input class="fi" id="nu-id" placeholder="R00067" style="font-family:var(--fm)"></div>
+    <div class="fl"><label>성명</label><input class="fi" id="nu-nm" placeholder="홍길동"></div>
+    <div class="fl"><label>비밀번호</label><input class="fi" type="password" id="nu-pw"></div>
+    <div class="fl"><label>권한</label><select class="fs" id="nu-rl"><option value="user">일반 사용자</option><option value="admin">관리자</option></select></div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-adduser')">취소</button><button class="btn b-pr" onclick="submitAddUser()">추가</button></div>
+  </div>
+</div>
+
+<!-- 사용자 수정 -->
+<div class="mo" id="mo-edituser">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-edituser')">✕</div>
+    <div class="md-t">사용자 수정</div>
+    <input type="hidden" id="eu-id">
+    <div class="fl"><label>사번</label><input class="fi" id="eu-idshow" readonly style="font-family:var(--fm);color:var(--t2)"></div>
+    <div class="fl"><label>성명</label><input class="fi" id="eu-nm"></div>
+    <div class="fl"><label>새 비밀번호 (변경 시)</label><input class="fi" type="password" id="eu-pw" placeholder="빈칸 = 변경 없음"></div>
+    <div class="fl"><label>권한</label><select class="fs" id="eu-rl"><option value="user">일반 사용자</option><option value="admin">관리자</option></select></div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-edituser')">취소</button><button class="btn b-pr" onclick="submitEditUser()">저장</button></div>
+  </div>
+</div>
+
+<!-- 문의 작성 -->
+<div class="mo" id="mo-inq">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-inq')">✕</div>
+    <div class="md-t">관리자 문의 / 수정 요청</div>
+    <div class="fl"><label>유형</label><select class="fs" id="inq-type"><option value="수정요청">수정 요청</option><option value="문의">문의</option><option value="기타">기타</option></select></div>
+    <div class="fl"><label>제목</label><input class="fi" id="inq-title"></div>
+    <div class="fl"><label>내용</label><textarea class="ft" id="inq-body" style="min-height:90px"></textarea></div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-inq')">취소</button><button class="btn b-pr" onclick="submitInq()">전송</button></div>
+  </div>
+</div>
+
+<!-- 문의 답변 -->
+<div class="mo" id="mo-reply">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-reply')">✕</div>
+    <div class="md-t">문의 답변</div><div class="md-s" id="reply-sub"></div>
+    <div class="fl"><label>답변</label><textarea class="ft" id="reply-body" style="min-height:90px"></textarea></div>
+    <input type="hidden" id="reply-idx">
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-reply')">취소</button><button class="btn b-pr" onclick="submitReply()">전송</button></div>
+  </div>
+</div>
+
+<div class="mo" id="mo-actual">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-actual')">✕</div>
+    <div class="md-t">실제 공수 기록</div><div class="md-s">계획 대비 실제 작업 시간을 기록합니다</div>
+    <div class="f2">
+      <div class="fl"><label>로봇</label><select class="fs" id="ac-robot" onchange="updActualModSel()"><option value="PARKIE">PARKIE</option><option value="CARRIE">CARRIE</option><option value="GOALIE">GOALIE</option></select></div>
+      <div class="fl"><label>모듈</label><select class="fs" id="ac-mod" onchange="updActualTaskSel()"></select></div>
+    </div>
+    <div class="fl"><label>작업 항목</label><select class="fs" id="ac-task"></select></div>
+    <div class="f2">
+      <div class="fl"><label>계획 시간 (h)</label><input class="fi" type="number" id="ac-plan" readonly style="color:var(--t2)"></div>
+      <div class="fl"><label>실제 시간 (h)</label><input class="fi" type="number" id="ac-actual" placeholder="0.5" step="0.5" min="0.1"></div>
+    </div>
+    <div class="fl"><label>메모</label><textarea class="ft" id="ac-memo" placeholder="특이사항, 지연 원인 등" style="min-height:55px"></textarea></div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-actual')">취소</button><button class="btn b-pr" onclick="submitActual()">기록</button></div>
+  </div>
+</div>
+
+<div class="mo" id="mo-lacking">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-lacking')">✕</div>
+    <div class="md-t" id="lacking-title">부족 품목 현황</div>
+    <div class="md-s" id="lacking-sub"></div>
+    <div id="lacking-body"></div>
+  </div>
+</div>
+
+<div class="lb2" id="lb" onclick="closeLB()"><button class="lbc" onclick="closeLB()">✕</button><img id="li" src="" alt=""></div>
+
+<!-- 변경사항 추가 모달 -->
+<div class="mo" id="mo-add-changelog">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-add-changelog')">✕</div>
+    <div class="md-t">변경사항 추가</div>
+    <div class="md-s">개발 로그에 새 항목을 추가합니다</div>
+    <div class="f2">
+      <div class="fl"><label>날짜</label><input class="fi" type="date" id="cl-date"></div>
+      <div class="fl"><label>버전</label><input class="fi" id="cl-ver" placeholder="v4.9" style="font-family:var(--fm)"></div>
+    </div>
+    <div class="fl"><label>유형</label>
+      <select class="fs" id="cl-type">
+        <option value="기능추가">✨ 기능 추가</option>
+        <option value="버그수정">🐛 버그 수정</option>
+        <option value="UI개선">🎨 UI 개선</option>
+        <option value="데이터구조">🗄️ 데이터 구조</option>
+        <option value="보안">🔒 보안</option>
+      </select>
+    </div>
+    <div class="fl"><label>변경 내용</label><textarea class="ft" id="cl-body" placeholder="변경된 기능이나 수정 내용을 상세히 기술하세요" style="min-height:80px"></textarea></div>
+    <div class="fl"><label>작성자</label><input class="fi" id="cl-author" placeholder="담당자 이름 또는 AI"></div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px">
+      <button class="btn b-se" onclick="closeMo('mo-add-changelog')">취소</button>
+      <button class="btn b-pr" onclick="submitChangelog()">추가</button>
+    </div>
+  </div>
+</div>
+
+<!-- 상위 부품 지정/변경 모달 -->
+<div class="mo" id="mo-set-parent">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-set-parent')">✕</div>
+    <div class="md-t" id="spm-title">상위 부품 지정</div>
+    <div class="md-s">이 부품이 속하는 상위 어셈블리를 선택합니다</div>
+    <input type="hidden" id="spm-pn">
+    <div class="fl">
+      <label>상위 부품 선택</label>
+      <select class="fs" id="spm-parent" style="font-size:12px"></select>
+    </div>
+    <div id="spm-preview" style="margin-top:8px;display:none;background:var(--acl);border:1px solid var(--ac);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--ac)"></div>
+    <!-- (인라인 <script>는 js/bom.js로 이전됨) -->
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:12px">
+      <button class="btn b-se" onclick="closeMo('mo-set-parent')">취소</button>
+      <button class="btn b-pr" onclick="submitSetParent()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 일정 확정 모달 -->
+<div class="mo" id="mo-confirm-schedule">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-confirm-schedule')">✕</div>
+    <div class="md-t">제작 일정 확정</div>
+    <div class="md-s" id="cs-sub"></div>
+    <div id="cs-body" style="font-size:13px;line-height:1.9;color:var(--t2)"></div>
+    <div style="background:var(--aml);border-radius:8px;padding:10px 14px;margin:12px 0;font-size:12px;color:var(--am-dark)">⚠️ 확정 시 공수 산정의 작업 시작일이 역산 결과로 업데이트됩니다.</div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px">
+      <button class="btn b-se" onclick="closeMo('mo-confirm-schedule')">취소</button>
+      <button class="btn b-wa" onclick="applyReverseSchedule()">일정 확정</button>
+    </div>
+  </div>
+</div>
+
+<!-- 작업 인원 추가 -->
+<!-- 확정 일정 상세/수정 모달 -->
+<div class="mo" id="mo-schedule-detail">
+  <div class="md" style="max-width:520px">
+    <div class="mc2" onclick="closeMo('mo-schedule-detail')">✕</div>
+    <input type="hidden" id="sd-id">
+    <div class="md-t" id="sd-title">일정 상세</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;background:var(--s2);border-radius:8px;padding:12px 14px">
+      <div><div style="font-size:10px;color:var(--t2);letter-spacing:.5px;text-transform:uppercase;margin-bottom:3px">로봇</div><div style="font-size:13px;font-weight:700" id="sd-robot"></div></div>
+      <div><div style="font-size:10px;color:var(--t2);letter-spacing:.5px;text-transform:uppercase;margin-bottom:3px">호기</div><div style="font-size:13px;font-weight:700" id="sd-units"></div></div>
+      <div><div style="font-size:10px;color:var(--t2);letter-spacing:.5px;text-transform:uppercase;margin-bottom:3px">납기일</div><div style="font-size:13px;font-weight:700;color:var(--gn)" id="sd-deadline"></div></div>
+      <div><div style="font-size:10px;color:var(--t2);letter-spacing:.5px;text-transform:uppercase;margin-bottom:3px">확정 일시</div><div style="font-size:11px;color:var(--t2)" id="sd-created"></div></div>
+    </div>
+    <div style="margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--t2);letter-spacing:.5px;text-transform:uppercase;margin-bottom:8px">📅 제작 단계 일정</div>
+      <div id="sd-phases"></div>
+    </div>
+    <div class="fl"><label>납품처 <span style="font-weight:400;color:var(--t2);font-size:10px">(고객사·담당자 등)</span></label>
+      <input class="fi" id="sd-delivery" placeholder="예: OO센터 홍길동 팀장"></div>
+    <div class="fl"><label>메모 <span style="font-weight:400;color:var(--t2);font-size:10px">(특이사항·변경내역 등)</span></label>
+      <textarea class="ft" id="sd-memo" placeholder="일정 변경사항, 특이사항 등을 기록하세요" style="min-height:72px"></textarea></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px">
+      <button class="btn b-re b-sm" onclick="deleteSchedule()">🗑️ 일정 삭제</button>
+      <div style="display:flex;gap:7px">
+        <button class="btn b-se" onclick="closeMo('mo-schedule-detail')">취소</button>
+        <button class="btn b-pr" onclick="saveScheduleDetail()">저장</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mo" id="mo-tech-add">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-tech-add')">✕</div>
+    <div class="md-t">작업 인원 추가</div><div class="md-s">작업자 정보를 등록합니다</div>
+    <div class="fl"><label>이름</label><input class="fi" id="ta-name" placeholder="홍길동"></div>
+    <div class="fl"><label>사번 (입력 시 자동 조회)</label>
+      <input class="fi" id="ta-id" placeholder="R00066" style="font-family:var(--fm)" oninput="lookupUserForTech(this.value)">
+      <div id="ta-user-hint" style="font-size:11px;color:var(--ac);margin-top:4px;display:none"></div>
+    </div>
+    <div class="fl"><label>전문 분야</label><input class="fi" id="ta-skill" placeholder="예: 기계조립, 전장배선"></div>
+    <div class="fl"><label>색상 (일정표 표시용)</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap" id="ta-color-pick">
+        <label style="cursor:pointer" title="#3B5BF6"><input type="radio" name="ta-color" value="#3B5BF6" checked style="display:none"><span style="display:inline-block;width:24px;height:24px;background:#3B5BF6;border-radius:50%;border:2px solid transparent" onclick="this.parentNode.querySelector('input').checked=true;markTechColor(this,'#3B5BF6')"></span></label>
+        <label style="cursor:pointer"><input type="radio" name="ta-color" value="#0EA5E9" style="display:none"><span style="display:inline-block;width:24px;height:24px;background:#0EA5E9;border-radius:50%;border:2px solid transparent" onclick="this.parentNode.querySelector('input').checked=true;markTechColor(this,'#0EA5E9')"></span></label>
+        <label style="cursor:pointer"><input type="radio" name="ta-color" value="#10B981" style="display:none"><span style="display:inline-block;width:24px;height:24px;background:#10B981;border-radius:50%;border:2px solid transparent" onclick="this.parentNode.querySelector('input').checked=true;markTechColor(this,'#10B981')"></span></label>
+        <label style="cursor:pointer"><input type="radio" name="ta-color" value="#F59E0B" style="display:none"><span style="display:inline-block;width:24px;height:24px;background:#F59E0B;border-radius:50%;border:2px solid transparent" onclick="this.parentNode.querySelector('input').checked=true;markTechColor(this,'#F59E0B')"></span></label>
+        <label style="cursor:pointer"><input type="radio" name="ta-color" value="#EF4444" style="display:none"><span style="display:inline-block;width:24px;height:24px;background:#EF4444;border-radius:50%;border:2px solid transparent" onclick="this.parentNode.querySelector('input').checked=true;markTechColor(this,'#EF4444')"></span></label>
+        <label style="cursor:pointer"><input type="radio" name="ta-color" value="#7C3AED" style="display:none"><span style="display:inline-block;width:24px;height:24px;background:#7C3AED;border-radius:50%;border:2px solid transparent" onclick="this.parentNode.querySelector('input').checked=true;markTechColor(this,'#7C3AED')"></span></label>
+        <label style="cursor:pointer"><input type="radio" name="ta-color" value="#EC4899" style="display:none"><span style="display:inline-block;width:24px;height:24px;background:#EC4899;border-radius:50%;border:2px solid transparent" onclick="this.parentNode.querySelector('input').checked=true;markTechColor(this,'#EC4899')"></span></label>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-tech-add')">취소</button><button class="btn b-pr" onclick="submitAddTech()">추가</button></div>
+  </div>
+</div>
+
+<!-- 작업 예약 -->
+<div class="mo" id="mo-tech-book">
+  <div class="md">
+    <div class="mc2" onclick="closeMo('mo-tech-book')">✕</div>
+    <div class="md-t" id="techbook-title">작업 예약 등록</div><div class="md-s">작업 인원 작업 시간을 예약합니다</div>
+    <input type="hidden" id="techbook-edit-id">
+    <div class="f2">
+      <div class="fl"><label>작업 인원</label><select class="fs" id="tb-tech"></select></div>
+      <div class="fl"><label>날짜</label><input class="fi" type="date" id="tb-date"></div>
+    </div>
+    <div class="f2">
+      <div class="fl"><label>시작 시간</label>
+        <select class="fs" id="tb-start">${Array.from({length:11},(_,i)=>`<option value="${8+i}">${8+i}:00</option>`).join('')}</select>
+      </div>
+      <div class="fl"><label>종료 시간</label>
+        <select class="fs" id="tb-end">${Array.from({length:11},(_,i)=>`<option value="${9+i}"${i===1?' selected':''}>${9+i}:00</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="fl"><label>작업 유형</label>
+      <select class="fs" id="tb-type">
+        <option value="조립">🔧 조립 작업</option>
+        <option value="검사">🔍 검사/테스트</option>
+        <option value="배선">⚡ 배선 작업</option>
+        <option value="소프트웨어">💻 소프트웨어</option>
+        <option value="교육">📚 교육/훈련</option>
+        <option value="기타">📋 기타</option>
+      </select>
+    </div>
+    <div class="fl"><label>작업 로봇 / 호기</label>
+      <div style="display:flex;gap:7px">
+        <select class="fs" style="flex:1" id="tb-robot"><option value="">로봇 선택</option><option value="PARKIE">PARKIE</option><option value="CARRIE">CARRIE</option><option value="GOALIE">GOALIE</option></select>
+        <input class="fi" style="width:80px" type="number" id="tb-unit" placeholder="호기" min="1">
+      </div>
+    </div>
+    <div class="fl"><label>예약 작업 일지 <span style="font-size:10px;color:var(--t3);font-weight:400;text-transform:none;letter-spacing:0">(예약자 / 작업 인원 작성 가능)</span></label><textarea class="ft" id="tb-note" placeholder="작업 내용, 준비사항 등" style="min-height:60px"></textarea></div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-tech-book')">취소</button><button class="btn b-pr" onclick="submitTechBook()">예약 등록</button></div>
+  </div>
+</div>
+
+<!-- 작업 기록 (당일 클릭) -->
+<div class="mo" id="mo-tech-log">
+  <div class="md">
+    <div class="mc2" onclick="closeMo('mo-tech-log')">✕</div>
+    <div class="md-t" id="techlog-title">작업 수행 내역</div>
+    <div class="md-s" id="techlog-sub"></div>
+    <!-- 예약 등록자 정보 -->
+    <div style="background:var(--s2);border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:12px;display:flex;gap:14px;flex-wrap:wrap">
+      <span style="color:var(--t2)">예약자: <b id="tl-booker" style="color:var(--tx)">-</b></span>
+      <span style="color:var(--t2)">예약 시간: <b id="tl-booked-time" style="color:var(--tx)">-</b></span>
+      <span style="color:var(--t2)">작업: <b id="tl-booked-task" style="color:var(--ac)">-</b></span>
+    </div>
+    <div class="fl"><label>예정 외 업무 일지 <span style="font-size:10px;color:var(--re);font-weight:400;text-transform:none;letter-spacing:0">(작업 인원만 작성 가능)</span></label><textarea class="ft" id="tl-unplanned" placeholder="예정에 없던 업무 내용" style="min-height:55px"></textarea></div>
+    <div class="fl"><label>작업 수행 내역 (메모)</label><textarea class="ft" id="tl-memo" placeholder="실제 수행한 작업 내용 기록" style="min-height:70px"></textarea></div>
+    <div class="f2">
+      <div class="fl"><label>실제 시작</label><select class="fs" id="tl-start"></select></div>
+      <div class="fl"><label>실제 종료</label><select class="fs" id="tl-end"></select></div>
+    </div>
+    <input type="hidden" id="tl-booking-id">
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-tech-log')">취소</button><button class="btn b-pr" onclick="submitTechLog()">저장</button></div>
+  </div>
+</div>
+
+<!-- 지연 사유 -->
+<div class="mo" id="mo-delay">
+  <div class="md md-sm">
+    <div class="mc2" onclick="closeMo('mo-delay')">✕</div>
+    <div class="md-t">제작 지연 사유 등록</div>
+    <div class="f2">
+      <div class="fl"><label>작업 인원</label><select class="fs" id="dl-tech"></select></div>
+      <div class="fl"><label>날짜</label><input class="fi" type="date" id="dl-date"></div>
+    </div>
+    <div class="fl"><label>지연 유형</label>
+      <select class="fs" id="dl-type">
+        <option value="부품 부족">📦 부품 부족</option>
+        <option value="장비 고장">🔧 장비 고장</option>
+        <option value="설계 변경">📐 설계 변경</option>
+        <option value="인력 부족">👥 인력 부족</option>
+        <option value="예정 외 업무">📋 예정 외 업무</option>
+        <option value="품질 이슈">⚠️ 품질 이슈</option>
+        <option value="기타">기타</option>
+      </select>
+    </div>
+    <div class="fl"><label>제목</label><input class="fi" id="dl-title" placeholder="지연 사유 요약"></div>
+    <div class="fl"><label>상세 내용</label><textarea class="ft" id="dl-body" style="min-height:70px" placeholder="구체적인 지연 내용과 조치사항"></textarea></div>
+    <div class="fl"><label>영향 시간 (h)</label><input class="fi" type="number" id="dl-hours" placeholder="2" step="0.5" min="0.5" style="width:100px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px"><button class="btn b-se" onclick="closeMo('mo-delay')">취소</button><button class="btn b-wa" onclick="submitDelay()">등록</button></div>
+  </div>
+</div>
+<div class="tst" id="tst"><div id="tst-i"></div><div id="tst-m" style="font-size:13px"></div></div>
+
+
+<!-- ===== 외부 라이브러리: XLSX (엑셀 입출력) — 앱 스크립트보다 먼저 ===== -->
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<!-- ===== 분리된 JS (원본 등장 순서 = 로드 순서, 전역 함수 공유, defer로 순서 보장) ===== -->
+<!-- 계정 정의: data.js 보다 먼저 로드되어야 함 -->
+<script defer src="js/config.accounts.js"></script>
+<script defer src="js/data.js"></script>
+<script defer src="js/auth.js"></script>
+<script defer src="js/navigation.js"></script>
+<script defer src="js/helpers.js"></script>
+<script defer src="js/dashboard.js"></script>
+<script defer src="js/calendar.js"></script>
+<script defer src="js/bom.js"></script>
+<script defer src="js/io.js"></script>
+<script defer src="js/scanner.js"></script>
+<script defer src="js/bulk-entry.js"></script>
+<script defer src="js/technician.js"></script>
+<script defer src="js/logs.js"></script>
+<script defer src="js/labor.js"></script>
+<script defer src="js/robot-detail.js"></script>
+<script defer src="js/admin.js"></script>
+<script defer src="js/inquiry.js"></script>
+<script defer src="js/modal-helpers.js"></script>
+<script defer src="js/excel.js"></script>
+<!-- 영속 저장: 모든 데이터 정의 이후 가장 마지막에 로드 -->
+<script defer src="js/persistence.js"></script>
+</body>
+</html>

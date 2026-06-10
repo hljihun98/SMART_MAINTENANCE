@@ -613,6 +613,13 @@
     body.dark-mode input[type="range"] { background: rgba(255,255,255,0.1); }
     body.dark-mode .card { box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
     body.dark-mode header { box-shadow: none; }
+    @keyframes rise{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
+    .container>*{animation:rise .55s cubic-bezier(.2,.75,.25,1) both;}
+    .container>*:nth-child(1){animation-delay:.02s}.container>*:nth-child(2){animation-delay:.07s}
+    .container>*:nth-child(3){animation-delay:.12s}.container>*:nth-child(4){animation-delay:.17s}
+    .container>*:nth-child(5){animation-delay:.22s}.container>*:nth-child(6){animation-delay:.27s}
+    .container>*:nth-child(n+7){animation-delay:.3s}
+    @media(prefers-reduced-motion:reduce){.container>*{animation:none;}}
   </style>
 </head>
 <body>

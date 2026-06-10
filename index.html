@@ -205,6 +205,11 @@
   }
   /* 시스템에서 애니메이션 축소를 요청하면 모든 전환 효과 비활성화 */
   @media (prefers-reduced-motion:reduce){*{transition:none!important;}}
+  @keyframes rise{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
+  body>*{animation:rise .55s cubic-bezier(.2,.75,.25,1) both;}
+  body>*:nth-child(1){animation-delay:.02s;}
+  body>*:nth-child(2){animation-delay:.07s;}
+  @media(prefers-reduced-motion:reduce){body>*{animation:none;}}
 </style>
 </head>
 <body>

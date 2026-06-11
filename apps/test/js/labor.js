@@ -39,8 +39,6 @@ function rendLabor(){
   buildLaborRobotSel();
   rendLaborModules();
   rendLaborSummary();
-  // 달력 로봇/호기 선택 UI 초기화
-  if(document.getElementById('asc-units')) rendAsmUnitBtns();
 }
 
 function rendLaborModules(){
@@ -184,7 +182,7 @@ function rendLaborSummary(){
     const eStr=u.isDone?'조립 완료':u.endDate?u.endDate.toLocaleDateString('ko-KR',{month:'2-digit',day:'2-digit'}):'-';
     const accH=actualRecords.filter(a=>a.robot===u.robot).reduce((s,a)=>s+a.actualH,0);
     const planH2=actualRecords.filter(a=>a.robot===u.robot).reduce((s,a)=>s+a.planH,0);
-    const eff=planH2>0?`${Math.round((planH2/accH)*100)}%`:'-';
+    const eff=planH2>0&&accH>0?`${Math.round((planH2/accH)*100)}%`:'-';
     return`<tr style="${u.isDone?'opacity:.6':''}">
       <td><span class="rb ${rbc(u.robot)}">${u.robot}</span></td>
       <td class="t-m t-sm" style="font-weight:700;color:${rclr}">${u.unit}호기</td>

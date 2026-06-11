@@ -85,7 +85,7 @@ function handleITPaste(e,startRow){
     if(cells[0]){const sel=tds[0].querySelector('select');const v=cells[0].trim().toUpperCase();if(v==='IN'||v==='입고')sel.value='IN';else if(v==='OUT'||v==='출고')sel.value='OUT';}
     if(cells[1]){tds[1].querySelector('input').value=cells[1].trim();itLookup(tds[1].querySelector('input'));}
     if(cells[2]){const q=tds[4].querySelector('input');if(q)q.value=cells[2].trim();}
-    if(cells[3]){const m=tds[5].querySelector('input');if(m)m.value=cells[3].trim();}
+    if(cells[3]){const m=tds[6].querySelector('input');if(m)m.value=cells[3].trim();}
   });
 }
 function submitIT(){

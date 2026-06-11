@@ -722,7 +722,6 @@ function applyReverseSchedule(){
   };
   confirmedSchedules.push(newSched);
 
-  _reverseConfirmed=true;
   closeMo('mo-confirm-schedule');
   closeReversePanel();
   rendAsmCalendar();rendLaborSummary();
@@ -878,7 +877,7 @@ function submitTechBook(){
     const endD=new Date(_pendingBooking.dateRange.end);
     while(cur<=endD){dates.push(cur.toISOString().slice(0,10));cur.setDate(cur.getDate()+1);}
   } else {
-    dates=[date];
+    dates.push(date);
   }
 
   dates.forEach(dk=>{

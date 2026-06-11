@@ -18,7 +18,6 @@ function doLogin(){
     CU={id,...user};
     loginTimes[id]=new Date().toLocaleString('ko-KR');
     logActivity(id,user.name,'LOGIN',`로그인`);
-    err.textContent='사번 또는 비밀번호가 올바르지 않습니다.';
     err.style.display='none';
     document.getElementById('ls').style.opacity='0';
     setTimeout(()=>{

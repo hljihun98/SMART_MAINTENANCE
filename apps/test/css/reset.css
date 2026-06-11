@@ -12,7 +12,7 @@
   --gn:#10B981;--gnl:#D1FAE5;
   --sh:0 1px 3px rgba(30,40,80,.08),0 4px 12px rgba(30,40,80,.04);
   --sh2:0 4px 20px rgba(30,40,80,.10),0 1px 4px rgba(30,40,80,.06);
-  --am-dark:var(--am-dark);--gn-dark:var(--gn-dark);--re-dark:var(--re-dark);--ac-hover:var(--ac-hover);
+  --am-dark:#92400E;--gn-dark:#065F46;--re-dark:#991B1B;--ac-hover:#2040CC;
   --fn:'Noto Sans KR',sans-serif;--fd:'Syne',sans-serif;--fm:'JetBrains Mono',monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}

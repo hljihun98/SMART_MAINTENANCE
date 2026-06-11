@@ -1,5 +1,7 @@
 # ROBOSTOCK — 로봇 제작 재고관리 시스템
 
+> **최신 버전: v0.8.28** (2026-06-11)
+
 PARKIE(주차로봇) · CARRIE(물류로봇) · GOALIE(순찰로봇) 제작을 위한
 부품 재고 · BOM · 입출고 · 공수 산정 · 작업 인원 일정 통합 관리 도구입니다.
 
@@ -199,6 +201,20 @@ localStorage 에 저장됩니다.
   이 순서를 바꾸지 마세요(로그인이 깨질 수 있음).
 - 모바일 상단 메뉴 자동 순환은 `js/mobile-nav.js` 가 담당합니다. 메뉴 DOM 구조와
   `.sb-nav` 클래스명은 이 스크립트가 참조하므로 변경 시 같이 확인해야 합니다.
+
+---
+
+## 최근 버그 수정 내역 (v0.8.25 ~ v0.8.28)
+
+| 버전 | 심각도 | 파일 | 내용 |
+|------|--------|------|------|
+| v0.8.25 | Critical | `css/reset.css` | CSS 변수 자기참조 순환으로 색상 뱃지·버튼 전체 소실 → 실제 hex 값으로 교체 |
+| v0.8.26 | Critical | `js/technician.js` | 단일 날짜 예약 시 `const` 변수 재대입(TypeError) → `dates.push()` 로 수정 |
+| v0.8.27 | High | `js/bom.js` | BOM 트리 순환 참조 시 무한재귀(스택오버플로) → `visited Set` 사이클 감지 추가; 인라인 핸들러 XSS → `escHtml()` 적용 |
+| v0.8.28 | Medium | `js/labor.js` | 공수효율 분모 0으로 `Infinity%` 표시 수정 |
+| v0.8.28 | Medium | `js/bulk-entry.js` | 붙여넣기 시 메모 컬럼이 이상여부 셀렉트 칸을 덮어쓰던 오프셋 오류 수정 |
+| v0.8.28 | Medium | `js/persistence.js` | localStorage 용량 초과 시 조용히 실패 → 사용자 토스트 경고 추가 |
+| v0.8.28 | Low | `js/auth.js` | 로그인 성공 경로에서 잘못된 오류 메시지 텍스트 설정 코드 제거 |
 
 ---
 

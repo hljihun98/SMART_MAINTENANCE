@@ -44,6 +44,9 @@
     } catch (e) {
       // QuotaExceededError(이미지 base64 가 많을 때) 등 → 앱은 계속 동작
       console.warn('[ROBOSTOCK] 저장 실패 (localStorage 용량 초과 가능):', e);
+      if (typeof toast === 'function') {
+        toast('⚠️', '저장 실패: 브라우저 저장 공간이 부족합니다. 불필요한 이미지를 삭제하세요.', 'wa');
+      }
     }
   }
 

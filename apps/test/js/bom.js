@@ -21,13 +21,20 @@ function rendBOM(){
   const revBg={TBD:'#FEF3C7',A:'#F3F4F6',B:'#EEF1FF',C:'#D1FAE5',D:'#FEE2E2'};
 
   // parentPartNo 기반 트리 순서로 평탄화
-  function flattenTree(items, parentPN, depth){
+  function flattenTree(items, parentPN, depth, visited=new Set()){
+    if(visited.has(parentPN)) return [];
+    if(parentPN) visited.add(parentPN);
     const children=items.filter(b=>{
       const bp=b.parentPartNo||'';
       return depth===0 ? !bp||!items.find(x=>x.partNo===bp) : bp===parentPN;
     });
     let result=[];
-    children.forEach(c=>{result.push(c);result=result.concat(flattenTree(items,c.partNo,depth+1));});
+    children.forEach(c=>{
+      if(!visited.has(c.partNo)){
+        result.push(c);
+        result=result.concat(flattenTree(items,c.partNo,depth+1,new Set(visited)));
+      }
+    });
     return result;
   }
   const ordered=flattenTree(rawList,'',0);
@@ -53,23 +60,23 @@ function rendBOM(){
     // 상위 부품 연결선 표시
     const prefix=lv>0?`<span style="display:inline-block;width:${indent}px;color:var(--t3);font-size:10px;text-align:right;padding-right:4px">${'└'}</span>`:'';
 
-    html+=`<tr class="bom-row" ondblclick="openPartDetail('${b.partNo}')" style="border-bottom:1px solid var(--bd);background:${lv>0?lb+'40':''}">
+    html+=`<tr class="bom-row" ondblclick="openPartDetail('${escHtml(b.partNo)}')" style="border-bottom:1px solid var(--bd);background:${lv>0?lb+'40':''}">
       <td style="text-align:center;padding:4px 6px">${lvBadge}</td>
       <td style="padding:4px 6px;font-family:var(--fm);font-size:12px;font-weight:${lv<=1?'700':'500'};color:${lc};white-space:nowrap">
-        ${prefix}${b.partNo}
+        ${prefix}${escHtml(b.partNo)}
       </td>
       <td style="padding:4px 6px;text-align:center">${revBadge}</td>
-      <td style="padding:4px 8px;font-size:13px;font-weight:${lv===0?'700':lv===1?'600':'400'}">${b.name}</td>
-      <td><span class="rb ${rbc(b.robot)}">${b.robot}</span></td>
-      <td class="t-m t-sm">${b.unit}</td>
+      <td style="padding:4px 8px;font-size:13px;font-weight:${lv===0?'700':lv===1?'600':'400'}">${escHtml(b.name)}</td>
+      <td><span class="rb ${rbc(b.robot)}">${escHtml(b.robot)}</span></td>
+      <td class="t-m t-sm">${escHtml(b.unit)}</td>
       <td><div style="display:flex;align-items:center;gap:5px"><span class="t-m" style="min-width:20px;font-weight:600">${b.stock}</span><div class="pb"><div class="pf" style="width:${pct}%;background:${b.stock===0?'var(--re)':b.stock<=b.minStock?'var(--am)':'var(--gn)'}"></div></div></div></td>
       <td class="t-m t-sm">${b.minStock}</td>
       <td class="t-m t-sm">${b.price.toLocaleString()}</td>
       <td><span class="sb2 ${s.c}">${s.t}</span></td>
       <td onclick="event.stopPropagation()" style="white-space:nowrap">
-        <button class="btn b-sm b-wa" onclick="openEditPart('${b.partNo}')">수정</button>
-        <button class="btn b-sm b-su" onclick="quickIO('in','${b.partNo}')">입고</button>
-        <button class="btn b-sm b-dn" onclick="quickIO('out','${b.partNo}')">출고</button>
+        <button class="btn b-sm b-wa" onclick="openEditPart('${escHtml(b.partNo)}')">수정</button>
+        <button class="btn b-sm b-su" onclick="quickIO('in','${escHtml(b.partNo)}')">입고</button>
+        <button class="btn b-sm b-dn" onclick="quickIO('out','${escHtml(b.partNo)}')">출고</button>
       </td>
     </tr>`;
   });

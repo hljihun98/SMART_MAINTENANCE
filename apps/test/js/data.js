@@ -193,6 +193,11 @@ let changelogData=[
   {date:'2026-06-11',ver:'v0.8.22',type:'UI개선',body:'토글 스위치 ON 상태 색상을 초록색으로 조정해 사용자가 활성 상태를 더 직관적으로 인식할 수 있도록 개선.',author:'Codex'},
   {date:'2026-06-11',ver:'v0.8.23',type:'UI개선',body:'로봇 상세 화면의 빠른 액션 버튼을 rd-quick-actions 그룹으로 묶고, 좁은 폭에서 토글은 한 줄 전체를 사용하고 입고/출고 버튼은 같은 줄·같은 높이의 2열로 정렬되도록 개선.',author:'Codex'},
   {date:'2026-06-11',ver:'v0.8.24',type:'버그수정',body:'GitHub 배포 환경에서 js/config.accounts.js 누락 시 accounts.js 초기화가 깨지던 문제를 수정. 로그인 화면에 계정 파일 누락/빈 계정 상태를 구체적으로 안내하도록 보강.',author:'Codex'},
+  // ── 버그 수정 배치 (6/11) ──────────────────────────────
+  {date:'2026-06-11',ver:'v0.8.25',type:'버그수정',body:'[Critical] reset.css CSS 변수 자기참조 순환 수정 → --am-dark/--gn-dark/--re-dark/--ac-hover 실제 hex 값으로 교체. 색상 뱃지·버튼 전체 소실 문제 해결.',author:'Claude'},
+  {date:'2026-06-11',ver:'v0.8.26',type:'버그수정',body:'[Critical] technician.js submitTechBook 단일 날짜 예약 TypeError 수정 → const dates 선언 후 재대입(dates=[date]) 불가 → dates.push(date) 로 교체.',author:'Claude'},
+  {date:'2026-06-11',ver:'v0.8.27',type:'버그수정',body:'[High] bom.js flattenTree 순환 parentPartNo 참조 시 무한재귀(스택오버플로) 수정 → visited Set 패턴으로 사이클 감지. XSS 방어: b.partNo·b.name·b.robot·b.unit 인라인 핸들러·innerHTML에 escHtml 적용.',author:'Claude'},
+  {date:'2026-06-11',ver:'v0.8.28',type:'버그수정',body:'[Medium] labor.js 공수효율 계산 분모 0 처리 → planH2>0&&accH>0 조건 추가(Infinity% → - 표시). bulk-entry.js 붙여넣기 메모 컬럼 오프셋 수정 tds[5]→tds[6]. persistence.js QuotaExceededError 토스트 알림 추가. auth.js 로그인 성공 시 잘못된 오류 텍스트 설정 코드 제거.',author:'Claude'},
 ];
 
 // Technician

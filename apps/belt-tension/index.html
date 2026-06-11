@@ -420,6 +420,8 @@ body{background:#F4F6F9 !important;background-image:none !important;font-size:14
 .tb-logo{height:22px;width:auto;display:block;object-fit:contain;flex:none;}
 .tb-name{font-size:11px;color:#9CA3AF;border-left:1px solid #E5E8ED;padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
 .tb-version{flex:none;font-size:11px;color:#6B7280;background:#F4F6F9;border:1px solid #E5E8ED;border-radius:999px;padding:2px 8px;}
+.home-btn{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#6B7280;text-decoration:none;background:#F4F6F9;border:1px solid #E5E8ED;border-radius:999px;padding:4px 10px;white-space:nowrap;transition:background .15s,color .15s;flex:none;}
+.home-btn:hover{background:#E5E8ED;color:#374151;}
 /* status pill -> soft reference pill */
 .status-pill{flex:none;font-family:var(--kr);font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:none;padding:5px 11px;border-radius:999px;border:1px solid #E5E8ED;background:#F4F6F9;color:#6B7280;box-shadow:none;}
 .status-pill::before{width:6px;height:6px;opacity:1;}
@@ -519,6 +521,7 @@ tbody tr:nth-child(even){background:#FAFBFC;}
       <span class="tb-name">음파식 벨트 텐션 측정기</span>
       <span class="tb-version">v1.0.0</span>
     </div>
+    <a class="home-btn" href="../../index.html" title="메인 포털로 이동"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>메인으로</a>
     <span id="statusPill" class="status-pill">READY</span>
   </div>
 

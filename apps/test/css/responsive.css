@@ -123,6 +123,10 @@ button,input,select,textarea{
     min-height:100dvh;
   }
 
+  .sb-logo{
+    padding-right:150px;
+  }
+
   .sb{
     left:0;
     right:0;

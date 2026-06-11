@@ -83,4 +83,5 @@ function initApp(){
   rendAll();
   go('dash');
   if(typeof startMobileNav==='function')startMobileNav();
+  if(typeof syncMcPadding==='function')setTimeout(syncMcPadding,100);
 }

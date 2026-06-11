@@ -144,6 +144,8 @@
       <div class="ns" id="admin-ns" style="display:none">관리자</div>
       <div class="ni" id="ni-changelog" data-pg="changelog" style="display:none" onclick="go('changelog',this)"><svg viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h7M3 12h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>개발 로그</div>
       <div class="ni" id="ni-admin" data-pg="admin" style="display:none" onclick="go('admin',this)"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="5.5" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M2 13c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>사용자 관리<span class="notice-dot" id="inq-dot" style="display:none"></span></div>
+      <div class="ns">포털</div>
+      <a class="ni ni-portal" href="../../index.html" title="메인 포털로 이동"><svg viewBox="0 0 16 16" fill="none"><path d="M2 7.5l6-5 6 5v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 14.5v-4h4v4" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>메인 포털</a>
     </div>
     <div class="sb-ft">
       <button class="inq-btn" id="inq-btn" onclick="openMo('mo-inq')">📨 관리자 문의</button>
@@ -692,7 +694,13 @@
       <div class="fl">
         <label>레벨 (0~6)</label>
         <select class="fs" id="ap-lv" onchange="updAddPartParentSel()">
-          ${[0,1,2,3,4,5,6].map(l=>`<option value="${l}">${l} — ${'L0 완성품,L1 ASSY,L2 서브어셈블리,L3 단위부품,L4 세부부품,L5 세부부품,L6 최하위'.split(',')[l]}</option>`).join('')}
+          <option value="0">0 — L0 완성품</option>
+          <option value="1">1 — L1 ASSY</option>
+          <option value="2">2 — L2 서브어셈블리</option>
+          <option value="3">3 — L3 단위부품</option>
+          <option value="4">4 — L4 세부부품</option>
+          <option value="5">5 — L5 세부부품</option>
+          <option value="6">6 — L6 최하위</option>
         </select>
       </div>
       <div class="fl"><label>Rev.</label><input class="fi" id="ap-rev" value="A" placeholder="A/B/C..."></div>
@@ -1008,10 +1016,34 @@
     </div>
     <div class="f2">
       <div class="fl"><label>시작 시간</label>
-        <select class="fs" id="tb-start">${Array.from({length:11},(_,i)=>`<option value="${8+i}">${8+i}:00</option>`).join('')}</select>
+        <select class="fs" id="tb-start">
+          <option value="8">8:00</option>
+          <option value="9">9:00</option>
+          <option value="10">10:00</option>
+          <option value="11">11:00</option>
+          <option value="12">12:00</option>
+          <option value="13">13:00</option>
+          <option value="14">14:00</option>
+          <option value="15">15:00</option>
+          <option value="16">16:00</option>
+          <option value="17">17:00</option>
+          <option value="18">18:00</option>
+        </select>
       </div>
       <div class="fl"><label>종료 시간</label>
-        <select class="fs" id="tb-end">${Array.from({length:11},(_,i)=>`<option value="${9+i}"${i===1?' selected':''}>${9+i}:00</option>`).join('')}</select>
+        <select class="fs" id="tb-end">
+          <option value="9">9:00</option>
+          <option value="10" selected>10:00</option>
+          <option value="11">11:00</option>
+          <option value="12">12:00</option>
+          <option value="13">13:00</option>
+          <option value="14">14:00</option>
+          <option value="15">15:00</option>
+          <option value="16">16:00</option>
+          <option value="17">17:00</option>
+          <option value="18">18:00</option>
+          <option value="19">19:00</option>
+        </select>
       </div>
     </div>
     <div class="fl"><label>작업 유형</label>

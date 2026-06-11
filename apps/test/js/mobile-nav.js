@@ -95,8 +95,19 @@
     });
     start();
   }
+  function syncMcPadding(){
+    const sb=document.querySelector('.sb');
+    const mc=document.querySelector('.mc');
+    if(!sb||!mc)return;
+    if(window.innerWidth>980){mc.style.paddingTop='';return;}
+    const h=sb.offsetHeight;
+    if(h>0) mc.style.paddingTop=(h+14)+'px';
+  }
+  window.syncMcPadding=syncMcPadding;
+
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);
   else init();
+  document.addEventListener('DOMContentLoaded',syncMcPadding);
   window.addEventListener('resize',()=>{
     const el=nav();
     if(el){
@@ -104,5 +115,6 @@
       removeClones(el);
     }
     pause(1200);
+    syncMcPadding();
   });
 })();

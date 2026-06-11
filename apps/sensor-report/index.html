@@ -36,6 +36,8 @@ body{font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo','Segoe UI'
 .tb-sub{font-size:11px;color:#9CA3AF;border-left:1px solid #E5E8ED;padding-left:10px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
 .tb-version{font-size:11px;color:#6B7280;background:#F4F6F9;border:1px solid #E5E8ED;border-radius:999px;padding:2px 8px}
 .tb-clock{font-size:11px;color:#9CA3AF;font-variant-numeric:tabular-nums;white-space:nowrap}
+.home-btn{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#6B7280;text-decoration:none;background:#F4F6F9;border:1px solid #E5E8ED;border-radius:999px;padding:4px 10px;white-space:nowrap;transition:background .15s,color .15s}
+.home-btn:hover{background:#E5E8ED;color:#374151}
 .info-panel{background:#fff;border-bottom:1px solid #E5E8ED;padding:14px 20px}
 .panel-label{font-size:10px;font-weight:600;color:#9CA3AF;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px}
 .info-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
@@ -98,6 +100,7 @@ input.n-inp:focus{border-color:#0099CC}
 .photo-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:6px}
 .pslot{position:relative;aspect-ratio:1;border:1px dashed #E5E8ED;border-radius:7px;cursor:pointer;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#FAFAFA;-webkit-tap-highlight-color:transparent}
 .pslot:active{opacity:.75}
+.pslot-disabled{cursor:not-allowed;opacity:.5;pointer-events:none}
 .pslot img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0;border-radius:6px}
 .pslot .al{font-size:9px;color:#C4C9D4;margin-top:2px}
 .pslot .xb{position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,0,.5);color:#fff;border:none;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;z-index:3;padding:0;line-height:1}
@@ -354,7 +357,10 @@ input.n-inp:focus{border-color:#0099CC}
       <img class="tb-logo" id="tb-logo" src="../../logo.png" alt="HL Robotics">
       <div class="tb-sub">PARKIE 센서 점검 <span class="tb-version">v1.0.0</span></div>
     </div>
-    <div class="tb-clock" id="clock"></div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <a class="home-btn" href="../../index.html" title="메인 포털로 이동"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>메인으로</a>
+      <div class="tb-clock" id="clock"></div>
+    </div>
   </div>
 
   <!-- 점검 정보 입력 영역: 장비명, 촬영자, 작업 단계, 확인 시점을 표시합니다. -->
@@ -669,6 +675,7 @@ function render(){
         const key = stagePhotoKey(r.id,si,ai,activeStage);
         const img = r.photos[key];
         if(img) return '<div class="pslot"><img src="'+img+'" alt="'+s.name+' '+a+'"><button class="xb" onclick="event.stopPropagation();delPhoto(\''+key+'\','+r.id+')">×</button></div>';
+        if(!activeStage) return '<div class="pslot pslot-disabled" title="촬영 단계를 먼저 선택해주세요"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E5E7EB" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg><span class="al" style="color:#D1D5DB">'+a+'</span></div>';
         return '<div class="pslot" onclick="upload(\''+key+'\','+r.id+')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D1D5DB" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg><span class="al">'+a+'</span></div>';
       }).join('');
       return '<div class="srow"><div class="stripe'+(st==='ok'?' ok':st==='ng'?' ng':'')+'"></div><div class="srow-top"><div class="s-name"><div class="dot '+s.type+'"></div>'+s.name+'</div><div class="s-r"><span class="s-cnt">'+cnt+'/'+angles.length+'</span><div class="toggle"><button class="tbtn'+(st==='ok'?' ok':'')+'" onclick="toggleStatus('+r.id+','+si+',\'ok\')">✓ 정상</button><button class="tbtn'+(st==='ng'?' ng':'')+'" onclick="toggleStatus('+r.id+','+si+',\'ng\')">⚠ 이상</button></div></div></div><div class="photo-grid">'+slots+'</div><div class="ng-memo'+(st==='ng'?' show':'')+'"><div class="ng-memo-lbl">⚠ 이상 내용 기록</div><textarea rows="2" placeholder="이상 내용을 입력하세요..." oninput="updateMemo('+r.id+','+si+',this.value)">'+memoVal+'</textarea></div></div>';
@@ -702,6 +709,7 @@ async function fileToJpeg(file){
 }
 // 사진 슬롯 클릭 시 파일 선택/카메라 촬영을 열고, 선택된 사진을 해당 슬롯에 임시 저장합니다.
 function upload(key,robId){
+  if(!activeStage){ showToast('촬영 단계를 먼저 선택해주세요'); return; }
   const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.capture='environment';
   inp.onchange=async e=>{
     const file=e.target.files[0]; if(!file) return;
@@ -1390,8 +1398,3 @@ function buildOfflinePdfFromCanvases(canvases){
 </script>
 </body>
 </html>
-
-
-<a href="../../index.html">
-메인으로
-</a>

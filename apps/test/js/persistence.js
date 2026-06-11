@@ -29,6 +29,7 @@
       delayLogs: delayLogs,
       confirmedSchedules: confirmedSchedules,
       robotGoals: robotGoals,
+      robotDashShow: robotDashShow,
       asmEntries: asmEntries,
       actualRecords: actualRecords,
       inquiries: inquiries,
@@ -83,6 +84,7 @@
     fillArr(actualRecords, d.actualRecords);
     fillArr(inquiries, d.inquiries);
     fillObj(robotGoals, d.robotGoals);
+    if(d.robotDashShow) fillObj(robotDashShow, d.robotDashShow);
     fillObj(asmEntries, d.asmEntries);
     fillObj(laborModules, d.laborModules);
     fillObj(laborSettings, d.laborSettings);

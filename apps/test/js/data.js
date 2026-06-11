@@ -198,6 +198,9 @@ let changelogData=[
   {date:'2026-06-11',ver:'v0.8.26',type:'버그수정',body:'[Critical] technician.js submitTechBook 단일 날짜 예약 TypeError 수정 → const dates 선언 후 재대입(dates=[date]) 불가 → dates.push(date) 로 교체.',author:'Claude'},
   {date:'2026-06-11',ver:'v0.8.27',type:'버그수정',body:'[High] bom.js flattenTree 순환 parentPartNo 참조 시 무한재귀(스택오버플로) 수정 → visited Set 패턴으로 사이클 감지. XSS 방어: b.partNo·b.name·b.robot·b.unit 인라인 핸들러·innerHTML에 escHtml 적용.',author:'Claude'},
   {date:'2026-06-11',ver:'v0.8.28',type:'버그수정',body:'[Medium] labor.js 공수효율 계산 분모 0 처리 → planH2>0&&accH>0 조건 추가(Infinity% → - 표시). bulk-entry.js 붙여넣기 메모 컬럼 오프셋 수정 tds[5]→tds[6]. persistence.js QuotaExceededError 토스트 알림 추가. auth.js 로그인 성공 시 잘못된 오류 텍스트 설정 코드 제거.',author:'Claude'},
+  // ── 포털 통합 및 모바일 개선 (6/11) ──────────────────────
+  {date:'2026-06-11',ver:'v0.9.0',type:'UI개선',body:'ROBOSTOCK 포털 상태 테스트→사용가능으로 변경. 사이드바 sb-nav에 "메인 포털" 링크 추가(데스크톱·모바일 모두 접근 가능). 모바일 mc padding-top 동적 조정(syncMcPadding) 추가. 520~980px 구간 sb-logo padding-right 보강으로 로고·유저배지 겹침 방지.',author:'Claude'},
+  {date:'2026-06-11',ver:'v0.9.1',type:'버그수정',body:'[High] robotDashShow가 persistence.js snapshot에 누락되어 새로고침 시 "대시보드에 표시" 토글 상태가 초기화되던 버그 수정. [Medium] submitActual에서 laborModules[r][mi] 접근 시 null 안전성 없어 모듈 전체 삭제 후 크래시 가능성 → optional chaining + 유효성 검사 추가.',author:'Claude'},
 ];
 
 // Technician

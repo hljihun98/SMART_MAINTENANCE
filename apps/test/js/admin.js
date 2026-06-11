@@ -182,8 +182,9 @@ function submitActual(){
   const r=document.getElementById('ac-robot').value;
   const mi=parseInt(document.getElementById('ac-mod').value)||0;
   const ti=parseInt(document.getElementById('ac-task').value)||0;
-  const mod=laborModules[r][mi];
-  const task=mod.tasks[ti];
+  const mod=(laborModules[r]||[])[mi];
+  const task=mod?.tasks?.[ti];
+  if(!mod||!task){toast('⚠️','작업 항목을 다시 선택해주세요','wa');return;}
   const actualH=parseFloat(document.getElementById('ac-actual').value);
   const memo=document.getElementById('ac-memo').value.trim();
   if(!actualH||actualH<=0){toast('⚠️','실제 시간을 입력하세요','wa');return;}

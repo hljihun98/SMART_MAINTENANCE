@@ -181,6 +181,8 @@
     }
 
     .header-actions { display: flex; gap: 8px; align-items: center; }
+    .home-btn{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--t2,#6B7280);text-decoration:none;background:var(--card,#F9FAFB);border:1px solid var(--bd,#E5E7EB);border-radius:999px;padding:5px 12px;white-space:nowrap;transition:background .15s,color .15s;}
+    .home-btn:hover{background:var(--bd,#E5E7EB);color:#374151;}
 
     /* 토글 버튼 */
     .btn-icon {
@@ -640,6 +642,7 @@
     </div>
     <div class="header-actions">
       <div id="datetime"></div>
+      <a class="home-btn" href="../../index.html" title="메인 포털로 이동"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>메인으로</a>
       <button class="btn-icon" id="themeBtn" title="테마 전환">🌙</button>
       <button class="btn-icon" id="installBtn" title="홈화면에 추가" style="display:none">📲</button>
     </div>

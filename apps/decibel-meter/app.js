@@ -13,6 +13,8 @@ const BROADBAND_RATIO = 0.45;
 const BUF_SIZE = 5;
 const OUTLIER_TOL = 0.12;
 const G = 9.80665;
+/* 충격 감지 임계값: 시간영역 RMS 기준 (0~1 범위, 낮을수록 민감) */
+const STRIKE_RMS_THRESH = 0.025;
 
 /* ---------- PDF 헬퍼 (센서점검 앱 동일 스타일) ---------- */
 const PDF_FONT = "'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',Arial,sans-serif";
@@ -86,6 +88,7 @@ let lastStrikeAt=0;
 let guideActive=false, guideStartTs=0, guidePeriodMs=3000, guidePeakFired=false;
 let collectionMaxRms=0;
 let noiseReduction={enabled:false};
+let noiseLevel=3;
 let noiseProfile=null;
 let noiseProfileReady=false;
 let targetLock={enabled:false, widthPct:30};
@@ -815,7 +818,7 @@ function analyzeLoop(){
         setStatus('listen','피크 — 지금 튕겨주세요!','COLLECTING');
       }
       if(sineVal<0) guidePeakFired=false;
-    } else if(rms > 0.08 && (now - lastStrikeAt) > 3000){
+    } else if(rms > STRIKE_RMS_THRESH && (now - lastStrikeAt) > 3000){
       // 일반 모드: RMS 충격 감지 (기존 동작 그대로)
       strikeTs=now; lastStrikeAt=now;
       collecting=true; collectStartTs=strikeTs+500; collectEndTs=strikeTs+2000; collectedSnapshots=[];
@@ -893,13 +896,22 @@ function computeRMS(){
   return Math.sqrt(s/tbuf.length);
 }
 
+const NR_LEVELS=[
+  null,
+  {alpha:0.5,  floorRatio:0.15},
+  {alpha:1.0,  floorRatio:0.10},
+  {alpha:1.5,  floorRatio:0.06},
+  {alpha:2.5,  floorRatio:0.03},
+  {alpha:4.0,  floorRatio:0.01},
+];
+
 function applyNoiseReduction(floatBuf, byteBuf, binHz){
   const N=floatBuf.length;
   if(!noiseProfile || noiseProfile.length!==N){ noiseProfile=new Float32Array(N); noiseProfileReady=false; }
   const rms=computeRMS();
   const quiet=(!collecting) && rms<0.05;
   const beta=noiseProfileReady?0.92:0.6;
-  const alpha=1.5, floorRatio=0.06;
+  const {alpha, floorRatio}=NR_LEVELS[noiseLevel]||NR_LEVELS[3];
   const minDb=analyser?analyser.minDecibels:-100, maxDb=analyser?analyser.maxDecibels:-30;
   const rng=Math.max(1,maxDb-minDb);
   const out=new Uint8Array(N);
@@ -1761,7 +1773,8 @@ btnEstimate.addEventListener('click', ()=>{
 
 /* ---------- 측정 보조 토글 ---------- */
 const swNoise=$('swNoise'), swLock=$('swLock'), btnRelearn=$('btnRelearn'),
-      selLockWidth=$('selLockWidth'), lockWidthWrap=$('lockWidthWrap');
+      selLockWidth=$('selLockWidth'), lockWidthWrap=$('lockWidthWrap'),
+      selNrLevel=$('selNrLevel'), nrLevelWrap=$('nrLevelWrap');
 function setSwitch(btn,on){ btn.setAttribute('aria-pressed', on?'true':'false'); }
 function updateAssistInfo(){
   const el=document.getElementById('lockDesc');
@@ -1778,10 +1791,16 @@ swNoise.addEventListener('click', ()=>{
   noiseReduction.enabled=!noiseReduction.enabled;
   setSwitch(swNoise, noiseReduction.enabled);
   btnRelearn.style.display = noiseReduction.enabled?'inline-flex':'none';
+  nrLevelWrap.style.display = noiseReduction.enabled?'inline-flex':'none';
   if(noiseReduction.enabled){
     noiseProfile=null; noiseProfileReady=false; setNoiseChip('학습 중');
     toast('노이즈 저감 ON — 조용한 상태에서 주변 소음을 자동 학습합니다.','ok');
   }else{ setNoiseChip(''); toast('노이즈 저감 OFF','warn'); }
+});
+selNrLevel.addEventListener('change', ()=>{
+  noiseLevel=+selNrLevel.value;
+  noiseProfile=null; noiseProfileReady=false; setNoiseChip('학습 중');
+  toast('노이즈 저감 강도 '+noiseLevel+'단계 — 소음 프로파일을 다시 학습합니다.','ok');
 });
 btnRelearn.addEventListener('click', ()=>{
   noiseProfile=null; noiseProfileReady=false; setNoiseChip('학습 중');

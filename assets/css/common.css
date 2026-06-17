@@ -1,0 +1,27 @@
+/* =====================================================
+   SMART Maintenance Platform — 공통 기본 스타일
+   모든 앱이 공유하는 CSS reset, 진입 애니메이션 정의
+   ===================================================== */
+
+/* ── CSS Reset ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── 페이지 진입 애니메이션 (rise) ──
+   각 앱의 컨테이너 직계 자식에 stagger 지연을 추가해 사용 */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* 접근성: 애니메이션 축소 설정 시 비활성화 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

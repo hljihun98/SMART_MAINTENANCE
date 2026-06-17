@@ -1,0 +1,169 @@
+/* ── 디자인 토큰: 전체 색상·그림자·폰트 변수 정의 ── */
+:root{
+  --page:#F4F6F8;
+  --card:#FFFFFF;
+  --border:#E5E8EC;
+  --border-soft:#EEF0F3;
+  --ink:#1B1F24;
+  --ink-2:#3D4450;
+  --muted:#6B7280;
+  --dim:#9AA3AF;
+  --blue:#2563EB;
+  --blue-bg:#EAF1FE;
+  --teal:#0EA5A4;
+  --green:#15803D;
+  --green-bg:#E7F6EE;
+  --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  --shadow-hi:0 6px 16px rgba(16,24,40,.08), 0 2px 6px rgba(16,24,40,.05);
+  --body:'Pretendard Variable',Pretendard,-apple-system,'Inter',sans-serif;
+  --latin:'Inter','Pretendard Variable',sans-serif;
+}
+
+body{
+  font-family:var(--body);
+  background:var(--page);
+  color:var(--ink);
+  -webkit-font-smoothing:antialiased;
+  line-height:1.5;
+  min-height:100vh;
+}
+
+/* ── 상단 앱바 ── */
+.appbar{
+  background:var(--card);
+  border-bottom:1px solid var(--border);
+}
+.appbar-inner{
+  max-width:1040px;
+  margin:0 auto;
+  padding:16px 28px;
+  display:flex;
+  align-items:center;
+  gap:16px;
+}
+.logo{display:inline-flex;align-items:center;text-decoration:none;border-radius:6px;}
+.logo:focus-visible{outline:none;box-shadow:0 0 0 3px var(--blue-bg);}
+.logo-mark{height:22px;width:auto;display:block;}
+
+.appbar .sep{width:1px;height:18px;background:var(--border);}
+.appbar .ctx{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:10px;}
+.vpill{
+  font-family:var(--latin);
+  font-size:11px;font-weight:600;
+  color:var(--muted);
+  background:var(--page);
+  border:1px solid var(--border);
+  border-radius:999px;
+  padding:3px 9px;
+}
+.appbar .when{
+  margin-left:auto;
+  font-family:var(--latin);
+  font-size:13px;
+  color:var(--dim);
+  letter-spacing:.01em;
+  white-space:nowrap;
+}
+
+/* ── 메인 컨텐츠 래퍼 ── */
+.wrap{max-width:1040px;margin:0 auto;padding:30px 28px 64px;}
+
+.pagehead{margin-bottom:6px;}
+.pagehead h1{font-size:22px;font-weight:700;letter-spacing:-.015em;}
+.pagehead p{font-size:13.5px;color:var(--muted);margin-top:5px;}
+
+.list-head{
+  display:flex;align-items:center;justify-content:space-between;
+  margin:26px 2px 14px;
+}
+.list-head .label{font-size:13px;font-weight:600;color:var(--muted);}
+.count{
+  font-family:var(--latin);
+  font-size:12px;color:var(--muted);
+  background:var(--card);border:1px solid var(--border);
+  border-radius:999px;padding:5px 12px;font-weight:500;
+}
+
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+
+/* ── 개별 앱 카드 ── */
+.card{
+  position:relative;
+  display:flex;flex-direction:column;gap:16px;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:20px 20px 18px 22px;
+  text-decoration:none;color:inherit;
+  box-shadow:var(--shadow);
+  overflow:hidden;
+  transition:box-shadow .18s ease, transform .18s ease, border-color .18s ease;
+}
+.card::before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
+  background:var(--accent,var(--blue));
+  border-radius:14px 0 0 14px;
+}
+.card:hover,.card:focus-visible{
+  box-shadow:var(--shadow-hi);
+  transform:translateY(-2px);
+  border-color:#D7DCE2;
+  outline:none;
+}
+.card:focus-visible{box-shadow:0 0 0 3px var(--blue-bg),var(--shadow-hi);}
+
+.card-top{display:flex;align-items:center;justify-content:space-between;}
+.ico{
+  width:40px;height:40px;border-radius:11px;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--accent-bg,#EEF3FF);
+  color:var(--accent,var(--blue));
+}
+.ico svg{width:21px;height:21px;stroke:currentColor;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round;}
+.tag{
+  font-size:11.5px;font-weight:600;letter-spacing:.01em;
+  color:var(--accent,var(--blue));
+  background:var(--accent-bg,#EEF3FF);
+  border-radius:999px;padding:5px 11px;
+}
+
+.card-body .name{font-size:16.5px;font-weight:700;letter-spacing:-.01em;margin-bottom:5px;}
+.card-body .desc{font-size:13px;color:var(--muted);line-height:1.55;}
+
+.card-foot{
+  display:flex;align-items:center;justify-content:space-between;
+  padding-top:14px;border-top:1px solid var(--border-soft);
+}
+.pill{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:12px;font-weight:600;
+  padding:4px 10px;border-radius:999px;
+}
+.pill.ok{color:var(--green);background:var(--green-bg);}
+.pill.dev{color:var(--muted);background:#F1F3F5;}
+.pill svg{width:13px;height:13px;stroke:currentColor;stroke-width:2.2;fill:none;stroke-linecap:round;stroke-linejoin:round;}
+.open{
+  font-size:13px;font-weight:600;color:var(--blue);
+  display:inline-flex;align-items:center;gap:5px;
+  transition:gap .18s ease;
+}
+.card:hover .open,.card:focus-visible .open{gap:9px;}
+
+.foot{
+  margin-top:30px;font-size:12px;color:var(--dim);
+  display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;
+  border-top:1px solid var(--border);padding-top:18px;
+}
+
+/* ── 진입 애니메이션 stagger ── */
+body>*{animation:rise .55s cubic-bezier(.2,.75,.25,1) both;}
+body>*:nth-child(1){animation-delay:.02s;}
+body>*:nth-child(2){animation-delay:.07s;}
+
+/* 모바일(680px 이하): 1열 그리드로 전환 */
+@media (max-width:680px){
+  .appbar-inner{padding:14px 18px;flex-wrap:wrap;}
+  .appbar .when{width:100%;margin:6px 0 0;order:3;}
+  .wrap{padding:24px 18px 52px;}
+  .grid{grid-template-columns:1fr;}
+}

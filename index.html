@@ -316,17 +316,16 @@
   var APPS = [
     { href:'./apps/sensor-report/', accent:'#2563EB', accentBg:'#EAF1FE',
       icon:'<path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M5 8V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2"/><path d="M8 13l2.5 3 2-2.5L16 18"/>',
-      tag:'라이다 · 카메라', name:'센서 보고서', desc:'센서 상태 데이터를 수집해 상태 리포트로 정리합니다.', ready:true },
+      tag:'라이다 · 카메라', name:'센서 보고서', desc:'PARKIE 로봇의 진동·온도 센서 점검 데이터를 수집해 PDF 보고서를 생성합니다.', ready:true },
     { href:'./apps/belt-tension/', accent:'#0EA5A4', accentBg:'#E3F6F5',
       icon:'<circle cx="6" cy="12" r="3"/><circle cx="18" cy="12" r="3"/><path d="M6 9h12"/><path d="M6 15h12"/>',
       tag:'장력 N', name:'벨트 장력계', desc:'컨베이어 벨트의 장력을 측정하고 기준값과 비교합니다.', ready:true },
+    { href:'./apps/decibel-meter/', accent:'#059669', accentBg:'#ECFDF5',
+      icon:'<path d="M4 10v4"/><path d="M8 7v10"/><path d="M12 4v16"/><path d="M16 8v8"/><path d="M20 11v2"/>',
+      tag:'장력 N · 음파', name:'벨트 장력계 2.0', desc:'음파 FFT 분석으로 벨트 장력을 측정합니다. 노이즈 저감·목표 잠금·CSV 내보내기를 지원합니다.', ready:true },
     { href:'./apps/test/', accent:'#7C3AED', accentBg:'#F1ECFE',
       icon:'<path d="M9 3h6"/><path d="M10 3v6l-4.5 8a2 2 0 0 0 1.8 3h9.4a2 2 0 0 0 1.8-3L14 9V3"/><path d="M7 14h10"/>',
-      tag:'재고 관리', name:'ROBOSTOCK', desc:'로봇 부품 재고와 BOM을 통합 관리합니다.<br> ID:R00000 PW:xptmxm12!@ (테스트12!@)', ready:true },
-   { href:'./apps/decibel-meter/', accent:'#94A3B8', accentBg:'#EEF1F4', icoColor:'#64748B', tagColor:'#64748B',
-      icon:'<path d="M4 10v4"/><path d="M8 7v10"/><path d="M12 4v16"/><path d="M16 8v8"/><path d="M20 11v2"/>',
-      tag:'Test', name:'데시벨 측정', desc:'신규 기능을 점검하는 환경입니다.', ready:false }
-
+      tag:'재고 관리', name:'ROBOSTOCK', desc:'로봇 부품 재고·BOM·입출고·공수·작업 일정을 통합 관리합니다.', ready:true }
   ];
 
   /* 즉시실행 함수(IIFE): 페이지 로드 시 앱 카드 그리드를 동적으로 렌더링 */
@@ -375,8 +374,9 @@
 
   /* ── 데이터 관리 ── */
   var APP_KEYS = [
-    { key:'parkie_sensor_v3',   label:'센서 보고서', desc:'센서 기록·첨부 사진' },
-    { key:'robostock_state_v1', label:'ROBOSTOCK',   desc:'재고·입출고·일정·계정 변경분' }
+    { key:'parkie_sensor_v3',   label:'센서 보고서',     desc:'센서 기록·첨부 사진' },
+    { key:'beltTension_v1',     label:'벨트 장력계',     desc:'벨트 측정 기록·로봇 데이터' },
+    { key:'robostock_state_v1', label:'ROBOSTOCK',       desc:'재고·입출고·일정·계정 변경분' }
   ];
   var LS_LIMIT = 5 * 1024 * 1024; /* localStorage 일반적 한도 5 MB */
 

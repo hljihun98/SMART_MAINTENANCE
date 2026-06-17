@@ -1,0 +1,1412 @@
+"use strict";
+
+/* toast alias — preserves 3200ms auto-hide timing of original */
+const toast = (msg, type, dur) => smToast(msg, type, dur || 3200);
+
+/* ---------- 분석 상수 ---------- */
+const MIN_FREQ = 10;
+const MAX_FREQ = 5000;
+const ABS_MIN_DB = -72;
+const PROMINENCE_DB = 9;
+const NOISE_LOUD_DB = -42;
+const BROADBAND_RATIO = 0.45;
+const BUF_SIZE = 5;
+const OUTLIER_TOL = 0.12;
+const G = 9.80665;
+
+/* ---------- PDF 헬퍼 (센서점검 앱 동일 스타일) ---------- */
+const PDF_FONT = "'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',Arial,sans-serif";
+const MM_TO_PX = 96 / 25.4;
+let logoImagePromise = null;
+function getLogoImage(){
+  if(!logoImagePromise){
+    logoImagePromise = new Promise((resolve, reject)=>{
+      const img = new Image();
+      img.onload = ()=>resolve(img);
+      img.onerror = reject;
+      img.src = '../../logo.png';
+    });
+  }
+  return logoImagePromise;
+}
+function textToPng(text, opt={}){
+  const sz=opt.size||7, bold=opt.bold?'700':'400';
+  const color=Array.isArray(opt.color)?'rgb('+opt.color+')':opt.color||'#111';
+  const scale=3, px=sz*96/72, pad=opt.pad??1.5;
+  const cv=document.createElement('canvas'), ctx=cv.getContext('2d');
+  ctx.font=bold+' '+px+'px '+PDF_FONT;
+  const mw=ctx.measureText(String(text||' ')).width;
+  const w=Math.max(1,Math.ceil(mw+pad*2)), h=Math.max(1,Math.ceil(px*1.45+pad*2));
+  cv.width=w*scale; cv.height=h*scale;
+  const c=cv.getContext('2d'); c.scale(scale,scale);
+  c.font=bold+' '+px+'px '+PDF_FONT;
+  c.fillStyle=color; c.textBaseline='middle';
+  c.fillText(String(text||''),pad,h/2);
+  return {data:cv.toDataURL('image/png'), wmm:w/MM_TO_PX, hmm:h/MM_TO_PX};
+}
+function pdfText(doc, text, x, y, opt={}){
+  const t=textToPng(text,opt);
+  let xx=x, yy=y;
+  if(opt.align==='center') xx=x-t.wmm/2;
+  else if(opt.align==='right') xx=x-t.wmm;
+  if(opt.valign==='middle') yy=y-t.hmm/2;
+  doc.addImage(t.data,'PNG',xx,yy,t.wmm,t.hmm,undefined,'FAST');
+}
+
+/* ---------- 벨트 ID 정의 (고정) ---------- */
+const BELT_PRESETS = {
+  lifting: { label:'리프팅 벨트', targetN:500, tolPct:10, mass:4.2, width:35, span:147, cf:1.000 },
+  drive:   { label:'구동모듈 벨트', targetN:170, tolPct:20, mass:2.8, width:20, span:88,  cf:1.000 }
+};
+const BELT_IDS = [
+  {key:'ID1', type:'drive',   label:'ID1'},
+  {key:'ID2', type:'drive',   label:'ID2'},
+  {key:'ID3', type:'drive',   label:'ID3'},
+  {key:'ID4', type:'drive',   label:'ID4'},
+  {key:'ID5', type:'lifting', label:'ID5'},
+  {key:'ID6', type:'lifting', label:'ID6'},
+];
+
+/* ---------- 전역 상태 ---------- */
+let audioCtx=null, analyser=null, srcNode=null, micStream=null;
+let floatBuf=null, byteBuf=null, rafId=null;
+let measuring=false, held=false;
+let peakBuffer=[];
+let currentResult=null;
+let activeBeltType=null;   // 현재 측정 중인 벨트 타입 ('lifting'|'drive')
+let selectedDriveIds=new Set();   // 선택된 구동모듈 ID (초기: 없음)
+let selectedLiftingIds=new Set(); // 선택된 리프팅 ID (초기: 없음)
+let robots=[];             // [{id,unit,createdAt,completedAt,slots:[]}]
+let activeRobot=null;      // 현재 측정 중인 로봇
+let activeSlotIdx=0;       // 현재 slots[] 인덱스
+let measureStartTs=0;
+let collecting=false, strikeTs=0, collectStartTs=0, collectEndTs=0, collectedSnapshots=[];
+let lastStrikeAt=0;
+let noiseReduction={enabled:false};
+let noiseProfile=null;
+let noiseProfileReady=false;
+let targetLock={enabled:false, widthPct:30};
+let lockCenter=NaN, lockLoBin=-1, lockHiBin=-1;
+
+/* ---------- DOM 캐시 ---------- */
+const $ = id => document.getElementById(id);
+const inMass=$('inMass'), inWidth=$('inWidth'), inSpan=$('inSpan'), inCF=$('inCF'), inTargetN=$('inTargetN'), inTolPct=$('inTolPct'), selFFT=$('selFFT');
+const btnStart=$('btnStart'), btnStop=$('btnStop'), btnHold=$('btnHold'),
+      btnSave=$('btnSave'), btnSkip=$('btnSkip'), btnClear=$('btnClear'),
+      btnCSV=$('btnCSV'), btnPDF=$('btnPDF'), btnNextSession=$('btnNextSession'),
+      btnCancelSetup=$('btnCancelSetup');
+const inUnit=$('inUnit');
+const inDriveMeas=$('inDriveMeas'), inLiftingMeas=$('inLiftingMeas');
+
+/* ---------- 보고서 버튼 활성화 ---------- */
+function updateReportButtons(){
+  const hasData = robots.length > 0;
+  if(btnPDF) btnPDF.disabled = !hasData;
+  if(btnCSV) btnCSV.disabled = !hasData;
+}
+
+/* ---------- 측정 플로우 단계 ---------- */
+let currentStep=1;
+function setStep(n){
+  for(let i=1;i<=5;i++){
+    const si=$('si'+i), fs=$('fs'+i);
+    if(si) si.className='step-item'+(i<n?' s-done':i===n?' s-active':'');
+    if(fs) fs.className='flow-step'+(i<n?' s-done':i===n?' s-active':'');
+    if(i<5){const sc=$('sc'+i+(i+1)); if(sc) sc.className='step-conn'+(i<n?' s-done':'');}
+  }
+  if(btnCancelSetup) btnCancelSetup.style.display = (n===2 && activeRobot) ? 'flex' : 'none';
+  updateSessionSwitchRow();
+}
+
+/* ---------- 벨트 ID 개별 선택 ---------- */
+function toggleBeltId(key){
+  const def = BELT_IDS.find(d=>d.key===key);
+  if(!def) return;
+  const set = def.type==='drive' ? selectedDriveIds : selectedLiftingIds;
+  if(set.has(key)) set.delete(key);
+  else set.add(key);
+  refreshBeltBtns(def.type);
+}
+function clearBeltGroup(type){
+  if(type==='drive') selectedDriveIds.clear();
+  else selectedLiftingIds.clear();
+  refreshBeltBtns(type);
+}
+function refreshBeltBtns(type){
+  const set = type==='drive' ? selectedDriveIds : selectedLiftingIds;
+  const grp = $(type==='drive'?'driveCountBtns':'liftingCountBtns');
+  if(grp) grp.querySelectorAll('.cnt-btn').forEach(b=>{
+    const k = b.dataset.key;
+    b.classList.toggle('cnt-active', k==='none' ? set.size===0 : set.has(k));
+  });
+  const row = $(type==='drive'?'driveMeasRow':'liftingMeasRow');
+  if(row) row.style.display = set.size>0 ? 'flex' : 'none';
+}
+function setBeltCount(type, n){ /* 하위호환 shim — 사용 안 함 */ }
+
+/* ---------- 활성 슬롯 목록 생성 ---------- */
+function buildActiveSlots(){
+  const dm=parseInt(inDriveMeas&&inDriveMeas.value)||1;
+  const lm=parseInt(inLiftingMeas&&inLiftingMeas.value)||1;
+  return BELT_IDS
+    .filter(def => (def.type==='drive' ? selectedDriveIds : selectedLiftingIds).has(def.key))
+    .map(def => {
+      const p = BELT_PRESETS[def.type];
+      return {
+        key: def.key, type: def.type, label: def.label,
+        targetN: p.targetN, tolPct: p.tolPct,
+        mass: parseFloat(inMass.value)||p.mass,
+        width: parseFloat(inWidth.value)||p.width,
+        span: parseFloat(inSpan.value)||p.span,
+        cf: parseFloat(inCF.value)||p.cf,
+        measCount: def.type==='drive' ? dm : lm,
+        values: [], average: null, avgJudge: null, completedAt: null
+      };
+    });
+}
+
+/* ---------- 슬롯 프리셋 적용 ---------- */
+function applySlotPreset(slot){
+  activeBeltType = slot.type;
+  inMass.value = slot.mass; inWidth.value = slot.width;
+  inSpan.value = slot.span; inCF.value = slot.cf.toFixed(3);
+  inTargetN.value = slot.targetN; inTolPct.value = slot.tolPct;
+  refreshPresetEstimate();
+  updateSlotProgress();
+}
+
+/* ---------- Step 2 진행 칩 ---------- */
+function updateSlotProgress(){
+  const el=$('measureProgress');
+  if(!el) return;
+  if(!activeRobot){ el.textContent='0 / 1'; el.className='progress-chip'; return; }
+  const slot = activeRobot.slots[activeSlotIdx];
+  if(!slot){ el.textContent=''; return; }
+  const cur = slot.values.length, max = slot.measCount;
+  el.textContent = slot.label + ' · ' + cur + ' / ' + max;
+  el.className = 'progress-chip' + (cur>0 ? ' has-data' : '');
+}
+function updateProgressChip(){ updateSlotProgress(); }  // 하위호환
+
+/* ---------- 로봇 시퀀스 시작 ---------- */
+function saveResult(){ saveCurrentSlot(); }  // btnSave 이벤트 호환
+
+function initRobotIfNeeded(){
+  const unit = inUnit ? inUnit.value.trim() : '';
+  if(!unit){ toast('호기 번호를 입력해주세요.','err'); return false; }
+  if(selectedDriveIds.size+selectedLiftingIds.size===0){ toast('벨트를 1개 이상 선택해주세요.','err'); return false; }
+  if(activeRobot) return true;  // 이미 진행 중
+  const slots = buildActiveSlots();
+  if(!slots.length){ toast('활성화된 벨트 슬롯이 없습니다.','err'); return false; }
+  const robot = { id:Date.now(), unit, createdAt:new Date(), completedAt:null, slots };
+  robots.push(robot);
+  activeRobot = robot;
+  activeSlotIdx = 0;
+  applySlotPreset(slots[0]);
+  renderRobotProgress();
+  renderRobots();
+  updateSessionSwitchRow();
+  return true;
+}
+
+/* ---------- 현재 슬롯 저장 ---------- */
+function saveCurrentSlot(){
+  if(!currentResult||!isFinite(currentResult.freq)){
+    toast('유효한 주파수가 없습니다.','err'); return;
+  }
+  if(!activeRobot){ toast('호기가 설정되지 않았습니다.','err'); return; }
+  const slot = activeRobot.slots[activeSlotIdx];
+  const lower = slot.targetN*(1-slot.tolPct/100), upper = slot.targetN*(1+slot.tolPct/100);
+  const judge = currentResult.corrN>=lower && currentResult.corrN<=upper ? 'OK' : 'NG';
+  slot.values.push({freq:currentResult.freq, corrN:currentResult.corrN, kgf:currentResult.kgf,
+    rawN:currentResult.rawN, conf:currentResult.confidence||0, time:new Date(), judge});
+
+  const slotDone = slot.values.length >= slot.measCount;
+  if(slotDone){
+    slot.completedAt = new Date();
+    const avg = slot.values.reduce((s,v)=>s+v.corrN,0)/slot.values.length;
+    slot.average = avg;
+    const lo=slot.targetN*(1-slot.tolPct/100), hi=slot.targetN*(1+slot.tolPct/100);
+    slot.avgJudge = avg>=lo&&avg<=hi ? 'OK' : 'NG';
+    const allDone = activeRobot.slots.every(s=>s.completedAt);
+    if(allDone){
+      activeRobot.completedAt = new Date();
+      renderRobots();
+      renderRobotProgress();
+      resetForNextMeasurement(true);
+      setStep(4);
+      showNextRobotPrompt();
+      toast('모든 벨트 측정 완료!','ok',4800);
+      return;
+    }
+    activeSlotIdx++;
+    toast(slot.label+' 완료 (평균 '+slot.average.toFixed(1)+' N → '+slot.avgJudge+') — 다음으로 이동','ok',3000);
+    renderRobotProgress();
+    renderRobots();
+    resetForNextMeasurement(false);
+    applySlotPreset(activeRobot.slots[activeSlotIdx]);
+    setStep(2);
+    startMeasure();
+  }else{
+    const rem = slot.measCount - slot.values.length;
+    toast('저장 ('+slot.values.length+'/'+slot.measCount+'회) · 남은: '+rem,'ok');
+    renderRobotProgress();
+    renderRobots();
+    resetForNextMeasurement(false);
+    setStep(2);
+    startMeasure();
+  }
+}
+
+/* ---------- 스킵 ---------- */
+function skipMeasurement(){
+  toast('이 측정을 스킵했습니다.','warn');
+  resetForNextMeasurement(false);
+  setStep(2);
+  startMeasure();
+}
+
+/* ---------- 현재 호기 설정 취소 ---------- */
+function cancelCurrentRobot(){
+  if(!activeRobot){ setStep(1); return; }
+  const hasMeasurements = activeRobot.slots.some(s=>s.values.length>0);
+  if(hasMeasurements &&
+     !confirm('이미 저장된 측정값이 있습니다.\n현재 호기 측정을 취소하면 미완료 상태로 남습니다. 계속할까요?')) return;
+  if(measuring) stopMeasure();
+  if(!hasMeasurements) robots=robots.filter(r=>r!==activeRobot);
+  activeRobot=null; activeSlotIdx=0; currentResult=null;
+  renderRobots();
+  updateReportButtons();
+  setStep(1);
+  updateSessionSwitchRow();
+  toast('측정 설정을 취소했습니다.','warn');
+}
+
+/* ---------- 측정 초기화 ---------- */
+function resetForNextMeasurement(done){
+  currentResult=null;
+  btnSave.disabled=true; if(btnSkip) btnSkip.disabled=true;
+  if(!measuring){
+    btnStart.disabled=false; btnStop.disabled=true; btnHold.disabled=true;
+    btnHold.innerHTML='<span class="ico">⏸</span> 고정';
+    btnHold.classList.remove('active'); selFFT.disabled=false;
+  }
+  setStatus('ready', done ? '대기 중' : '대기 중 — 다음 회차를 측정하세요', 'READY');
+}
+
+/* ---------- 회차 측정값 취소 ---------- */
+function cancelSlotMeasurement(vi){
+  if(!activeRobot) return;
+  const slot = activeRobot.slots[activeSlotIdx];
+  if(!slot) return;
+  slot.values.splice(vi, 1);
+  slot.completedAt=null; slot.average=null; slot.avgJudge=null;
+  activeRobot.completedAt=null;
+  renderRobotProgress();
+  renderRobots();
+  updateSlotProgress();
+  setStep(2);
+  toast((vi+1)+'회차 측정값을 삭제했습니다.','warn');
+}
+
+/* ---------- 다음 호기 프롬프트 ---------- */
+function showNextRobotPrompt(){
+  const p=$('nextRobotPrompt'), cfg=$('nextRobotCfg'), ns=$('btnNextSession');
+  if(p){
+    const driveStr = selectedDriveIds.size > 0 ? [...selectedDriveIds].join('·') : '없음';
+    const liftStr  = selectedLiftingIds.size > 0 ? [...selectedLiftingIds].join('·') : '없음';
+    if(cfg) cfg.textContent = '구동모듈: '+driveStr+' · 리프팅: '+liftStr;
+    p.style.display='block';
+  }
+  if(ns) ns.style.display='none';
+}
+function startNextRobot(sameConfig){
+  const p=$('nextRobotPrompt'); if(p) p.style.display='none';
+  activeRobot=null; activeSlotIdx=0;
+  if(inUnit) inUnit.value='';
+  if(!sameConfig){
+    selectedDriveIds=new Set();
+    selectedLiftingIds=new Set();
+    refreshBeltBtns('drive'); refreshBeltBtns('lifting');
+  }
+  updateSlotProgress();
+  setStep(1);
+  if(inUnit) inUnit.focus();
+  toast(sameConfig ? '호기 번호를 입력하세요.' : '호기 번호와 벨트 구성을 설정하세요.','ok');
+}
+function promptNextRobot(){ showNextRobotPrompt(); }  // step1 버튼 호환
+
+/* ---------- Step 1 세션 전환 행 ---------- */
+function updateSessionSwitchRow(){
+  const row=$('sessionSwitchRow'), info=$('sessionSwitchInfo');
+  if(!row||!info) return;
+  if(robots.length>0){
+    const done=robots.filter(r=>r.completedAt).length;
+    info.textContent='현재 '+robots.length+'개 호기 (완료 '+done+'개)';
+    row.style.display='flex';
+  }else{ row.style.display='none'; }
+}
+
+/* ---------- 로봇 진행 표시 (Step 4) ---------- */
+function renderRobotProgress(){
+  const el=$('sessionProgress'); if(!el) return;
+  const unitTag=$('fs4Unit');
+  if(unitTag) unitTag.textContent = activeRobot ? ' — '+(activeRobot.unit ? activeRobot.unit+'호기' : '(미설정)') : '';
+  if(!activeRobot){ el.innerHTML=''; return; }
+  const isCurrent = (si) => si===activeSlotIdx && !activeRobot.completedAt;
+  el.innerHTML = activeRobot.slots.map((slot, si)=>{
+    const done = !!slot.completedAt;
+    const active = isCurrent(si);
+    const chips = slot.values.map((v,vi)=>{
+      const cls = v.judge==='OK' ? 'prog-ok' : 'prog-ng';
+      return `<div class="prog-chip ${cls}">
+        ${active ? `<button class="prog-del" onclick="cancelSlotMeasurement(${vi})" title="취소">✕</button>` : ''}
+        <span class="prog-num">${vi+1}회</span>
+        <span class="prog-val">${v.corrN.toFixed(1)}</span>
+        <span class="prog-unit">N</span>
+      </div>`;
+    }).join('');
+    const empties = done ? '' : Array.from({length:slot.measCount-slot.values.length},(_,i)=>
+      `<div class="prog-chip prog-empty"><span class="prog-num">${slot.values.length+i+1}회</span><span class="prog-val">—</span></div>`
+    ).join('');
+    const avgBlock = done && slot.average!=null ?
+      `<div class="prog-avg ${slot.avgJudge==='OK'?'avg-ok':'avg-ng'}">
+         <span class="avg-label">평균</span><span class="avg-val">${slot.average.toFixed(1)} N</span>
+         <span class="avg-judge">${slot.avgJudge}</span>
+       </div>` : '';
+    const statusTag = done ? '<span class="slot-tag-done">✓</span>' :
+                      active ? '<span class="slot-tag-now">측정 중</span>' : '';
+    return `<div class="slot-section ${active?'slot-cur':''}${done?' slot-done':''}">
+      <div class="slot-head"><span class="slot-key">${slot.label}</span>${statusTag}</div>
+      <div class="prog-grid">${chips}${empties}</div>${avgBlock}
+    </div>`;
+  }).join('');
+  updateSessionSwitchRow();
+}
+const estFreq=$('estFreq'), kconst=$('kconst'), btnEstimate=$('btnEstimate');
+const statusDot=$('statusDot'), statusText=$('statusText'), statusPill=$('statusPill');
+const liveFreq=$('liveFreq'), livePeak=$('livePeak'), meterFill=$('meterFill'), meterVal=$('meterVal');
+const canvas=$('spectrum'), ctx=canvas.getContext('2d');
+const resTarget=$('resTarget'), resJudge=$('resJudge'), resJudgeWrap=$('resJudgeWrap');
+
+/* ================================================================
+   상태 배지 갱신
+   ================================================================ */
+function setStatus(state, text, pillText){
+  statusText.textContent=text;
+  statusPill.textContent=pillText;
+  statusPill.className='status-pill '+
+    ({ready:'',listen:'s-listen',good:'s-good',weak:'s-weak',noise:'s-noise',bad:'s-bad'}[state]||'');
+  statusDot.className='dot'+(state==='listen'||state==='good'?' live':'');
+  if(state==='good') statusDot.style.background='var(--green)';
+  else if(state==='listen') statusDot.style.background='var(--cyan)';
+  else if(state==='weak') statusDot.style.background='var(--amber)';
+  else if(state==='noise') statusDot.style.background='var(--orange)';
+  else if(state==='bad') statusDot.style.background='var(--red)';
+  else statusDot.style.background='var(--muted-2)';
+}
+
+/* ================================================================
+   입력값 검증
+   ================================================================ */
+function readInputs(){
+  const mass=parseFloat(inMass.value);
+  const width=parseFloat(inWidth.value);
+  const span=parseFloat(inSpan.value);
+  let cf=parseFloat(inCF.value);
+  if(!isFinite(cf)||cf<=0) cf=1.0;
+  return {mass,width,span,cf};
+}
+function readTarget(){
+  let targetN=parseFloat(inTargetN.value);
+  let tolPct=parseFloat(inTolPct.value);
+  if(!isFinite(targetN) || targetN<=0) targetN=NaN;
+  if(!isFinite(tolPct) || tolPct<=0) tolPct=NaN;
+  return {targetN, tolPct};
+}
+function validateInputs(){
+  [inMass,inWidth,inSpan].forEach(el=>el.classList.remove('invalid'));
+  const {mass,width,span}=readInputs();
+  if([mass,width,span].some(v=>isNaN(v))){
+    [inMass,inWidth,inSpan].forEach(el=>{ if(isNaN(parseFloat(el.value))) el.classList.add('invalid'); });
+    toast('입력값을 모두 입력해주세요.', 'err');
+    return false;
+  }
+  if(mass<=0||width<=0||span<=0){
+    [inMass,inWidth,inSpan].forEach(el=>{ if(parseFloat(el.value)<=0) el.classList.add('invalid'); });
+    toast('Mass, Width, Span은 0보다 큰 값을 입력해야 합니다.', 'err');
+    return false;
+  }
+  return true;
+}
+
+/* ================================================================
+   장력 계산
+   ================================================================ */
+function calcTension(mass,width,span,freq,cf){
+  const rawN = 4*mass*width*span*span*freq*freq*1e-9;
+  const corrN = rawN*cf;
+  const kgf = corrN/G;
+  return {rawN, corrN, kgf};
+}
+function calcExpectedFreq(mass,width,span,targetN,cf){
+  const safeCF = (isFinite(cf) && cf > 0) ? cf : 1;
+  const denom = 4 * mass * width * span * span * 1e-9 * safeCF;
+  if(!isFinite(targetN) || targetN <= 0 || !isFinite(denom) || denom <= 0) return NaN;
+  return Math.sqrt(targetN / denom);
+}
+function refreshPresetEstimate(){
+  const mass = parseFloat(inMass.value);
+  const width = parseFloat(inWidth.value);
+  const span = parseFloat(inSpan.value);
+  const targetN = parseFloat(inTargetN.value);
+  const cf = parseFloat(inCF.value);
+  const expectedFreq = calcExpectedFreq(mass, width, span, targetN, cf);
+  if(isFinite(expectedFreq)) estFreq.value = expectedFreq.toFixed(2);
+}
+function canUseMicrophone(){
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.isSecureContext);
+}
+function micUnavailableMessage(){
+  if(!window.isSecureContext){
+    return '모바일에서 마이크 권한 팝업이 안 뜨는 경우는 대부분 HTTPS가 아니기 때문입니다. HTTPS 또는 localhost에서 열어주세요.';
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    return '이 브라우저/환경에서는 마이크를 사용할 수 없습니다. 브라우저 설정과 권한을 확인해주세요.';
+  }
+  return '마이크를 사용할 수 없는 환경입니다. 브라우저 권한과 기기 설정을 확인해주세요.';
+}
+
+/* ================================================================
+   측정 시작 — 마이크 권한 요청 & Web Audio API 초기화
+   ================================================================ */
+async function startMeasure(){
+  if(measuring) return;
+  if(!activeRobot){ if(!initRobotIfNeeded()) return; }
+  if(!validateInputs()) return;
+  if(!canUseMicrophone()){
+    setStatus('bad','마이크 사용 불가','UNAVAILABLE');
+    toast(micUnavailableMessage(), 'err');
+    btnStart.disabled = !window.isSecureContext;
+    return;
+  }
+
+  try{
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false }
+    });
+  }catch(err){
+    const name = err && err.name ? err.name : '';
+    if(name === 'NotAllowedError' || name === 'SecurityError'){
+      setStatus('bad','마이크 권한 거부','DENIED');
+      toast('마이크 권한이 거부되었거나 브라우저가 차단했습니다. 사이트 설정에서 마이크를 허용해주세요.', 'err');
+    }else if(name === 'NotFoundError'){
+      setStatus('bad','마이크를 찾을 수 없음','NO MIC');
+      toast('사용 가능한 마이크를 찾지 못했습니다. 기기 마이크 또는 외부 마이크 연결을 확인해주세요.', 'err');
+    }else{
+      setStatus('bad','마이크 초기화 실패','ERROR');
+      toast('마이크 초기화에 실패했습니다: '+(err.message || '알 수 없는 오류'), 'err');
+    }
+    stopMeasure();
+    return;
+  }
+
+  try{
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended') await audioCtx.resume();
+    srcNode = audioCtx.createMediaStreamSource(micStream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = parseInt(selFFT.value,10);
+    analyser.smoothingTimeConstant = 0;
+    srcNode.connect(analyser);
+    floatBuf = new Float32Array(analyser.frequencyBinCount);
+    byteBuf  = new Uint8Array(analyser.frequencyBinCount);
+  }catch(err){
+    setStatus('bad','오디오 초기화 실패','ERROR');
+    toast('오디오 초기화에 실패했습니다: '+err.message, 'err');
+    stopMeasure();
+    return;
+  }
+
+  measuring=true; held=false; peakBuffer=[];
+  measureStartTs=Date.now();
+  btnStart.disabled=true; btnStop.disabled=false; btnHold.disabled=false; btnSave.disabled=true;
+  setStep(2);
+  btnHold.classList.remove('active'); btnHold.innerHTML='<span class="ico">⏸</span> 측정값 고정';
+  selFFT.disabled=true;
+  setStatus('listen','측정 중 — 벨트를 튕겨주세요','LISTENING');
+  toast('측정을 시작했습니다. 벨트 Span 중앙을 가볍게 튕기세요.', 'ok');
+  analyzeLoop();
+}
+
+/* ================================================================
+   측정 중지 — 리소스 정리
+   ================================================================ */
+function stopMeasure(){
+  measuring=false;
+  if(rafId){ cancelAnimationFrame(rafId); rafId=null; }
+  if(srcNode){ try{srcNode.disconnect();}catch(e){} srcNode=null; }
+  if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
+  if(audioCtx){ try{audioCtx.close();}catch(e){} audioCtx=null; }
+  analyser=null;
+  btnStart.disabled=false; btnStop.disabled=true; btnHold.disabled=true; btnSave.disabled=true;
+  if(btnSkip) btnSkip.disabled=true;
+  selFFT.disabled=false;
+  held=false;
+  btnHold.innerHTML='<span class="ico">⏸</span> 고정';
+  btnHold.classList.remove('active');
+  setStatus('ready','대기 중','READY');
+  meterFill.style.width='0%'; meterVal.textContent='0%';
+  liveFreq.textContent='--'; livePeak.textContent='대기'; livePeak.style.color='var(--muted)';
+}
+
+/* ================================================================
+   피크 주파수 검출 + 분석 루프
+   ================================================================ */
+function analyzeLoop(){
+  if(!measuring||!analyser){ return; }
+
+  try{
+    analyser.getFloatFrequencyData(floatBuf);
+    analyser.getByteFrequencyData(byteBuf);
+  }catch(err){
+    console.error('FFT read error', err);
+    toast('오디오 처리 중 오류가 발생했습니다. 측정을 중지합니다.','err');
+    stopMeasure();
+    return;
+  }
+
+  const sampleRate = audioCtx.sampleRate;
+  const binHz = sampleRate / analyser.fftSize;
+
+  let byteDraw = byteBuf;
+  if(noiseReduction.enabled){ byteDraw = applyNoiseReduction(floatBuf, byteBuf, binHz); }
+
+  let minBin = Math.max(1, Math.floor(MIN_FREQ/binHz));
+  let maxBin = Math.min(floatBuf.length-2, Math.ceil(MAX_FREQ/binHz));
+
+  lockLoBin=-1; lockHiBin=-1; lockCenter=NaN;
+  if(targetLock.enabled){
+    const c = computeLockCenter();
+    if(isFinite(c) && c>0){
+      lockCenter=c;
+      const w=targetLock.widthPct/100;
+      const lo=Math.max(MIN_FREQ, c*(1-w)), hi=Math.min(MAX_FREQ, c*(1+w));
+      lockLoBin=Math.max(minBin, Math.floor(lo/binHz));
+      lockHiBin=Math.min(maxBin, Math.ceil(hi/binHz));
+      if(lockHiBin>lockLoBin){ minBin=lockLoBin; maxBin=lockHiBin; }
+    }
+  }
+
+  let peakBin=-1, peakDb=-Infinity, sumDb=0, n=0;
+  let aboveCount=0;
+  for(let i=minBin;i<=maxBin;i++){
+    const db=floatBuf[i];
+    sumDb+=db; n++;
+    if(db>peakDb){ peakDb=db; peakBin=i; }
+  }
+  const meanDb = sumDb/Math.max(1,n);
+
+  for(let i=minBin;i<=maxBin;i++){ if(floatBuf[i] >= peakDb-6) aboveCount++; }
+  const broadband = (aboveCount/Math.max(1,n)) > BROADBAND_RATIO;
+
+  let lvl=0; for(let i=minBin;i<=maxBin;i++){ if(byteBuf[i]>lvl) lvl=byteBuf[i]; }
+  const lvlPct=Math.round(lvl/255*100);
+  meterFill.style.width=lvlPct+'%'; meterVal.textContent=lvlPct+'%';
+
+  drawSpectrum(byteDraw, binHz, minBin, maxBin, peakBin);
+
+  const now = Date.now();
+  const rms = computeRMS();
+  if(!collecting){
+    if(rms > 0.08 && (now - lastStrikeAt) > 3000){
+      strikeTs = now; lastStrikeAt = now;
+      collecting = true; collectStartTs = strikeTs + 500; collectEndTs = strikeTs + 2000; collectedSnapshots = [];
+      setStatus('listen','충격 감지 — 0.5s 무시 후 1.5s 분석','COLLECTING');
+    }
+  } else {
+    if(now > collectEndTs){
+      collecting = false;
+      finalizeCollection();
+    }else if(now >= collectStartTs){
+      const det = detectFundamentalBandpass(floatBuf, binHz, minBin, maxBin);
+      if(det) collectedSnapshots.push({t:now, f:det.freq, mag:det.mag});
+      liveFreq.textContent = det?det.freq.toFixed(1):'--';
+    }
+    rafId=requestAnimationFrame(analyzeLoop); return;
+  }
+
+  if(held){ rafId=requestAnimationFrame(analyzeLoop); return; }
+
+  if(meanDb > NOISE_LOUD_DB){
+    setStatus('noise','주변 소음이 큽니다','NOISE');
+    livePeak.textContent='소음'; livePeak.style.color='var(--orange)';
+    liveFreq.textContent='--';
+  }
+  else if(peakDb < ABS_MIN_DB){
+    setStatus('weak','신호가 약합니다 — 더 명확히 튕겨주세요','WEAK');
+    livePeak.textContent='약함'; livePeak.style.color='var(--amber)';
+    liveFreq.textContent='--';
+  }
+  else if(broadband || (peakDb - meanDb) < PROMINENCE_DB){
+    setStatus('listen','대기 중 — 벨트를 튕겨주세요','LISTENING');
+    livePeak.textContent='—'; livePeak.style.color='var(--muted)';
+    liveFreq.textContent='--';
+  }
+  else{
+    const f = interpolatePeak(floatBuf, peakBin, binHz);
+    if(f<MIN_FREQ || f>MAX_FREQ){
+      setStatus('listen','측정 범위를 벗어난 주파수','RANGE');
+    }else{
+      pushPeak(f);
+      const stable = stableFreq();
+      const unstable = isUnstable();
+      liveFreq.textContent = f.toFixed(1);
+      livePeak.textContent='검출'; livePeak.style.color='var(--green)';
+      if(unstable){
+        setStatus('noise','측정 불안정 — 반복 측정해주세요','UNSTABLE');
+      }else{
+        setStatus('good','신호 검출','DETECTED');
+      }
+      updateResult(stable);
+    }
+  }
+
+  rafId=requestAnimationFrame(analyzeLoop);
+}
+
+function interpolatePeak(buf, bin, binHz){
+  const a=buf[bin-1], b=buf[bin], c=buf[bin+1];
+  const denom=(a-2*b+c);
+  let delta=0;
+  if(denom!==0) delta=0.5*(a-c)/denom;
+  if(!isFinite(delta)||Math.abs(delta)>1) delta=0;
+  return (bin+delta)*binHz;
+}
+
+function computeRMS(){
+  if(!analyser) return 0;
+  const tbuf = new Float32Array(analyser.fftSize);
+  try{ analyser.getFloatTimeDomainData(tbuf); }catch(e){ return 0; }
+  let s=0; for(let i=0;i<tbuf.length;i++){ s += tbuf[i]*tbuf[i]; }
+  return Math.sqrt(s/tbuf.length);
+}
+
+function applyNoiseReduction(floatBuf, byteBuf, binHz){
+  const N=floatBuf.length;
+  if(!noiseProfile || noiseProfile.length!==N){ noiseProfile=new Float32Array(N); noiseProfileReady=false; }
+  const rms=computeRMS();
+  const quiet=(!collecting) && rms<0.05;
+  const beta=noiseProfileReady?0.92:0.6;
+  const alpha=1.5, floorRatio=0.06;
+  const minDb=analyser?analyser.minDecibels:-100, maxDb=analyser?analyser.maxDecibels:-30;
+  const rng=Math.max(1,maxDb-minDb);
+  const out=new Uint8Array(N);
+  for(let i=0;i<N;i++){
+    const lin=Math.pow(10,(floatBuf[i]||-200)/20);
+    if(quiet){ noiseProfile[i]=beta*noiseProfile[i]+(1-beta)*lin; }
+    let cleaned=lin-alpha*noiseProfile[i];
+    if(cleaned < floorRatio*lin) cleaned=floorRatio*lin;
+    if(cleaned < 1e-7) cleaned=1e-7;
+    const cdb=20*Math.log10(cleaned);
+    floatBuf[i]=cdb;
+    let b=(cdb-minDb)/rng*255;
+    out[i]=b<0?0:(b>255?255:b);
+  }
+  if(quiet && !noiseProfileReady){ noiseProfileReady=true; setNoiseChip('적용 중'); }
+  return out;
+}
+
+function computeLockCenter(){
+  let c=parseFloat(estFreq.value);
+  if(isFinite(c) && c>0) return c;
+  const mass=parseFloat(inMass.value), width=parseFloat(inWidth.value),
+        span=parseFloat(inSpan.value), cf=parseFloat(inCF.value), targetN=parseFloat(inTargetN.value);
+  const ef=calcExpectedFreq(mass,width,span,targetN,cf);
+  if(isFinite(ef) && ef>0) return ef;
+  const k=parseFloat(kconst.value)||1000;
+  if(isFinite(span) && span>0) return k/span;
+  return NaN;
+}
+
+function setNoiseChip(txt){
+  const el=document.getElementById('nrChip');
+  if(!el) return;
+  el.textContent=txt||''; el.style.display=txt?'inline-flex':'none';
+}
+
+function detectFundamentalBandpass(floatBuf, binHz, globalMinBin, globalMaxBin){
+  const span = parseFloat(inSpan.value) || 0;
+  const k = parseFloat(kconst.value) || 1000;
+  let expected = parseFloat(estFreq.value);
+  if(!isFinite(expected) && span>0){ expected = k / span; }
+  let loBin = globalMinBin, hiBin = globalMaxBin;
+  if(isFinite(expected) && expected>0){
+    const lo = Math.max(MIN_FREQ, expected*0.7);
+    const hi = Math.min(MAX_FREQ, expected*1.3);
+    loBin = Math.max(globalMinBin, Math.floor(lo/binHz));
+    hiBin = Math.min(globalMaxBin, Math.ceil(hi/binHz));
+  }
+  if(targetLock.enabled && lockLoBin>=0 && lockHiBin>lockLoBin){
+    loBin=Math.max(globalMinBin, lockLoBin);
+    hiBin=Math.min(globalMaxBin, lockHiBin);
+  }
+  const cands = [];
+  for(let i=loBin;i<=hiBin;i++){
+    const db = floatBuf[i];
+    const mag = Math.pow(10, db/20);
+    cands.push({bin:i,mag});
+  }
+  cands.sort((a,b)=>b.mag-a.mag);
+  if(!cands.length) return null;
+  const selected = [];
+  for(const c of cands.slice(0,12).reverse()){
+    const f = c.bin * binHz;
+    let isHarm=false;
+    for(const s of selected){
+      const ratio = f / s.freq;
+      for(let n=2;n<=4;n++){
+        if(Math.abs(ratio - n) < 0.035){ isHarm = true; break; }
+      }
+      if(isHarm) break;
+    }
+    if(!isHarm) selected.push({freq:f,mag:c.mag,bin:c.bin});
+    if(selected.length>=1) break;
+  }
+  if(!selected.length){
+    const top=cands[0];
+    return {freq: top.bin*binHz, mag: top.mag};
+  }
+  const best = selected[0];
+  const refined = interpolatePeak(floatBuf, best.bin, binHz);
+  return {freq: refined, mag: best.mag};
+}
+
+/* ----------------------------------------------------------------
+   측정 안정화
+   ---------------------------------------------------------------- */
+function pushPeak(f){
+  peakBuffer.push(f);
+  if(peakBuffer.length>BUF_SIZE) peakBuffer.shift();
+}
+function median(arr){
+  if(!arr.length) return NaN;
+  const s=[...arr].sort((x,y)=>x-y);
+  const m=Math.floor(s.length/2);
+  return s.length%2 ? s[m] : (s[m-1]+s[m])/2;
+}
+function stableFreq(){
+  if(!peakBuffer.length) return NaN;
+  let med=median(peakBuffer);
+  if(!isFinite(med) || med===0){
+    const avg = peakBuffer.reduce((s,v)=>s+v,0)/peakBuffer.length;
+    if(!isFinite(avg) || avg===0) return NaN;
+    med = avg;
+  }
+  const kept=peakBuffer.filter(v=>Math.abs(v-med)<=med*OUTLIER_TOL);
+  const use=kept.length?kept:peakBuffer;
+  return use.reduce((a,b)=>a+b,0)/use.length;
+}
+function isUnstable(){
+  if(peakBuffer.length<3) return false;
+  const med=median(peakBuffer);
+  const spread=Math.max(...peakBuffer)-Math.min(...peakBuffer);
+  return spread > med*OUTLIER_TOL*2;
+}
+
+/* ----------------------------------------------------------------
+   최종 결과 카드 갱신
+   ---------------------------------------------------------------- */
+function updateResult(freq, extConf){
+  if(!isFinite(freq)) return;
+  const {mass,width,span,cf}=readInputs();
+  const {rawN,corrN,kgf}=calcTension(mass,width,span,freq,cf);
+  const {targetN, tolPct}=readTarget();
+  let judge='--';
+  let judgeOk = null;
+  if(isFinite(targetN) && isFinite(tolPct)){
+    const lower = targetN * (1 - tolPct/100);
+    const upper = targetN * (1 + tolPct/100);
+    judgeOk = corrN >= lower && corrN <= upper;
+    judge = judgeOk ? 'OK' : 'NG';
+    resTarget.textContent = targetN.toFixed(1)+' N ±'+tolPct.toFixed(0)+'%';
+    resJudge.textContent = judge;
+    resJudgeWrap.className = judgeOk ? 'judge-ok' : 'judge-ng';
+  }else{
+    resTarget.textContent = '--';
+    resJudge.textContent = '--';
+    resJudgeWrap.className = '';
+  }
+  const realtimeConf = extConf !== undefined ? extConf :
+    (peakBuffer.length < 2 ? 15 :
+     peakBuffer.length < BUF_SIZE ? 25 + peakBuffer.length * 8 :
+     isUnstable() ? 20 : 65);
+  currentResult={
+    time:new Date(), mass,width,span,cf, freq, targetN, tolPct,
+    rawN, corrN, kgf, confidence: Math.round(realtimeConf)
+  };
+  $('resTensionN').textContent=corrN.toFixed(1);
+  $('resTensionKgf').textContent=kgf.toFixed(2);
+  $('resFreq').textContent=freq.toFixed(1);
+  $('resRawN').textContent=rawN.toFixed(1);
+  $('resMass').textContent=mass;
+  $('resWidth').textContent=width;
+  $('resSpan').textContent=span;
+  $('resCF').textContent=cf.toFixed(3);
+  $('resTime').textContent=fmtTime(currentResult.time);
+  try{ renderTargetGauge(corrN, targetN, tolPct, judgeOk); }catch(e){}
+}
+
+function finalizeCollection(){
+  if(!collectedSnapshots.length){
+    setStatus('listen','유효한 스냅샷이 없습니다','READY');
+    toast('충격은 감지되었으나 유효한 주파수를 수집하지 못했습니다. 다시 시도하세요.','err');
+    return;
+  }
+  const last = collectedSnapshots.slice(-20);
+  const freqs = last.map(s=>s.f);
+  const mags = last.map(s=>s.mag);
+  freqs.sort((a,b)=>a-b);
+  const med = median(freqs);
+  const lower = med*0.95, upper = med*1.05;
+  const filtered = last.filter(s=>s.f>=lower && s.f<=upper);
+  const finalFreq = filtered.length ? filtered.reduce((s,i)=>s+i.f,0)/filtered.length : (freqs[Math.floor(freqs.length/2)]||NaN);
+  const minF = Math.min(...freqs), maxF = Math.max(...freqs);
+  const rangePercent = (maxF - minF)/med*100;
+
+  analyser.getFloatFrequencyData(floatBuf);
+  const sr = audioCtx.sampleRate; const binHz = sr / analyser.fftSize;
+  const bandMin = Math.max(1, Math.floor(MIN_FREQ/binHz));
+  const bandMax = Math.min(floatBuf.length-2, Math.ceil(MAX_FREQ/binHz));
+  let avgNoise = 0, cnt=0;
+  for(let i=bandMin;i<=bandMax;i++){ avgNoise += Math.pow(10,(floatBuf[i]||-200)/20); cnt++; }
+  avgNoise = cnt? avgNoise/cnt : 1e-6;
+  const avgMag = mags.reduce((s,v)=>s+v,0)/mags.length;
+  const snr = avgMag / Math.max(1e-6, avgNoise);
+  const agreement = filtered.length / Math.max(1,last.length);
+
+  let confidence = Math.min(100, (Math.log10(snr+1)*30 + agreement*50 + Math.max(0,40 - rangePercent)));
+  if(!isFinite(confidence)) confidence = 0; if(confidence<0) confidence=0;
+
+  updateResult(finalFreq, confidence);
+  if(currentResult){ currentResult.rangePercent = rangePercent; }
+  $('resConf').textContent = Math.round(confidence);
+  try{ renderConfidenceRing(Math.round(confidence)); }catch(e){}
+  const hasResult = isFinite(finalFreq);
+  btnSave.disabled = !hasResult;
+  if(btnSkip) btnSkip.disabled = !hasResult;
+  if(hasResult) setStep(3);
+
+  if(rangePercent<=3 && agreement>=0.8){
+    setStatus('good','안정적인 주파수 감지 — 자동 종료','STABLE');
+    held=true; btnHold.classList.add('active'); btnHold.innerHTML='<span class="ico">▶</span> 고정 해제';
+    measuring=false;
+    if(rafId){ cancelAnimationFrame(rafId); rafId=null; }
+    if(srcNode){ try{srcNode.disconnect();}catch(e){} srcNode=null; }
+    if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
+    if(audioCtx){ try{audioCtx.close();}catch(e){} audioCtx=null; }
+    analyser=null;
+    btnStart.disabled=false; btnStop.disabled=true; selFFT.disabled=false; btnHold.disabled=true;
+    toast('측정이 자동으로 종료되었습니다. 결과가 고정되었습니다.','ok');
+  }else{
+    setStatus('weak','결과 불안정 — 재측정 권장','UNSTABLE');
+    toast('측정이 완료되었으나 안정성이 낮습니다 (Confidence '+Math.round(confidence)+'%).','warn');
+  }
+}
+
+/* ================================================================
+   스펙트럼 그래프
+   ================================================================ */
+function setupCanvas(){
+  const dpr=window.devicePixelRatio||1;
+  const w=canvas.clientWidth, h=200;
+  canvas.width=Math.round(w*dpr);
+  canvas.height=Math.round(h*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+function drawSpectrum(byte, binHz, minBin, maxBin, peakBin){
+  const W=canvas.clientWidth, H=200;
+  ctx.clearRect(0,0,W,H);
+  if(!byte || byte.length===0){ return; }
+
+  ctx.strokeStyle='rgba(100,116,139,.22)'; ctx.fillStyle='#94a3b8';
+  ctx.font='11px "Noto Sans KR","Malgun Gothic",sans-serif'; ctx.textAlign='center'; ctx.lineWidth=1;
+  const grids=[10,500,1000,2000,3000,4000,5000];
+  grids.forEach(fr=>{
+    const x=(fr-MIN_FREQ)/(MAX_FREQ-MIN_FREQ)*W;
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H-14); ctx.stroke();
+    ctx.fillText(fr>=1000?(fr/1000)+'k':fr, x, H-2);
+  });
+
+  if(lockLoBin>=0 && lockHiBin>lockLoBin){
+    const lx=((lockLoBin*binHz)-MIN_FREQ)/(MAX_FREQ-MIN_FREQ)*W;
+    const rx=((lockHiBin*binHz)-MIN_FREQ)/(MAX_FREQ-MIN_FREQ)*W;
+    ctx.fillStyle='rgba(0,153,204,.10)';
+    ctx.fillRect(lx,0,Math.max(2,rx-lx),H-14);
+    ctx.strokeStyle='rgba(3,105,161,.5)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(lx,0); ctx.lineTo(lx,H-14); ctx.moveTo(rx,0); ctx.lineTo(rx,H-14); ctx.stroke();
+    if(isFinite(lockCenter)){
+      const cx=(lockCenter-MIN_FREQ)/(MAX_FREQ-MIN_FREQ)*W;
+      ctx.setLineDash([3,3]); ctx.strokeStyle='rgba(3,105,161,.8)';
+      ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx,H-14); ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+  const fMin=Math.max(1,Math.floor(MIN_FREQ/binHz));
+  const fMax=Math.min(byte.length-2,Math.ceil(MAX_FREQ/binHz));
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'rgba(0,153,204,.5)');
+  grad.addColorStop(1,'rgba(0,153,204,.04)');
+  ctx.fillStyle=grad;
+  ctx.beginPath(); ctx.moveTo(0,H-14);
+  const usableH=H-22;
+  for(let i=fMin;i<=fMax;i++){
+    const f=i*binHz;
+    const x=(f-MIN_FREQ)/(MAX_FREQ-MIN_FREQ)*W;
+    const y=(H-14)-(byte[i]/255)*usableH;
+    ctx.lineTo(x,y);
+  }
+  ctx.lineTo(W,H-14); ctx.closePath(); ctx.fill();
+
+  if(peakBin>=minBin && peakBin<=maxBin){
+    const pf=peakBin*binHz;
+    const px=(pf-MIN_FREQ)/(MAX_FREQ-MIN_FREQ)*W;
+    ctx.strokeStyle='#111827'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(px,0); ctx.lineTo(px,H-14); ctx.stroke();
+    const label=Math.round(pf)+' Hz';
+    ctx.font='700 12px "Noto Sans KR","Malgun Gothic",sans-serif';
+    const tw=ctx.measureText(label).width+12;
+    let bx=px-tw/2; bx=Math.max(2,Math.min(bx,W-tw-2));
+    ctx.fillStyle='rgba(17,24,39,.10)';
+    ctx.fillRect(bx,4,tw,18);
+    ctx.fillStyle='#111827'; ctx.textAlign='center';
+    ctx.fillText(label, bx+tw/2, 17);
+  }
+}
+
+/* ================================================================
+   측정값 고정
+   ================================================================ */
+function toggleHold(){
+  if(!measuring) return;
+  held=!held;
+  btnHold.classList.toggle('active',held);
+  if(held){
+    btnHold.innerHTML='<span class="ico">▶</span> 고정 해제';
+    setStatus('good','측정값 고정됨','HOLD');
+    toast('현재 측정값을 고정했습니다.', 'warn');
+    if(currentResult){ btnSave.disabled=false; if(btnSkip) btnSkip.disabled=false; setStep(3); }
+  }else{
+    btnHold.innerHTML='<span class="ico">⏸</span> 측정값 고정';
+    setStatus('listen','측정 중 — 벨트를 튕겨주세요','LISTENING');
+  }
+}
+
+/* ================================================================
+   결과 테이블 렌더링 (transposed: rows=벨트ID, columns=호기)
+   ================================================================ */
+function renderRobots(){
+  const head=$('histHead'), body=$('histBody');
+  if(!head||!body) return;
+  if(!robots.length){
+    head.innerHTML='<tr><th colspan="3" style="text-align:center;color:#9CA3AF;">저장된 측정이 없습니다.</th></tr>';
+    body.innerHTML='';
+    return;
+  }
+  // Collect all belt IDs that were used across all robots
+  const allKeys = BELT_IDS.map(d=>d.key);
+  // Build column headers per robot
+  const robotHeaders = robots.map(r=>`<th>${r.unit ? r.unit+'호기' : '(미설정)'}</th>`).join('');
+  head.innerHTML = `<tr>
+    <th>벨트 ID</th><th>종류 / Target</th>${robotHeaders}
+  </tr>`;
+  body.innerHTML = allKeys.map(key=>{
+    const def = BELT_IDS.find(d=>d.key===key);
+    if(!def) return '';
+    const p = BELT_PRESETS[def.type];
+    // check if any robot measured this ID
+    const anyMeasured = robots.some(r=>r.slots.find(s=>s.key===key));
+    if(!anyMeasured) return '';
+    const targetStr = p.targetN+' N ±'+p.tolPct+'%';
+    const typeLbl = def.type==='drive' ? '구동모듈' : '리프팅';
+    const cells = robots.map(r=>{
+      const slot = r.slots.find(s=>s.key===key);
+      if(!slot) return '<td class="val-empty">-</td>';
+      if(!slot.values.length) return '<td class="val-empty">—</td>';
+      const avg = slot.average != null ? slot.average :
+        slot.values.reduce((a,v)=>a+v.corrN,0)/slot.values.length;
+      const judge = slot.avgJudge || (avg >= p.targetN*(1-p.tolPct/100) && avg <= p.targetN*(1+p.tolPct/100) ? 'OK' : 'NG');
+      const cls = judge==='OK' ? 'val-ok' : 'val-ng';
+      return `<td class="val-cell ${cls}" style="text-align:center;font-weight:700;">${avg.toFixed(1)}<br><span style="font-size:9px;font-weight:800;">${judge}</span></td>`;
+    }).join('');
+    return `<tr>
+      <td style="font-weight:800;color:#111;">${key}</td>
+      <td style="font-size:11px;color:#6B7280;">${typeLbl}<br>${targetStr}</td>
+      ${cells}
+    </tr>`;
+  }).filter(Boolean).join('');
+  updateSessionSwitchRow();
+  updateReportButtons();
+}
+function renderSessions(){ renderRobots(); }  // 하위호환
+
+function clearHistory(){
+  if(!robots.length){ toast('초기화할 측정이 없습니다.'); return; }
+  if(confirm('모든 측정 기록을 삭제할까요?')){
+    robots=[]; activeRobot=null; activeSlotIdx=0;
+    renderRobots(); setStep(1);
+    updateSlotProgress();
+    toast('측정 기록을 초기화했습니다.','warn');
+  }
+}
+
+/* ================================================================
+   CSV 다운로드 (로봇 × 슬롯 형식)
+   ================================================================ */
+function downloadCSV(){
+  if(!robots.length){ toast('다운로드할 측정이 없습니다.','err'); return; }
+  const usedKeys = BELT_IDS.filter(def=>robots.some(r=>r.slots.find(s=>s.key===def.key))).map(d=>d.key);
+  const header=['호기','날짜',...usedKeys.flatMap(k=>[k+'_평균(N)',k+'_판정'])];
+  const rows = robots.map(r=>{
+    const unit = r.unit ? r.unit+'호기' : '(미설정)';
+    const date = fmtTime(r.createdAt, true);
+    const slotCols = usedKeys.flatMap(k=>{
+      const slot = r.slots.find(s=>s.key===k);
+      if(!slot||!slot.values.length) return ['',''];
+      const p = BELT_PRESETS[slot.type];
+      const avg = slot.average!=null ? slot.average : slot.values.reduce((a,v)=>a+v.corrN,0)/slot.values.length;
+      const judge = slot.avgJudge || (avg>=p.targetN*(1-p.tolPct/100)&&avg<=p.targetN*(1+p.tolPct/100)?'OK':'NG');
+      return [avg.toFixed(2), judge];
+    });
+    return [unit, date, ...slotCols];
+  });
+  const csv='﻿'+[header,...rows].map(line=>line.join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const stamp=fmtTime(new Date(),true).replace(/[: ]/g,'-');
+  a.href=url; a.download='belt_tension_'+stamp+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('CSV 파일을 다운로드했습니다.','ok');
+}
+
+/* ================================================================
+   PDF 보고서 다운로드 (센서점검 앱 동일 양식)
+   ================================================================ */
+async function downloadPDF(){
+  if(!robots.length){ toast('다운로드할 측정이 없습니다.','err'); return; }
+  toast('PDF 생성 중...','ok');
+  try{
+    const {jsPDF} = window.jspdf;
+    const doc = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
+    const W=210, M=14;
+    const now = fmtTime(new Date(), true);
+
+    /* ---- 열 너비 ---- */
+    const TW = {id:16, round:14, freq:40, tension:52, judge:26, time:34};
+    const tableW = TW.id + TW.round + TW.freq + TW.tension + TW.judge + TW.time;
+
+    /* ---- 헤더 ---- */
+    doc.setFillColor(255,255,255); doc.rect(0,0,W,22,'F');
+    doc.setDrawColor(229,232,237); doc.setLineWidth(0.3); doc.line(0,22,W,22);
+    try{
+      const logoImg = await getLogoImage();
+      const maxW=40, maxH=12;
+      const srcW = logoImg.naturalWidth||logoImg.width||1;
+      const srcH = logoImg.naturalHeight||logoImg.height||1;
+      const ratio = srcW/srcH;
+      let lw=maxW, lh=maxW/ratio;
+      if(lh>maxH){ lh=maxH; lw=maxH*ratio; }
+      doc.addImage(logoImg,'PNG',M,4+(maxH-lh)/2,lw,lh);
+    }catch(e){
+      doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(17,17,17); doc.text('HL Robotics',M,13);
+    }
+    doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(150,150,150);
+    doc.text('BELT TENSION MEASUREMENT REPORT', M+42, 10);
+    doc.text(now, W-M, 10, {align:'right'});
+
+    let y = 27;
+
+    const allOK = robots.every(r=>r.slots.every(s=>!s.completedAt||s.avgJudge==='OK'));
+    const ngCount = robots.reduce((n,r)=>n+r.slots.filter(s=>s.avgJudge==='NG').length, 0);
+    pdfText(doc,
+      '호기: '+robots.length+'   NG 슬롯: '+ngCount+'   출력일시: '+now,
+      M, y-2, {size:7.5, color:[90,90,90]});
+    y += 5;
+
+    /* ---- 열 헤더 그리기 함수 ---- */
+    const hColDefs = [
+      {t:'벨트 ID',  w:TW.id},
+      {t:'회차',    w:TW.round},
+      {t:'측정주파수 (Hz)', w:TW.freq},
+      {t:'측정장력 (N)',   w:TW.tension},
+      {t:'판정',    w:TW.judge},
+      {t:'측정시각', w:TW.time},
+    ];
+    function drawColHeaders(yy){
+      let hx=M;
+      hColDefs.forEach(h=>{
+        doc.setFillColor(100,120,150); doc.setDrawColor(100,120,150); doc.setLineWidth(0.25);
+        doc.rect(hx,yy,h.w,5.5,'FD');
+        pdfText(doc,h.t,hx+h.w/2,yy+2.75,{align:'center',valign:'middle',size:6.5,bold:true,color:[255,255,255]});
+        hx+=h.w;
+      });
+      return yy+5.5;
+    }
+
+    /* ---- 호기별 섹션 ---- */
+    for(const robot of robots){
+      const unitStr = robot.unit ? robot.unit+'호기' : '(미설정)';
+      const robotOK = robot.slots.filter(s=>s.completedAt).every(s=>s.avgJudge==='OK');
+      const robotNG = robot.slots.some(s=>s.avgJudge==='NG');
+      const robotJudge = robotNG ? 'NG' : (robot.completedAt ? 'OK' : '-');
+
+      if(y > 252){ doc.addPage(); y=14; }
+
+      /* 호기 배너 (다크 블루) */
+      doc.setFillColor(30,60,114); doc.setDrawColor(30,60,114); doc.setLineWidth(0.3);
+      doc.rect(M,y,tableW,7,'FD');
+      pdfText(doc,unitStr,M+3,y+3.5,{size:9,bold:true,color:[255,255,255],valign:'middle'});
+      pdfText(doc,robotJudge,M+tableW-3,y+3.5,{size:9,bold:true,
+        color:robotNG?[255,180,180]:robot.completedAt?[150,255,180]:[200,210,220],align:'right',valign:'middle'});
+      y += 7;
+
+      y = drawColHeaders(y);
+
+      /* 슬롯별 측정값 */
+      for(const slot of robot.slots){
+        const p = BELT_PRESETS[slot.type];
+        if(!slot.values.length) continue;
+
+        slot.values.forEach((v,vi)=>{
+          const rowH=7;
+          if(y+rowH>285){ doc.addPage(); y=14; y=drawColHeaders(y); }
+          const isOK=v.judge==='OK', isNG=v.judge==='NG';
+          let rx=M;
+          doc.setDrawColor(200,205,215); doc.setLineWidth(0.25);
+          if(vi%2===0){ doc.setFillColor(245,248,252); doc.rect(rx,y,tableW,rowH,'F'); }
+
+          /* 벨트 ID */
+          doc.rect(rx,y,TW.id,rowH);
+          pdfText(doc,slot.label,rx+TW.id/2,y+rowH/2,{size:7.5,bold:true,color:[40,40,40],align:'center',valign:'middle'});
+          rx+=TW.id;
+
+          /* 회차 */
+          doc.rect(rx,y,TW.round,rowH);
+          pdfText(doc,(vi+1)+'회',rx+TW.round/2,y+rowH/2,{size:7,color:[60,60,60],align:'center',valign:'middle'});
+          rx+=TW.round;
+
+          /* 주파수 */
+          doc.rect(rx,y,TW.freq,rowH);
+          pdfText(doc,v.freq.toFixed(1),rx+TW.freq/2,y+rowH/2,{size:7,color:[60,60,60],align:'center',valign:'middle'});
+          rx+=TW.freq;
+
+          /* 장력 */
+          doc.rect(rx,y,TW.tension,rowH);
+          pdfText(doc,v.corrN.toFixed(1)+' N',rx+TW.tension/2,y+rowH/2,{
+            size:7,bold:isOK||isNG,color:isOK?[25,120,60]:isNG?[160,20,20]:[60,60,60],align:'center',valign:'middle'});
+          rx+=TW.tension;
+
+          /* 판정 */
+          if(isOK){ doc.setFillColor(220,245,225); doc.setDrawColor(80,180,100); doc.rect(rx,y,TW.judge,rowH,'FD'); }
+          else if(isNG){ doc.setFillColor(255,230,230); doc.setDrawColor(220,80,80); doc.rect(rx,y,TW.judge,rowH,'FD'); }
+          else{ doc.setFillColor(240,241,242); doc.setDrawColor(150,155,160); doc.rect(rx,y,TW.judge,rowH,'FD'); }
+          pdfText(doc,v.judge||'-',rx+TW.judge/2,y+rowH/2,{
+            size:7,bold:true,color:isOK?[25,120,60]:isNG?[160,20,20]:[130,130,130],align:'center',valign:'middle'});
+          rx+=TW.judge;
+
+          /* 시각 */
+          doc.setDrawColor(200,205,215); doc.rect(rx,y,TW.time,rowH);
+          pdfText(doc,v.time?fmtTime(v.time):'-',rx+TW.time/2,y+rowH/2,{size:6.5,color:[100,100,100],align:'center',valign:'middle'});
+          y+=rowH;
+        });
+
+        /* 슬롯 평균 행 */
+        if(slot.values.length>0 && slot.average!=null){
+          const rowH=7;
+          if(y+rowH>285){ doc.addPage(); y=14; }
+          const isOK=slot.avgJudge==='OK', isNG=slot.avgJudge==='NG';
+          const avgColor=isOK?[25,120,60]:isNG?[160,20,20]:[60,60,60];
+          if(isOK){ doc.setFillColor(220,245,225); doc.setDrawColor(80,180,100); }
+          else if(isNG){ doc.setFillColor(255,230,230); doc.setDrawColor(220,80,80); }
+          else{ doc.setFillColor(240,241,242); doc.setDrawColor(150,155,160); }
+          doc.setLineWidth(0.3); doc.rect(M,y,tableW,rowH,'FD');
+          pdfText(doc,slot.label+' 평균',M+TW.id/2,y+rowH/2,{size:7,bold:true,color:[40,40,40],align:'center',valign:'middle'});
+          pdfText(doc,'-',M+TW.id+TW.round/2,y+rowH/2,{size:7,color:[130,130,130],align:'center',valign:'middle'});
+          pdfText(doc,'-',M+TW.id+TW.round+TW.freq/2,y+rowH/2,{size:7,color:[130,130,130],align:'center',valign:'middle'});
+          pdfText(doc,slot.average.toFixed(1)+' N',M+TW.id+TW.round+TW.freq+TW.tension/2,y+rowH/2,{size:8,bold:true,color:avgColor,align:'center',valign:'middle'});
+          pdfText(doc,slot.avgJudge||'-',M+TW.id+TW.round+TW.freq+TW.tension+TW.judge/2,y+rowH/2,{size:8,bold:true,color:avgColor,align:'center',valign:'middle'});
+          y+=rowH;
+        }
+      }
+      y+=5;
+    }
+
+    /* ---- 푸터 ---- */
+    const pages = doc.internal.getNumberOfPages();
+    for(let i=1;i<=pages;i++){
+      doc.setPage(i);
+      doc.setDrawColor(229,232,237); doc.setLineWidth(0.3); doc.line(M,287,M+tableW,287);
+      doc.setFont('helvetica','normal'); doc.setFontSize(6); doc.setTextColor(190,190,190);
+      doc.text('HL Robotics - Belt Tension Measurement Report  |  '+now+'  |  '+i+' / '+pages, W/2, 292, {align:'center'});
+    }
+
+    /* ---- 저장 ---- */
+    const st=new Date();
+    const pn=n=>String(n).padStart(2,'0');
+    doc.save('belt_tension_report_'+st.getFullYear()+pn(st.getMonth()+1)+pn(st.getDate())+'_'+pn(st.getHours())+pn(st.getMinutes())+'.pdf');
+    toast('PDF 보고서를 다운로드했습니다.','ok');
+  }catch(e){
+    console.error('PDF 생성 실패',e);
+    toast('PDF 생성에 실패했습니다.','err');
+  }
+}
+
+function fmtTime(d, withDate=false){
+  const p=n=>String(n).padStart(2,'0');
+  const t=p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+  if(!withDate) return t;
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+t;
+}
+
+/* ================================================================
+   이벤트 바인딩 & 초기화
+   ================================================================ */
+btnStart.addEventListener('click', startMeasure);
+btnStop.addEventListener('click', stopMeasure);
+btnHold.addEventListener('click', toggleHold);
+btnSave.addEventListener('click', saveCurrentSlot);
+if(btnSkip) btnSkip.addEventListener('click', skipMeasurement);
+if(btnCancelSetup) btnCancelSetup.addEventListener('click', cancelCurrentRobot);
+btnClear.addEventListener('click', clearHistory);
+btnCSV.addEventListener('click', downloadCSV);
+btnPDF.addEventListener('click', downloadPDF);
+btnEstimate.addEventListener('click', ()=>{
+  const span = parseFloat(inSpan.value);
+  const k = parseFloat(kconst.value)||1000;
+  if(!isFinite(span) || span<=0){ toast('Span 값을 입력해주세요.','err'); return; }
+  const est = k / span;
+  estFreq.value = est.toFixed(2);
+  toast('예상 주파수를 계산했습니다: '+estFreq.value+' Hz','ok');
+});
+['input','change'].forEach(evt=>{
+  inMass.addEventListener(evt, refreshPresetEstimate);
+  inWidth.addEventListener(evt, refreshPresetEstimate);
+  inSpan.addEventListener(evt, refreshPresetEstimate);
+  inCF.addEventListener(evt, refreshPresetEstimate);
+  inTargetN.addEventListener(evt, refreshPresetEstimate);
+});
+
+/* ---------- 측정 보조 토글 ---------- */
+const swNoise=$('swNoise'), swLock=$('swLock'), btnRelearn=$('btnRelearn'),
+      selLockWidth=$('selLockWidth'), lockWidthWrap=$('lockWidthWrap');
+function setSwitch(btn,on){ btn.setAttribute('aria-pressed', on?'true':'false'); }
+function updateAssistInfo(){
+  const el=document.getElementById('lockDesc');
+  if(!el) return;
+  if(!targetLock.enabled){
+    el.textContent='예상 주파수 주변의 좁은 대역만 탐색해 엉뚱한 피크를 무시합니다.'; return;
+  }
+  const c=computeLockCenter();
+  el.textContent=(isFinite(c)&&c>0)
+    ? ('중심 ≈ '+c.toFixed(1)+' Hz · ±'+targetLock.widthPct+'% 대역만 탐색합니다.')
+    : '예상 주파수나 목표 장력을 입력하면 중심이 설정됩니다.';
+}
+swNoise.addEventListener('click', ()=>{
+  noiseReduction.enabled=!noiseReduction.enabled;
+  setSwitch(swNoise, noiseReduction.enabled);
+  btnRelearn.style.display = noiseReduction.enabled?'inline-flex':'none';
+  if(noiseReduction.enabled){
+    noiseProfile=null; noiseProfileReady=false; setNoiseChip('학습 중');
+    toast('노이즈 저감 ON — 조용한 상태에서 주변 소음을 자동 학습합니다.','ok');
+  }else{ setNoiseChip(''); toast('노이즈 저감 OFF','warn'); }
+});
+btnRelearn.addEventListener('click', ()=>{
+  noiseProfile=null; noiseProfileReady=false; setNoiseChip('학습 중');
+  toast('소음 프로파일을 다시 학습합니다.','ok');
+});
+swLock.addEventListener('click', ()=>{
+  targetLock.enabled=!targetLock.enabled;
+  setSwitch(swLock, targetLock.enabled);
+  lockWidthWrap.style.display = targetLock.enabled?'inline-flex':'none';
+  if(targetLock.enabled){
+    const c=computeLockCenter();
+    if(isFinite(c)&&c>0) toast('측정 대상 고정 ON — 중심 ≈ '+c.toFixed(1)+' Hz','ok');
+    else toast('측정 대상 고정 ON — 예상 주파수나 목표 장력을 입력하면 정확해집니다.','warn');
+  }else toast('측정 대상 고정 OFF','warn');
+  updateAssistInfo();
+});
+selLockWidth.addEventListener('change', ()=>{
+  targetLock.widthPct=parseInt(selLockWidth.value,10)||30; updateAssistInfo();
+});
+['input','change'].forEach(evt=>{
+  [inMass,inWidth,inSpan,inCF,inTargetN,estFreq,kconst].forEach(el=>el.addEventListener(evt, updateAssistInfo));
+});
+
+window.addEventListener('resize', setupCanvas);
+window.addEventListener('beforeunload', ()=>{ if(measuring) stopMeasure(); });
+
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden && measuring)
+    toast('탭이 백그라운드로 전환됐습니다. 측정은 계속 실행됩니다.', 'warn', 2000);
+});
+
+/* ====================================================================
+   목표 허용밴드 게이지 / Confidence 링
+   ==================================================================== */
+function renderTargetGauge(corrN, targetN, tolPct, judgeOk){
+  var wrap=document.getElementById('gaugeWrap');
+  var zone=document.getElementById('gaugeZone');
+  var marker=document.getElementById('gaugeMarker');
+  var low=document.getElementById('gaugeLow');
+  var high=document.getElementById('gaugeHigh');
+  if(!zone||!marker) return;
+  var ok = isFinite(targetN) && isFinite(tolPct) && targetN>0 && tolPct>0;
+  if(!ok){
+    if(wrap) wrap.classList.add('no-target');
+    zone.style.left='30%'; zone.style.width='40%';
+    marker.style.left='50%'; marker.classList.remove('ok','ng');
+    if(low) low.textContent='–'; if(high) high.textContent='–';
+    return;
+  }
+  if(wrap) wrap.classList.remove('no-target');
+  var lower=targetN*(1-tolPct/100), upper=targetN*(1+tolPct/100);
+  var pad=tolPct/100*2.4;
+  var domMin=targetN*(1-pad), domMax=targetN*(1+pad), span=domMax-domMin;
+  if(span<=0) span=1;
+  zone.style.left=((lower-domMin)/span*100)+'%';
+  zone.style.width=((upper-lower)/span*100)+'%';
+  var mk=(corrN-domMin)/span*100; mk=Math.max(0,Math.min(100,mk));
+  marker.style.left=mk+'%';
+  marker.classList.toggle('ok', judgeOk===true);
+  marker.classList.toggle('ng', judgeOk===false);
+  if(low) low.textContent=Math.round(lower);
+  if(high) high.textContent=Math.round(upper);
+}
+
+function renderConfidenceRing(pct){
+  var arc=document.getElementById('confArc');
+  if(!arc) return;
+  var circ=2*Math.PI*26;
+  var p=Math.max(0,Math.min(100, isFinite(pct)?pct:0));
+  arc.style.strokeDasharray=circ.toFixed(2);
+  arc.style.strokeDashoffset=(circ*(1-p/100)).toFixed(2);
+  arc.style.stroke = p>=90 ? 'var(--green)' : (p>=60 ? 'var(--warn)' : (p>0 ? 'var(--red)' : 'var(--line-2)'));
+}
+
+window.addEventListener('load', ()=>{
+  setupCanvas();
+  drawSpectrum(new Uint8Array(0),1,1,0,-1);
+  setStep(1);
+  refreshBeltBtns('drive'); refreshBeltBtns('lifting');
+  updateSlotProgress();
+  renderRobots();
+  updateReportButtons();
+  updateSessionSwitchRow();
+  renderConfidenceRing(0);
+  renderTargetGauge(NaN, NaN, NaN, null);
+  if(!canUseMicrophone()){
+    toast(micUnavailableMessage(), 'err');
+    btnStart.disabled=true;
+  }
+});

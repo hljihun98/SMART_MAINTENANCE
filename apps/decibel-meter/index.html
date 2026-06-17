@@ -1,1465 +1,392 @@
 <!--
- * SoundGuard Pro — 데시벨 측정기
+ * 음파식 벨트 장력 측정기
  *
  * 주요 기능
- * - 실시간 dB SPL 측정: Web Audio API의 RMS를 이용해 마이크 입력을 dB SPL로 변환하여 실시간 표시합니다.
- * - 원형·수평 바 게이지: SVG 원형 게이지와 수평 바 게이지로 소음 레벨을 직관적으로 표현합니다.
- * - 통계 표시: MIN/MAX/AVG 및 측정 경과 시간을 실시간으로 계산합니다.
- * - 실시간 차트: Chart.js를 사용해 최근 30초치 소음 파형을 시계열 차트로 표시합니다.
- * - 마이크 보정: -30~+30 dB 슬라이더로 환경에 맞게 보정값을 조정할 수 있습니다.
- * - Excel/PDF 내보내기: SheetJS로 .xlsx, jsPDF로 .pdf 형식으로 측정 기록을 저장합니다.
- * - 다크모드: 라이트/다크 테마를 토글 버튼으로 전환할 수 있습니다.
- * - PWA 지원: Service Worker를 이용한 오프라인 캐싱 및 홈화면 추가(설치)를 지원합니다.
+ * - 마이크 음파 분석: Web Audio API FFT를 이용해 10~5000 Hz 대역의 피크 주파수를 실시간으로 검출합니다.
+ * - 장력 자동 계산: T[N] = 4 × Mass × Width × Span² × Frequency² × 1e-9 공식으로 벨트 장력을 계산하며, 보정계수(CF)를 적용합니다.
+ * - 목표 장력 게이지: 허용 오차 범위를 시각적 게이지로 표시하고 OK/NG 판정을 제공합니다.
+ * - 노이즈 저감: 주변 소음 스펙트럼을 학습한 뒤 실시간 신호에서 차감(스펙트럴 서브트랙션)합니다.
+ * - 측정 대상 고정: 예상 주파수 주변의 좁은 밴드만 탐색해 엉뚱한 피크를 무시합니다.
+ * - 프리셋 지원: 리프팅 벨트(500 N ±10%), 구동모듈 벨트(170 N ±20%) 프리셋을 제공합니다.
+ * - 측정 기록·내보내기: 측정값을 표에 누적 저장하고 CSV 파일로 내보낼 수 있습니다.
+ *
+ * 만든 사람
+ * - 이름: 김지훈
+ * - 이메일: hljihun98@gmail.com
+ *
+ * 만든 날짜: 2026-06-03
  -->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SoundGuard Pro — 데시벨 측정기</title>
-  <meta name="description" content="산업현장용 실시간 데시벨 측정 애플리케이션" />
-  <meta name="theme-color" content="#f0f6ff" />
-
-  <!-- PWA Manifest (inline via JS) -->
-  <link rel="manifest" href="#" id="manifest-link" />
-
-  <!-- Chart.js CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-  <!-- SheetJS (xlsx) CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <!-- jsPDF CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <!-- jsPDF AutoTable CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.7.1/jspdf.plugin.autotable.min.js"></script>
-
-  <style>
-    /* =============================================
-       CSS 변수 & 테마
-    ============================================= */
-    :root {
-      /* ── 밝은 기본 테마 ── */
-      --bg-primary:   #f0f6ff;
-      --bg-secondary: #e4edf9;
-      --bg-card:      #ffffff;
-      --bg-glass:     rgba(255, 255, 255, 0.88);
-      --border:       rgba(100, 140, 210, 0.18);
-      --border-glow:  rgba(37, 120, 255, 0.28);
-
-      --text-primary:   #0e1f40;
-      --text-secondary: #2e4a80;
-      --text-muted:     #7a99c8;
-
-      --accent:      #2578ff;
-      --accent-soft: rgba(37, 120, 255, 0.10);
-      --green:       #00b96b;
-      --yellow:      #f5a800;
-      --red:         #e8203a;
-      --orange:      #f26d00;
-
-      --green-glow:  rgba(0, 185, 107, 0.25);
-      --yellow-glow: rgba(245, 168, 0, 0.3);
-      --red-glow:    rgba(232, 32, 58, 0.3);
-
-      --font-display: 'Courier New', 'Lucida Console', monospace;
-      --font-body:    'Segoe UI', system-ui, sans-serif;
-
-      --radius:    12px;
-      --radius-lg: 20px;
-      --shadow:    0 4px 24px rgba(37,120,255,0.10);
-      --transition: 0.25s cubic-bezier(0.4,0,0.2,1);
-    }
-
-    /* 다크 모드 (토글) */
-    body.dark-mode {
-      --bg-primary:   #0a0e1a;
-      --bg-secondary: #111827;
-      --bg-card:      #161d2e;
-      --bg-glass:     rgba(22, 29, 46, 0.85);
-      --border:       rgba(255,255,255,0.07);
-      --border-glow:  rgba(0, 212, 255, 0.3);
-      --text-primary:   #e8f4ff;
-      --text-secondary: #8ba3c4;
-      --text-muted:     #4a6080;
-      --accent:      #00d4ff;
-      --accent-soft: rgba(0, 212, 255, 0.12);
-      --green:       #00e676;
-      --yellow:      #ffea00;
-      --red:         #ff3d57;
-      --shadow:    0 8px 32px rgba(0,0,0,0.5);
-    }
-
-    /* =============================================
-       전체 레이아웃
-    ============================================= */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    html { scroll-behavior: smooth; }
-
-    body {
-      background-color: var(--bg-primary);
-      color: var(--text-primary);
-      font-family: var(--font-body);
-      min-height: 100vh;
-      overflow-x: hidden;
-      transition: background-color var(--transition), color var(--transition);
-    }
-
-    /* 배경: 밝고 부드러운 그라디언트 + 격자 */
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background-image:
-        linear-gradient(180deg, #ddeeff 0%, #f0f6ff 40%, #eaf1ff 100%),
-        linear-gradient(rgba(37,120,255,0.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(37,120,255,0.04) 1px, transparent 1px);
-      background-size: 100% 100%, 36px 36px, 36px 36px;
-      pointer-events: none;
-      z-index: 0;
-    }
-    body.dark-mode::before {
-      background-image:
-        linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
-      background-size: 40px 40px, 40px 40px;
-    }
-
-    .container {
-      position: relative;
-      z-index: 1;
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 16px;
-    }
-
-    /* =============================================
-       헤더
-    ============================================= */
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 14px 20px;
-      background: var(--bg-glass);
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      margin-bottom: 16px;
-      box-shadow: 0 2px 16px rgba(37,120,255,0.08);
-    }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .logo-icon {
-      width: 38px; height: 38px;
-      background: linear-gradient(135deg, var(--accent), #0040ff);
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 18px;
-    }
-    .logo-text {
-      font-family: var(--font-display);
-      font-size: 1.1rem;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      color: var(--accent);
-    }
-    .logo-sub {
-      font-size: 0.65rem;
-      color: var(--text-muted);
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-
-    .header-actions { display: flex; gap: 8px; align-items: center; }
-    .home-btn{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--t2,#6B7280);text-decoration:none;background:var(--card,#F9FAFB);border:1px solid var(--bd,#E5E7EB);border-radius:999px;padding:5px 12px;white-space:nowrap;transition:background .15s,color .15s;}
-    .home-btn:hover{background:var(--bd,#E5E7EB);color:#374151;}
-
-    /* 토글 버튼 */
-    .btn-icon {
-      width: 38px; height: 38px;
-      border: 1px solid var(--border);
-      background: var(--bg-card);
-      color: var(--text-secondary);
-      border-radius: 10px;
-      cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 16px;
-      transition: all var(--transition);
-    }
-    .btn-icon:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-
-    /* 날짜/시간 */
-    #datetime {
-      font-family: var(--font-display);
-      font-size: 0.72rem;
-      color: var(--text-muted);
-      letter-spacing: 0.05em;
-      text-align: right;
-    }
-
-    /* =============================================
-       메인 그리드
-    ============================================= */
-    .main-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      margin-bottom: 16px;
-    }
-
-    @media (max-width: 700px) {
-      .main-grid { grid-template-columns: 1fr; }
-    }
-
-    /* =============================================
-       카드 공통
-    ============================================= */
-    .card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 20px;
-      position: relative;
-      overflow: hidden;
-      transition: border-color var(--transition);
-      box-shadow: 0 2px 16px rgba(37,120,255,0.07);
-    }
-    .card::after {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 3px;
-      background: linear-gradient(90deg, transparent, var(--accent), transparent);
-      opacity: 0.5;
-    }
-    .card-title {
-      font-size: 0.65rem;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      margin-bottom: 14px;
-      font-weight: 600;
-    }
-
-    /* =============================================
-       원형 게이지 (메인 dB 표시)
-    ============================================= */
-    .gauge-card {
-      grid-column: span 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-
-    .gauge-wrapper {
-      position: relative;
-      width: 220px; height: 220px;
-      margin: 0 auto;
-    }
-
-    /* SVG 원형 게이지 */
-    .gauge-svg {
-      width: 100%; height: 100%;
-      transform: rotate(-135deg);
-    }
-    .gauge-track {
-      fill: none;
-      stroke: rgba(255,255,255,0.05);
-      stroke-width: 14;
-      stroke-linecap: round;
-    }
-    .gauge-fill {
-      fill: none;
-      stroke: var(--green);
-      stroke-width: 14;
-      stroke-linecap: round;
-      stroke-dasharray: 565; /* 2π × r(90) × (270/360) ≈ 565 */
-      stroke-dashoffset: 565;
-      transition: stroke-dashoffset 0.4s ease, stroke 0.4s ease;
-      filter: drop-shadow(0 0 8px var(--green));
-    }
-
-    .gauge-center {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-    }
-    .db-value {
-      font-family: var(--font-display);
-      font-size: 3.4rem;
-      font-weight: 700;
-      line-height: 1;
-      color: var(--green);
-      transition: color 0.4s ease;
-      text-shadow: 0 0 20px currentColor;
-      letter-spacing: -2px;
-    }
-    .db-unit {
-      font-family: var(--font-display);
-      font-size: 0.9rem;
-      color: var(--text-muted);
-      letter-spacing: 0.1em;
-      margin-top: 2px;
-    }
-    .db-status {
-      font-size: 0.65rem;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      margin-top: 4px;
-      color: var(--green);
-      transition: color 0.4s;
-    }
-
-    /* =============================================
-       수평 바 게이지
-    ============================================= */
-    .bar-gauge {
-      margin-top: 18px;
-      width: 100%;
-    }
-    .bar-gauge-track {
-      height: 10px;
-      background: rgba(37,120,255,0.08);
-      border-radius: 5px;
-      overflow: hidden;
-      position: relative;
-    }
-    .bar-gauge-fill {
-      height: 100%;
-      border-radius: 5px;
-      background: linear-gradient(90deg, var(--green) 0%, var(--yellow) 60%, var(--red) 100%);
-      width: 0%;
-      transition: width 0.35s ease;
-      position: relative;
-    }
-    .bar-gauge-fill::after {
-      content: '';
-      position: absolute;
-      right: 0; top: 0; bottom: 0;
-      width: 4px;
-      background: white;
-      border-radius: 2px;
-      box-shadow: 0 0 8px white;
-    }
-    .bar-gauge-labels {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 4px;
-      font-family: var(--font-display);
-      font-size: 0.6rem;
-      color: var(--text-muted);
-    }
-
-    /* =============================================
-       통계 카드
-    ============================================= */
-    .stats-card { display: flex; flex-direction: column; gap: 10px; }
-
-    .stat-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 14px;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-    }
-    .stat-icon {
-      width: 36px; height: 36px; border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 14px; flex-shrink: 0;
-    }
-    .stat-icon.min { background: rgba(0, 212, 255, 0.15); color: var(--accent); }
-    .stat-icon.max { background: rgba(255, 61, 87, 0.15); color: var(--red); }
-    .stat-icon.avg { background: rgba(0, 230, 118, 0.15); color: var(--green); }
-    .stat-icon.time { background: rgba(255, 234, 0, 0.15); color: var(--yellow); }
-
-    .stat-label { font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase; }
-    .stat-val {
-      font-family: var(--font-display);
-      font-size: 1.4rem;
-      font-weight: 700;
-      color: var(--text-primary);
-      line-height: 1;
-    }
-    .stat-val span { font-size: 0.7rem; color: var(--text-muted); margin-left: 2px; }
-
-    /* =============================================
-       보정(Calibration) & 컨트롤
-    ============================================= */
-    .controls-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-
-    .btn {
-      display: inline-flex; align-items: center; gap: 7px;
-      padding: 12px 22px;
-      border: none; border-radius: var(--radius);
-      font-family: var(--font-body);
-      font-size: 0.85rem; font-weight: 600;
-      letter-spacing: 0.04em;
-      cursor: pointer;
-      transition: all var(--transition);
-      flex: 1; min-width: 130px;
-      justify-content: center;
-    }
-    .btn:active { transform: scale(0.97); }
-
-    .btn-primary {
-      background: linear-gradient(135deg, var(--accent), #0055cc);
-      color: white;
-      box-shadow: 0 4px 20px rgba(0,212,255,0.3);
-    }
-    .btn-primary:hover { box-shadow: 0 4px 28px rgba(0,212,255,0.5); }
-
-    .btn-danger {
-      background: linear-gradient(135deg, var(--red), #cc0030);
-      color: white;
-      box-shadow: 0 4px 20px rgba(255,61,87,0.3);
-    }
-    .btn-danger:hover { box-shadow: 0 4px 28px rgba(255,61,87,0.5); }
-
-    .btn-secondary {
-      background: var(--bg-secondary);
-      color: var(--text-secondary);
-      border: 1px solid var(--border);
-    }
-    .btn-secondary:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-
-    .btn-success {
-      background: linear-gradient(135deg, var(--green), #007a30);
-      color: #0a1a0a;
-      font-weight: 700;
-    }
-    .btn-warning {
-      background: linear-gradient(135deg, var(--yellow), #cc9900);
-      color: #1a1500;
-      font-weight: 700;
-    }
-
-    /* 보정 슬라이더 영역 */
-    .calibration-card {
-      margin-bottom: 16px;
-    }
-    .calib-row {
-      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    }
-    .calib-label { font-size: 0.78rem; color: var(--text-secondary); white-space: nowrap; }
-    input[type="range"] {
-      flex: 1; min-width: 100px;
-      -webkit-appearance: none; appearance: none;
-      height: 6px; border-radius: 3px;
-      background: rgba(37,120,255,0.12);
-      outline: none; cursor: pointer;
-    }
-    input[type="range"]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 18px; height: 18px; border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 8px var(--accent);
-      cursor: pointer;
-    }
-    .calib-val {
-      font-family: var(--font-display);
-      font-size: 0.85rem; color: var(--accent);
-      min-width: 50px; text-align: right;
-    }
-
-    /* =============================================
-       차트 영역
-    ============================================= */
-    .chart-card { margin-bottom: 16px; }
-    .chart-wrapper {
-      position: relative;
-      height: 180px;
-    }
-
-    /* =============================================
-       측정 기록 테이블
-    ============================================= */
-    .table-card { margin-bottom: 16px; }
-
-    .table-actions {
-      display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;
-    }
-
-    .table-wrapper {
-      overflow-x: auto;
-      border-radius: var(--radius);
-      border: 1px solid var(--border);
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.8rem;
-    }
-    thead tr {
-      background: rgba(37,120,255,0.06);
-      border-bottom: 1px solid var(--border);
-    }
-    th {
-      padding: 10px 12px;
-      font-family: var(--font-display);
-      font-size: 0.65rem; letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      text-align: left; white-space: nowrap;
-    }
-    td {
-      padding: 9px 12px;
-      color: var(--text-secondary);
-      border-bottom: 1px solid rgba(37,120,255,0.06);
-      white-space: nowrap;
-    }
-    tbody tr:last-child td { border-bottom: none; }
-    tbody tr:hover td { background: rgba(37,120,255,0.04); }
-
-    .badge {
-      display: inline-block;
-      padding: 2px 8px; border-radius: 20px;
-      font-size: 0.68rem; font-weight: 600;
-      letter-spacing: 0.05em;
-    }
-    .badge-green  { background: rgba(0,230,118,0.15); color: var(--green); }
-    .badge-yellow { background: rgba(255,234,0,0.15); color: var(--yellow); }
-    .badge-red    { background: rgba(255,61,87,0.15);  color: var(--red); }
-
-    /* 빈 테이블 */
-    .table-empty {
-      padding: 40px; text-align: center;
-      color: var(--text-muted); font-size: 0.82rem;
-    }
-
-    /* =============================================
-       Status 라이트 (실시간 표시기)
-    ============================================= */
-    .status-indicator {
-      display: flex; align-items: center; gap: 8px;
-      font-size: 0.72rem; color: var(--text-muted);
-    }
-    .status-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--text-muted);
-      transition: background var(--transition);
-    }
-    .status-dot.active {
-      background: var(--green);
-      box-shadow: 0 0 8px var(--green);
-      animation: pulse 1.5s infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.6; transform: scale(0.85); }
-    }
-
-    /* =============================================
-       알림 토스트
-    ============================================= */
-    #toast {
-      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px);
-      background: var(--bg-card);
-      border: 1px solid var(--accent);
-      color: var(--text-primary);
-      padding: 12px 24px; border-radius: 30px;
-      font-size: 0.82rem;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-      transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1);
-      z-index: 1000; pointer-events: none;
-      white-space: nowrap;
-    }
-    #toast.show { transform: translateX(-50%) translateY(0); }
-
-    /* =============================================
-       스크롤바
-    ============================================= */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(0,212,255,0.3); }
-
-    /* =============================================
-       반응형
-    ============================================= */
-    @media (max-width: 500px) {
-      .db-value { font-size: 2.6rem; }
-      .gauge-wrapper { width: 180px; height: 180px; }
-      .btn { padding: 12px 14px; font-size: 0.8rem; }
-      .logo-text { font-size: 0.9rem; }
-    }
-
-    /* 다크모드 오버라이드 */
-    body.dark-mode .card::after {
-      background: linear-gradient(90deg, transparent, #00d4ff, transparent);
-    }
-    body.dark-mode tbody tr:hover td { background: rgba(0,212,255,0.04); }
-    body.dark-mode thead tr { background: rgba(0,212,255,0.06); }
-    body.dark-mode td { border-bottom-color: rgba(255,255,255,0.03); }
-    body.dark-mode .stat-item { background: rgba(255,255,255,0.03); }
-    body.dark-mode .bar-gauge-track { background: rgba(255,255,255,0.05); }
-    body.dark-mode input[type="range"] { background: rgba(255,255,255,0.1); }
-    body.dark-mode .card { box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
-    body.dark-mode header { box-shadow: none; }
-    @keyframes rise{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
-    .container>*{animation:rise .55s cubic-bezier(.2,.75,.25,1) both;}
-    .container>*:nth-child(1){animation-delay:.02s}.container>*:nth-child(2){animation-delay:.07s}
-    .container>*:nth-child(3){animation-delay:.12s}.container>*:nth-child(4){animation-delay:.17s}
-    .container>*:nth-child(5){animation-delay:.22s}.container>*:nth-child(6){animation-delay:.27s}
-    .container>*:nth-child(n+7){animation-delay:.3s}
-    @media(prefers-reduced-motion:reduce){.container>*{animation:none;}}
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#F4F6F9">
+<title>음파식 벨트 텐션 측정기</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="../../assets/css/common.css">
+<link rel="stylesheet" href="./style.css">
 </head>
 <body>
+<div class="app">
 
-<!-- 토스트 메시지 -->
-<div id="toast"></div>
-
-<div class="container">
-
-  <!-- ===== 헤더 ===== -->
-  <header>
-    <div class="logo">
-      <div class="logo-icon">🎙</div>
-      <div>
-        <div class="logo-text">SoundGuard Pro</div>
-        <div class="logo-sub">Industrial Sound Level Meter</div>
-      </div>
+  <!-- ===== TOP BAR ===== -->
+  <div class="topbar">
+    <div class="tb-left">
+      <img class="tb-logo" id="tb-logo" src="../../logo.png" alt="HL Robotics">
+      <span class="tb-name">음파식 벨트 텐션 측정기</span>
+      <span class="tb-version">v1.0.0</span>
     </div>
-    <div class="header-actions">
-      <div id="datetime"></div>
-      <a class="home-btn" href="../../index.html" title="메인 포털로 이동"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>메인으로</a>
-      <button class="btn-icon" id="themeBtn" title="테마 전환">🌙</button>
-      <button class="btn-icon" id="installBtn" title="홈화면에 추가" style="display:none">📲</button>
-    </div>
-  </header>
-
-  <!-- ===== 제어 버튼 ===== -->
-  <div class="controls-row">
-    <button class="btn btn-primary" id="startBtn">▶ 측정 시작</button>
-    <button class="btn btn-danger" id="stopBtn" disabled>⏹ 측정 정지</button>
-    <div class="status-indicator" style="flex:1; justify-content:flex-end;">
-      <div class="status-dot" id="statusDot"></div>
-      <span id="statusText">대기중</span>
-    </div>
+    <span id="statusPill" class="status-pill">READY</span>
   </div>
 
-  <!-- ===== 메인 계측 그리드 ===== -->
-  <div class="main-grid">
+  <!-- ===== HERO RESULT ===== -->
+  <section class="hero">
+    <div class="hero-head">
+      <span class="hero-label">보정 후 장력 · Corrected</span>
+      <span id="resJudgeWrap"><span id="resJudge">--</span></span>
+    </div>
+    <div class="hero-readout">
+      <span id="resTensionN">--</span>
+      <span class="hero-unit">N</span>
+    </div>
+    <div class="hero-kgf"><span id="resTensionKgf">--</span> kgf</div>
 
-    <!-- 원형 게이지 -->
-    <div class="card gauge-card">
-      <div class="card-title">현재 소음 레벨</div>
+    <div class="gauge" id="gaugeWrap">
+      <div class="gauge-scale">
+        <span id="gaugeLow">–</span>
+        <span class="mid">목표 범위</span>
+        <span id="gaugeHigh">–</span>
+      </div>
+      <div class="gauge-track">
+        <div id="gaugeZone" class="gauge-zone"></div>
+        <div id="gaugeMarker" class="gauge-marker"></div>
+      </div>
+      <div class="gauge-cap">목표 <b id="resTarget">--</b></div>
+    </div>
+  </section>
 
-      <div class="gauge-wrapper">
-        <svg class="gauge-svg" viewBox="0 0 200 200">
-          <!-- 배경 트랙: 135도~405도 (270도 호) -->
-          <circle class="gauge-track" cx="100" cy="100" r="82"
-            stroke-dasharray="348 565"
-            stroke-dashoffset="-87"
-          />
-          <!-- 실제 채움 -->
-          <circle class="gauge-fill" id="gaugeFill" cx="100" cy="100" r="82"
-            stroke-dasharray="0 565"
-            stroke-dashoffset="-87"
-          />
+  <!-- ===== LIVE ANALYSIS ===== -->
+  <section class="panel">
+    <div class="panel-title"><span class="ko">실시간 분석</span><span class="en">Live Analysis</span></div>
+    <div class="live-row">
+      <div class="stat">
+        <div class="stat-k">검출 주파수</div>
+        <div class="stat-v"><span id="resFreq">--</span><i>Hz</i></div>
+      </div>
+      <div class="stat">
+        <div class="stat-k">현재 주파수</div>
+        <div class="stat-v accent"><span id="liveFreq">--</span><i>Hz</i></div>
+      </div>
+      <div class="conf-ring">
+        <svg class="ring-svg" viewBox="0 0 64 64">
+          <circle class="ring-bg" cx="32" cy="32" r="26"/>
+          <circle id="confArc" class="ring-arc" cx="32" cy="32" r="26"/>
         </svg>
-        <div class="gauge-center">
-          <div class="db-value" id="dbValue">--</div>
-          <div class="db-unit">dB SPL</div>
-          <div class="db-status" id="dbStatus">IDLE</div>
-        </div>
+        <div class="conf-center"><span id="resConf">--</span><i>%</i></div>
       </div>
+      <div class="conf-label">Confidence</div>
+    </div>
 
-      <!-- 수평 바 -->
-      <div class="bar-gauge">
-        <div class="bar-gauge-track">
-          <div class="bar-gauge-fill" id="barFill"></div>
-        </div>
-        <div class="bar-gauge-labels">
-          <span>0</span><span>30</span><span>60</span><span>90</span><span>120dB</span>
-        </div>
+    <div class="signal">
+      <div class="signal-head"><span>신호 강도</span><span id="meterVal">0%</span></div>
+      <div class="meter-track"><div id="meterFill" class="meter-fill"></div></div>
+    </div>
+
+    <div class="live-foot">
+      <span class="dot-wrap">
+        <span id="statusDot" class="dot"></span>
+        <span id="statusText" class="status-text">대기 중</span>
+      </span>
+      <span class="peak">피크<b id="livePeak">대기</b></span>
+    </div>
+  </section>
+
+  <!-- ===== SPECTRUM ===== -->
+  <section class="panel">
+    <div class="panel-title"><span class="ko">주파수 스펙트럼</span><span class="en">10–5000 Hz</span></div>
+    <div class="canvas-box"><canvas id="spectrum"></canvas></div>
+  </section>
+
+  <!-- ===== MEASUREMENT FLOW ===== -->
+  <section class="panel flow-panel">
+    <div class="panel-title"><span class="ko">측정 플로우</span><span class="en">Measurement Flow</span></div>
+
+    <!-- 단계 표시 바 -->
+    <div class="step-bar">
+      <div class="step-item s-active" id="si1">
+        <div class="step-dot"><span>1</span></div>
+        <div class="step-lbl">세션<br>설정</div>
+      </div>
+      <div class="step-conn" id="sc12"></div>
+      <div class="step-item" id="si2">
+        <div class="step-dot"><span>2</span></div>
+        <div class="step-lbl">텐션<br>측정</div>
+      </div>
+      <div class="step-conn" id="sc23"></div>
+      <div class="step-item" id="si3">
+        <div class="step-dot"><span>3</span></div>
+        <div class="step-lbl">저장/<br>스킵</div>
+      </div>
+      <div class="step-conn" id="sc34"></div>
+      <div class="step-item" id="si4">
+        <div class="step-dot"><span>4</span></div>
+        <div class="step-lbl">회차<br>진행</div>
+      </div>
+      <div class="step-conn" id="sc45"></div>
+      <div class="step-item" id="si5">
+        <div class="step-dot"><span>5</span></div>
+        <div class="step-lbl">보고서</div>
       </div>
     </div>
 
-    <!-- 통계 -->
-    <div class="card stats-card">
-      <div class="card-title">측정 통계</div>
+    <!-- Step 1 : 호기 설정 -->
+    <div class="flow-step s-active" id="fs1">
+      <div class="flow-step-head"><span class="fs-badge">1</span>호기 설정</div>
 
-      <div class="stat-item">
-        <div class="stat-icon min">↓</div>
-        <div>
-          <div class="stat-label">최솟값 (MIN)</div>
-          <div class="stat-val" id="statMin">--<span>dB</span></div>
+      <div class="session-field">
+        <div class="session-label">호기 번호</div>
+        <input id="inUnit" class="flow-unit-input" type="number" inputmode="numeric"
+               min="1" step="1" autocomplete="off" placeholder="예) 11">
+      </div>
+
+      <div class="session-field">
+        <div class="session-label">구동모듈 벨트 <span class="belt-spec-tag">170 N ±20% · ID1~ID4</span></div>
+        <div class="belt-count-btns" id="driveCountBtns">
+          <button class="cnt-btn cnt-active" data-key="none" onclick="clearBeltGroup('drive')">없음</button>
+          <button class="cnt-btn" data-key="ID1" onclick="toggleBeltId('ID1')">ID1</button>
+          <button class="cnt-btn" data-key="ID2" onclick="toggleBeltId('ID2')">ID2</button>
+          <button class="cnt-btn" data-key="ID3" onclick="toggleBeltId('ID3')">ID3</button>
+          <button class="cnt-btn" data-key="ID4" onclick="toggleBeltId('ID4')">ID4</button>
+        </div>
+        <div class="meas-count-row" id="driveMeasRow">
+          <span class="meas-count-lbl">측정 횟수</span>
+          <input id="inDriveMeas" class="count-input" type="number" inputmode="numeric" min="1" max="20" value="1">
+          <span class="count-unit">회</span>
         </div>
       </div>
-      <div class="stat-item">
-        <div class="stat-icon max">↑</div>
-        <div>
-          <div class="stat-label">최댓값 (MAX)</div>
-          <div class="stat-val" id="statMax">--<span>dB</span></div>
+
+      <div class="session-field">
+        <div class="session-label">리프팅 벨트 <span class="belt-spec-tag">500 N ±10% · ID5~ID6</span></div>
+        <div class="belt-count-btns" id="liftingCountBtns">
+          <button class="cnt-btn cnt-active" data-key="none" onclick="clearBeltGroup('lifting')">없음</button>
+          <button class="cnt-btn" data-key="ID5" onclick="toggleBeltId('ID5')">ID5</button>
+          <button class="cnt-btn" data-key="ID6" onclick="toggleBeltId('ID6')">ID6</button>
+        </div>
+        <div class="meas-count-row" id="liftingMeasRow">
+          <span class="meas-count-lbl">측정 횟수</span>
+          <input id="inLiftingMeas" class="count-input" type="number" inputmode="numeric" min="1" max="20" value="1">
+          <span class="count-unit">회</span>
         </div>
       </div>
-      <div class="stat-item">
-        <div class="stat-icon avg">≈</div>
-        <div>
-          <div class="stat-label">평균값 (AVG)</div>
-          <div class="stat-val" id="statAvg">--<span>dB</span></div>
-        </div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-icon time">⏱</div>
-        <div>
-          <div class="stat-label">측정 시간</div>
-          <div class="stat-val" id="statTime">00:00:00</div>
-        </div>
+
+      <div id="sessionSwitchRow" class="session-switch-row" style="display:none">
+        <div class="session-switch-label" id="sessionSwitchInfo"></div>
+        <button class="btn btn-new-session" type="button" onclick="promptNextRobot()">
+          <span class="ico">＋</span> 새 호기 측정
+        </button>
       </div>
     </div>
-  </div>
 
-  <!-- ===== 보정(Calibration) ===== -->
-  <div class="card calibration-card">
-    <div class="card-title">마이크 보정 (Calibration)</div>
-    <div class="calib-row">
-      <span class="calib-label">보정 오프셋:</span>
-      <input type="range" id="calibSlider" min="-30" max="30" value="0" step="1" />
-      <span class="calib-val" id="calibVal">+0 dB</span>
-      <button class="btn btn-secondary" style="flex:0;min-width:80px;padding:8px 14px;"
-        onclick="document.getElementById('calibSlider').value=0; updateCalib();">초기화</button>
+    <!-- Step 2 : 텐션 측정 -->
+    <div class="flow-step" id="fs2">
+      <div class="flow-step-head">
+        <span class="fs-badge">2</span>텐션 측정
+        <span id="measureProgress" class="progress-chip">0 / 8</span>
+      </div>
+      <button id="btnStart" class="btn btn-start"><span class="ico">●</span> 측정 시작</button>
+      <div class="flow-row-btns">
+        <button id="btnStop" class="btn btn-stop" disabled><span class="ico">■</span> 중지</button>
+        <button id="btnHold" class="btn btn-hold" disabled><span class="ico">⏸</span> 고정</button>
+      </div>
+      <button id="btnCancelSetup" class="btn btn-cancel-setup" type="button" style="display:none"><span class="ico">✕</span> 설정 취소</button>
     </div>
-    <div style="margin-top:8px; font-size:0.72rem; color:var(--text-muted);">
-      💡 브라우저에서의 dB 측정은 상대값입니다. 실제 소음계와 비교해 오프셋을 조정하세요.
-    </div>
-  </div>
 
-  <!-- ===== 실시간 차트 ===== -->
-  <div class="card chart-card">
-    <div class="card-title">실시간 소음 파형</div>
-    <div class="chart-wrapper">
-      <canvas id="waveChart"></canvas>
+    <!-- Step 3 : 저장 / 스킵 -->
+    <div class="flow-step" id="fs3">
+      <div class="flow-step-head"><span class="fs-badge">3</span>저장 / 스킵</div>
+      <div class="flow-hint">측정이 안정화되면 이 회차를 저장하거나 스킵할 수 있습니다.<br>스킵하면 이 측정을 제외하고 다시 시도합니다.</div>
+      <div class="save-skip-row">
+        <button id="btnSave" class="btn btn-save" disabled><span class="ico">＋</span> 저장</button>
+        <button id="btnSkip" class="btn btn-skip" disabled><span class="ico">↷</span> 스킵</button>
+      </div>
     </div>
-  </div>
 
-  <!-- ===== 측정 기록 테이블 ===== -->
-  <div class="card table-card">
-    <div class="card-title">측정 기록</div>
-    <div class="table-actions">
-      <button class="btn btn-success" onclick="downloadXLSX()" style="min-width:110px;">📊 Excel 저장</button>
-      <button class="btn btn-warning" onclick="downloadPDF()" style="min-width:110px;">📄 PDF 저장</button>
-      <button class="btn btn-secondary" onclick="clearRecords()" style="min-width:110px;">🗑 기록 초기화</button>
+    <!-- Step 4 : 회차 진행 -->
+    <div class="flow-step" id="fs4">
+      <div class="flow-step-head"><span class="fs-badge">4</span>회차 진행<span id="fs4Unit" class="fs4-unit"></span></div>
+      <div id="sessionProgress" class="session-progress-box"></div>
+      <!-- 다음 호기 구성 선택 (로봇 완료 시 표시) -->
+      <div id="nextRobotPrompt" class="next-robot-prompt" style="display:none">
+        <div class="next-robot-q">다음 호기도 같은 구성으로 측정하시겠습니까?</div>
+        <div class="next-robot-cfg" id="nextRobotCfg"></div>
+        <div class="next-robot-btns">
+          <button class="btn btn-primary" onclick="startNextRobot(true)">동일 구성</button>
+          <button class="btn btn-secondary" onclick="startNextRobot(false)">새로 설정</button>
+        </div>
+      </div>
+      <button id="btnNextSession" class="btn btn-next-session" type="button" style="display:none">
+        <span class="ico">＋</span> 새 호기 측정
+      </button>
     </div>
-    <div class="table-wrapper">
-      <table id="recordTable">
-        <thead>
+
+    <!-- Step 5 : 보고서 -->
+    <div class="flow-step" id="fs5">
+      <div class="flow-step-head"><span class="fs-badge">5</span>보고서 생성</div>
+      <div class="flow-row-btns">
+        <button id="btnPDF" class="btn btn-pdf" type="button"><span class="ico">⤓</span> PDF 보고서</button>
+        <button id="btnCSV" class="btn" type="button"><span class="ico">⤓</span> CSV</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== ASSIST (노이즈 저감 / 측정 대상 고정) ===== -->
+  <section class="panel">
+    <div class="panel-title"><span class="ko">측정 보조</span><span class="en">Assist</span></div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name">노이즈 저감
+          <span id="nrChip" class="assist-chip" style="display:none;">학습 중</span>
+        </div>
+        <div class="toggle-desc">주변 소음 스펙트럼을 학습해 실시간 신호에서 차감합니다. 모터·전원 험 등 정상 소음에 강합니다.</div>
+      </div>
+      <div class="toggle-ctrl">
+        <button id="btnRelearn" class="mini-btn" type="button" style="display:none;">재학습</button>
+        <button id="swNoise" class="switch" type="button" aria-pressed="false" aria-label="노이즈 저감"><span class="knob"></span></button>
+      </div>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name">측정 대상 고정
+          <span id="lockWidthWrap" class="assist-sel" style="display:none;">± <select id="selLockWidth"><option value="20">20%</option><option value="30" selected>30%</option><option value="40">40%</option></select></span>
+        </div>
+        <div class="toggle-desc" id="lockDesc">예상 주파수 주변의 좁은 대역만 탐색해 엉뚱한 피크를 무시합니다.</div>
+      </div>
+      <div class="toggle-ctrl">
+        <button id="swLock" class="switch" type="button" aria-pressed="false" aria-label="측정 대상 고정"><span class="knob"></span></button>
+      </div>
+    </div>
+
+    <div class="assist-note">노이즈 저감은 측정 직전 조용한 상태에서 자동 학습됩니다. 측정 대상 고정은 예상 주파수(또는 목표 장력)가 있을 때 가장 정확합니다.</div>
+  </section>
+
+  <!-- ===== CONDITIONS ===== -->
+  <details class="panel" open>
+    <summary>측정 조건 설정 <span class="sum-en">Conditions</span> <span class="chev">⌄</span></summary>
+    <div class="panel-body">
+      <div class="form-grid">
+        <div class="field">
+          <label>Mass <span class="unit">g/m</span></label>
+          <input id="inMass" type="number" inputmode="decimal" step="any" placeholder="2.5">
+        </div>
+        <div class="field">
+          <label>Width / Rib <span class="unit">mm·count</span></label>
+          <input id="inWidth" type="number" inputmode="decimal" step="any" placeholder="25 / 1">
+        </div>
+        <div class="field">
+          <label>Span <span class="unit">mm</span></label>
+          <input id="inSpan" type="number" inputmode="decimal" step="any" placeholder="300">
+        </div>
+        <div class="field">
+          <label>보정계수 <span class="unit">CF</span></label>
+          <input id="inCF" type="number" inputmode="decimal" step="any" value="1.000" placeholder="1.000">
+        </div>
+        <div class="field">
+          <label>목표 장력 <span class="unit">N</span></label>
+          <input id="inTargetN" type="number" inputmode="decimal" step="any" placeholder="500">
+        </div>
+        <div class="field">
+          <label>허용오차 <span class="unit">%</span></label>
+          <input id="inTolPct" type="number" inputmode="decimal" step="any" value="10" placeholder="10">
+        </div>
+        <div class="field full">
+          <label>예상 주파수 <span class="unit">Hz · estimate</span></label>
+          <div class="estimate-input">
+            <input id="estFreq" type="number" inputmode="decimal" step="any" placeholder="직접 입력 또는 계산">
+            <input id="kconst" type="number" inputmode="decimal" step="any" value="1000" title="k constant" placeholder="k">
+            <button id="btnEstimate" class="btn" type="button">계산</button>
+          </div>
+        </div>
+        <div class="field full">
+          <label>FFT 크기 <span class="unit">resolution</span></label>
+          <select id="selFFT">
+            <option value="8192">8192</option>
+            <option value="16384" selected>16384 (기본)</option>
+            <option value="32768">32768</option>
+          </select>
+        </div>
+      </div>
+      <div class="note">입력값은 모바일에서 자동으로 1열로 전환됩니다. <b>목표 장력</b>과 <b>허용오차</b>를 넣으면 상단 게이지에 합·부 범위가 표시됩니다.</div>
+    </div>
+  </details>
+
+  <!-- ===== DETAIL RESULT ===== -->
+  <section class="panel">
+    <div class="panel-title"><span class="ko">상세 결과</span><span class="en">Detail</span></div>
+    <div class="detail-grid">
+      <div class="mini"><div class="k">계산 장력 (보정 전)</div><div class="v"><span id="resRawN">--</span> N</div></div>
+      <div class="mini"><div class="k">측정 시간</div><div class="v" style="font-size:15px;"><span id="resTime">--</span></div></div>
+    </div>
+    <div class="detail-meta">
+      <span>Mass <b id="resMass">--</b></span>
+      <span>Width <b id="resWidth">--</b></span>
+      <span>Span <b id="resSpan">--</b></span>
+      <span>CF <b id="resCF">--</b></span>
+    </div>
+  </section>
+
+  <!-- ===== HISTORY ===== -->
+  <section class="panel">
+    <div class="history-toolbar">
+      <div class="panel-title" style="margin:0;"><span class="ko">측정 기록</span></div>
+      <div class="history-actions">
+        <button id="btnClear" class="btn" type="button"><span class="ico">↺</span> 초기화</button>
+      </div>
+    </div>
+    <div class="table-scroll">
+      <table id="histTable">
+        <thead id="histHead">
           <tr>
-            <th>#</th>
-            <th>날짜/시간</th>
-            <th>dB 값</th>
-            <th>상태</th>
-            <th>측정 경과</th>
+            <th colspan="3" style="text-align:center;color:#9CA3AF;">저장된 측정이 없습니다.</th>
           </tr>
         </thead>
-        <tbody id="recordBody">
-          <tr><td colspan="5" class="table-empty">측정을 시작하면 기록이 저장됩니다.</td></tr>
+        <tbody id="histBody">
         </tbody>
       </table>
     </div>
-  </div>
+  </section>
 
-</div><!-- /container -->
-
-<!-- ===== 마이크 권한 안내 모달 ===== -->
-<div id="micModal" style="
-  display:none; position:fixed; inset:0; z-index:2000;
-  background:rgba(14,31,64,0.55); backdrop-filter:blur(6px);
-  align-items:center; justify-content:center; padding:20px;
-">
-  <div style="
-    background:#fff; border-radius:20px; max-width:400px; width:100%;
-    padding:32px 28px; box-shadow:0 16px 60px rgba(37,120,255,0.18);
-    border:1px solid rgba(37,120,255,0.15); text-align:center;
-    font-family:'Segoe UI',system-ui,sans-serif;
-  ">
-    <div style="font-size:3rem; margin-bottom:12px;">🎙️</div>
-    <h2 style="font-size:1.15rem; color:#0e1f40; margin-bottom:10px; font-weight:700;">마이크 접근 권한 필요</h2>
-    <p style="font-size:0.85rem; color:#3a5070; line-height:1.65; margin-bottom:20px;">
-      실시간 소음 측정을 위해 <strong>마이크 사용 권한</strong>이 필요합니다.<br>
-      아래 버튼을 누르면 브라우저의 권한 요청 팝업이 표시됩니다.<br>
-      팝업에서 <strong style="color:#2578ff;">허용</strong>을 선택해 주세요.
-    </p>
-
-    <!-- 브라우저별 허용 방법 안내 -->
-    <div style="
-      background:#f0f6ff; border-radius:12px; padding:14px 16px;
-      text-align:left; margin-bottom:22px; font-size:0.78rem; color:#2e4a80; line-height:1.7;
-    ">
-      <strong>📌 권한 허용 방법</strong><br>
-      • <b>Chrome/Edge:</b> 주소창 왼쪽 🔒 아이콘 → 마이크 → 허용<br>
-      • <b>Safari:</b> 환경설정 → 웹사이트 → 마이크 → 허용<br>
-      • <b>모바일:</b> 팝업에서 "허용" 탭
+  <!-- ===== HELP ===== -->
+  <details class="panel">
+    <summary>사용 안내 · 주의사항 <span class="sum-en">Guide</span> <span class="chev">⌄</span></summary>
+    <div class="panel-body">
+      <div class="help-grid">
+        <div class="help-item">
+          <div class="title">측정 방법</div>
+          <div class="text">측정 시작 후 Span 중앙부를 짧고 선명하게 튕겨 주세요. 검출 주파수와 장력이 안정될 때까지 1~2회 반복하면 정확도가 좋아집니다.</div>
+        </div>
+        <div class="help-item">
+          <div class="title">환경 주의</div>
+          <div class="text">주변 소음이 크면 검출이 불안정해집니다. 마이크가 벨트를 향하게 하고, 너무 약한 타격은 피하세요.</div>
+        </div>
+        <div class="help-item">
+          <div class="title">저장 기준</div>
+          <div class="text">Confidence가 높고 상태가 GOOD/STABLE일 때 저장하세요. 자동 안정화가 완료되면 결과가 고정됩니다.</div>
+        </div>
+      </div>
+      <div class="disclaimer"><b>안내</b> · 본 측정값은 마이크 입력과 알고리즘 추정에 기반한 참고값입니다. 정밀 측정이 필요하면 기준 장력계와 비교해 보정계수를 조정하세요.</div>
     </div>
+  </details>
 
-    <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
-      <button id="micAllowBtn" style="
-        padding:12px 28px; border:none; border-radius:12px; cursor:pointer;
-        background:linear-gradient(135deg,#2578ff,#0040cc);
-        color:#fff; font-size:0.9rem; font-weight:700;
-        box-shadow:0 4px 16px rgba(37,120,255,0.35);
-        transition:opacity .2s;
-      ">🎙️ 마이크 허용하기</button>
-      <button id="micCancelBtn" style="
-        padding:12px 20px; border:1px solid rgba(37,120,255,0.2); border-radius:12px; cursor:pointer;
-        background:#f0f6ff; color:#2e4a80; font-size:0.9rem; font-weight:600;
-        transition:opacity .2s;
-      ">취소</button>
-    </div>
-  </div>
 </div>
 
-<!-- ===== 권한 거부 안내 모달 ===== -->
-<div id="micDeniedModal" style="
-  display:none; position:fixed; inset:0; z-index:2000;
-  background:rgba(14,31,64,0.55); backdrop-filter:blur(6px);
-  align-items:center; justify-content:center; padding:20px;
-">
-  <div style="
-    background:#fff; border-radius:20px; max-width:420px; width:100%;
-    padding:32px 28px; box-shadow:0 16px 60px rgba(232,32,58,0.15);
-    border:1px solid rgba(232,32,58,0.2); text-align:center;
-    font-family:'Segoe UI',system-ui,sans-serif;
-  ">
-    <div style="font-size:3rem; margin-bottom:12px;">🚫</div>
-    <h2 style="font-size:1.15rem; color:#0e1f40; margin-bottom:10px; font-weight:700;">마이크 권한이 차단되었습니다</h2>
-    <p style="font-size:0.85rem; color:#3a5070; line-height:1.65; margin-bottom:20px;">
-      마이크 접근이 거부되어 측정을 시작할 수 없습니다.<br>
-      아래 안내에 따라 브라우저 설정에서 권한을 허용한 뒤 <strong>페이지를 새로고침</strong>해 주세요.
-    </p>
-
-    <div style="
-      background:#fff5f6; border:1px solid rgba(232,32,58,0.15); border-radius:12px;
-      padding:14px 16px; text-align:left; margin-bottom:22px;
-      font-size:0.78rem; color:#8a1020; line-height:1.8;
-    ">
-      <strong>🔧 권한 복구 방법</strong><br>
-      <b>Chrome / Edge:</b><br>
-      &nbsp; 주소창 왼쪽 🔒 자물쇠 아이콘 클릭<br>
-      &nbsp; → 마이크 → <b>허용</b> 선택 → 새로고침<br><br>
-      <b>모바일 Chrome:</b><br>
-      &nbsp; 주소창 오른쪽 ⋮ 메뉴 → 사이트 설정<br>
-      &nbsp; → 마이크 → <b>허용</b> 선택
-    </div>
-
-    <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
-      <button onclick="location.reload()" style="
-        padding:12px 24px; border:none; border-radius:12px; cursor:pointer;
-        background:linear-gradient(135deg,#e8203a,#aa0020);
-        color:#fff; font-size:0.9rem; font-weight:700;
-        box-shadow:0 4px 16px rgba(232,32,58,0.3);
-      ">🔄 페이지 새로고침</button>
-      <button id="micDeniedCloseBtn" style="
-        padding:12px 20px; border:1px solid rgba(37,120,255,0.2); border-radius:12px; cursor:pointer;
-        background:#f0f6ff; color:#2e4a80; font-size:0.9rem; font-weight:600;
-      ">닫기</button>
-    </div>
-  </div>
-</div>
-
-<script>
-/* =====================================================
-   SoundGuard Pro — 데시벨 측정기
-   Web Audio API 기반 실시간 소음 측정 애플리케이션
-===================================================== */
-
-/* ─ 전역 상태 변수 ─ */
-let audioCtx    = null;        // Web Audio API 컨텍스트 객체
-let analyser    = null;        // FFT 분석기 노드
-let mediaStream = null;        // 마이크 MediaStream 객체
-let rafId       = null;        // requestAnimationFrame 루프 ID (cancelAnimationFrame 취소용)
-let intervalId  = null;        // 0.5초 마다 통계·차트·테이블 갱신하는 인터벌 ID
-let timerIntervalId = null;    // 1초 마다 경과 시간을 갱신하는 타이머 인터벌 ID
-
-let isRunning   = false;       // 측정 실행 중 여부
-let calibOffset = 0;           // 마이크 보정 슬라이더 오프셋 값 (dB, -30~+30)
-let currentDB   = 0;           // RAF 루프에서 계산된 현재 순간 dB 값
-
-/* 측정 통계 데이터 */
-let dbValues    = [];          // 0.5초 간격으로 누적된 측정값 배열 (MIN/MAX/AVG 계산용)
-let startTime   = null;        // 측정 시작 Date.now() 타임스탬프
-let elapsedSec  = 0;           // 측정 시작 후 경과 초
-
-/* 측정 기록 테이블 데이터 */
-let records     = [];          // 테이블에 표시된 기록 객체 배열
-let recordCount = 0;           // 기록 일련번호 카운터
-
-/* Chart.js 실시간 파형 차트 */
-let waveChart   = null;        // Chart.js 차트 인스턴스
-const CHART_MAX_POINTS = 60;   // 차트에 표시할 최대 데이터 포인트 수 (0.5초 간격이므로 30초치)
-let chartLabels = [];          // 차트 X축 레이블 배열 (경과 시간 문자열)
-let chartData   = [];          // 차트 Y축 데이터 배열 (dB 값)
-
-/* PWA 홈화면 추가 프롬프트 이벤트 보관 */
-let deferredPrompt = null;
-
-/* ─ DOM 요소 캐시 (매번 querySelector 대신 변수로 재사용) ─ */
-const dbValueEl  = document.getElementById('dbValue');   // 원형 게이지 중앙의 dB 숫자
-const dbStatusEl = document.getElementById('dbStatus');  // 게이지 중앙의 상태 텍스트(QUIET 등)
-const gaugeFill  = document.getElementById('gaugeFill'); // SVG 원형 게이지 채움 원호
-const barFill    = document.getElementById('barFill');   // 수평 바 게이지 채움
-const statMin    = document.getElementById('statMin');   // 최솟값 표시 요소
-const statMax    = document.getElementById('statMax');   // 최댓값 표시 요소
-const statAvg    = document.getElementById('statAvg');   // 평균값 표시 요소
-const statTime   = document.getElementById('statTime');  // 측정 경과 시간 표시 요소
-const statusDot  = document.getElementById('statusDot');  // 상태 표시등 점
-const statusText = document.getElementById('statusText'); // 상태 텍스트 (측정중/정지됨)
-const recordBody = document.getElementById('recordBody'); // 측정 기록 테이블 tbody
-const startBtn   = document.getElementById('startBtn');   // 측정 시작 버튼
-const stopBtn    = document.getElementById('stopBtn');    // 측정 정지 버튼
-const calibSlider= document.getElementById('calibSlider');// 마이크 보정 슬라이더
-const calibValEl = document.getElementById('calibVal');   // 현재 보정 오프셋 수치 표시
-
-/* ─ 헤더 날짜·시간 실시간 업데이트 (1초 간격) ─ */
-(function updateDatetime() {
-  const el = document.getElementById('datetime');
-  function tick() {
-    const now = new Date();
-    el.innerHTML =
-      now.toLocaleDateString('ko-KR', {year:'numeric',month:'2-digit',day:'2-digit'})
-      + '<br>' +
-      now.toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  }
-  tick();
-  setInterval(tick, 1000);
-})();
-
-/* ─ 마이크 보정 슬라이더 입력 처리 ─
-   슬라이더 값(-30~+30 dB)을 calibOffset에 반영하고 수치 레이블을 갱신 */
-function updateCalib() {
-  calibOffset = parseInt(calibSlider.value, 10);
-  calibValEl.textContent = (calibOffset >= 0 ? '+' : '') + calibOffset + ' dB';
-}
-calibSlider.addEventListener('input', updateCalib);
-
-/* ─ Chart.js 실시간 파형 차트 초기화 ─
-   dB 값을 시계열로 표시하는 라인 차트를 생성 */
-function initChart() {
-  const ctx = document.getElementById('waveChart').getContext('2d');
-  const isDark = !document.body.classList.contains('light-mode');
-
-  waveChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: chartLabels,
-      datasets: [{
-        label: 'dB SPL',
-        data: chartData,
-        borderColor: '#2578ff',
-        backgroundColor: 'rgba(37,120,255,0.08)',
-        borderWidth: 2,
-        pointRadius: 0,
-        tension: 0.4,
-        fill: true,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 0 },
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: 'rgba(255,255,255,0.97)',
-          borderColor: 'rgba(37,120,255,0.25)',
-          borderWidth: 1,
-          titleColor: '#7a99c8',
-          bodyColor: '#0e1f40',
-          callbacks: {
-            label: ctx => ` ${ctx.parsed.y.toFixed(1)} dB`
-          }
-        }
-      },
-      scales: {
-        x: {
-          grid: { color: 'rgba(37,120,255,0.07)' },
-          ticks: { color: '#7a99c8', maxTicksLimit: 8, font: { family: 'Courier New', size: 10 } }
-        },
-        y: {
-          min: 20, max: 110,
-          grid: { color: 'rgba(37,120,255,0.07)' },
-          ticks: { color: '#7a99c8', font: { family: 'Courier New', size: 10 },
-            callback: v => v + ' dB' }
-        }
-      }
-    }
-  });
-}
-
-/* ─ 원형 게이지 SVG 계산 상수 ─
-   SVG r=82, rotate(-135deg) 적용 후 270도 호를 0~120 dB 범위에 매핑 */
-const GAUGE_CIRC = 2 * Math.PI * 82; // 전체 원 둘레 ≈ 515.2
-const GAUGE_ARC  = GAUGE_CIRC * 0.75; // 270도(3/4) 호 길이 ≈ 386.4
-
-/* dB 값에 따라 원형 게이지·수평 바 게이지·색상을 갱신 */
-function updateGauge(db) {
-  const pct = Math.min(Math.max((db - 20) / 100, 0), 1); // 20~120 dB → 0~1 정규화
-  const dash = GAUGE_ARC * pct;
-
-  /* stroke-dasharray로 원호 길이 설정 — fill_len과 나머지 gap으로 채움 비율 표현 */
-  gaugeFill.style.strokeDasharray = `${dash} ${GAUGE_CIRC}`;
-
-  /* dB 범위에 따른 색상 분기 */
-  let color;
-  if (db <= 60)      color = 'var(--green)';   // 정상 구간 (녹색)
-  else if (db <= 80) color = 'var(--yellow)';  // 주의 구간 (노란색)
-  else               color = 'var(--red)';     // 위험 구간 (빨간색)
-
-  gaugeFill.style.stroke = color;
-  gaugeFill.style.filter = `drop-shadow(0 0 10px ${color})`; // 발광 효과
-  dbValueEl.style.color  = color;
-  dbStatusEl.style.color = color;
-
-  /* 수평 바 게이지도 같은 비율로 갱신 */
-  barFill.style.width = (pct * 100) + '%';
-}
-
-/* dB 값을 사람이 읽기 좋은 소음 수준 텍스트로 변환 */
-function getStatusText(db) {
-  if (db <= 40)      return 'QUIET';       // 조용한 사무실 수준
-  else if (db <= 60) return 'NORMAL';      // 일반 대화 수준
-  else if (db <= 70) return 'MODERATE';    // 소음이 있는 환경
-  else if (db <= 80) return 'LOUD';        // 시끄러운 공장
-  else if (db <= 90) return 'VERY LOUD';   // 청력 손상 주의
-  else               return '⚠ DANGER';   // 즉각적인 청력 손상 위험
-}
-/* dB 값에 따른 테이블 배지 CSS 클래스 반환 */
-function getStatusBadge(db) {
-  if (db <= 60) return 'badge-green';
-  else if (db <= 80) return 'badge-yellow';
-  else return 'badge-red';
-}
-
-/* ─ Web Audio API 기반 순간 dB SPL 계산 ─
-   시간영역 데이터를 읽어 RMS를 구하고, dBFS → dB SPL로 변환 */
-function getInstantDB() {
-  if (!analyser) return 0;
-  const bufLen = analyser.frequencyBinCount;
-  const data   = new Float32Array(bufLen);
-  analyser.getFloatTimeDomainData(data);  // 시간영역 PCM 데이터 읽기
-
-  /* RMS(제곱평균제곱근) 계산 */
-  let sum = 0;
-  for (let i = 0; i < bufLen; i++) sum += data[i] * data[i];
-  const rms = Math.sqrt(sum / bufLen);
-
-  /* dBFS(풀스케일 데시벨) 계산 후 dB SPL로 근사 변환
-     브라우저 마이크는 상대값(dBFS)이므로 +90 오프셋으로 SPL에 근사시킴 */
-  const dbFS  = rms > 0 ? 20 * Math.log10(rms) : -90;
-  const dbSPL = dbFS + 90 + calibOffset;
-  return Math.max(0, Math.min(130, dbSPL)); // 0~130 dB 범위로 클램핑
-}
-
-/* ─ requestAnimationFrame 루프: 화면 주사율에 맞춰 dB 표시 실시간 갱신 ─ */
-function rafLoop() {
-  if (!isRunning) return;
-  currentDB = getInstantDB();
-
-  /* UI 즉시 갱신 (숫자·상태 텍스트·게이지) */
-  dbValueEl.textContent = currentDB.toFixed(1);
-  dbStatusEl.textContent = getStatusText(currentDB);
-  updateGauge(currentDB);
-
-  rafId = requestAnimationFrame(rafLoop); // 다음 프레임에도 실행
-}
-
-/* ─ 0.5초 인터벌: 통계·차트·테이블 갱신 ─
-   RAF 루프보다 느린 주기로 통계 계산과 차트 데이터를 추가 */
-function onInterval() {
-  const db = currentDB;
-  dbValues.push(db);
-
-  /* MIN/MAX/AVG 통계 계산 및 표시 */
-  const min = Math.min(...dbValues);
-  const max = Math.max(...dbValues);
-  const avg = dbValues.reduce((a,b)=>a+b,0) / dbValues.length;
-
-  statMin.innerHTML = min.toFixed(1) + '<span>dB</span>';
-  statMax.innerHTML = max.toFixed(1) + '<span>dB</span>';
-  statAvg.innerHTML = avg.toFixed(1) + '<span>dB</span>';
-
-  /* 차트 데이터 포인트 추가 (초과 시 오래된 데이터 제거 — 슬라이딩 윈도우) */
-  const label = formatElapsed(elapsedSec);
-  chartLabels.push(label);
-  chartData.push(parseFloat(db.toFixed(1)));
-  if (chartLabels.length > CHART_MAX_POINTS) {
-    chartLabels.shift();
-    chartData.shift();
-  }
-  waveChart.update('none');  // 'none' 옵션으로 애니메이션 없이 즉시 갱신
-
-  /* 테이블 기록 추가: 첫 번째 기록 또는 매 5초(10번 인터벌)마다 */
-  if (dbValues.length % 10 === 0 || dbValues.length === 1) {
-    addTableRecord(db);
-  }
-}
-
-function addTableRecord(db) {
-  recordCount++;
-  const now  = new Date();
-  const dt   = now.toLocaleString('ko-KR');
-  const elapsed = formatElapsed(elapsedSec);
-  const status = getStatusText(db);
-  const badge  = getStatusBadge(db);
-
-  records.push({ no: recordCount, dt, db: db.toFixed(1), status, elapsed });
-
-  // 기존 empty 메시지 제거
-  const emptyRow = recordBody.querySelector('td[colspan]');
-  if (emptyRow) emptyRow.parentElement.remove();
-
-  // 행 삽입 (최신이 위)
-  const tr = document.createElement('tr');
-  tr.innerHTML = `
-    <td>${recordCount}</td>
-    <td>${dt}</td>
-    <td style="font-family:var(--font-display);font-weight:700;">${db.toFixed(1)} dB</td>
-    <td><span class="badge ${badge}">${status}</span></td>
-    <td>${elapsed}</td>
-  `;
-  recordBody.insertBefore(tr, recordBody.firstChild);
-}
-
-/* ─ 경과 시간 포맷 유틸리티 ─ */
-/* 초(sec)를 'HH:MM:SS' 형식의 문자열로 변환 */
-function formatElapsed(sec) {
-  const h = String(Math.floor(sec/3600)).padStart(2,'0');
-  const m = String(Math.floor((sec%3600)/60)).padStart(2,'0');
-  const s = String(sec%60).padStart(2,'0');
-  return `${h}:${m}:${s}`;
-}
-
-/* 측정 시작 시 타이머 초기화 및 1초 인터벌 시작 */
-function startTimer() {
-  startTime = Date.now();
-  elapsedSec = 0;
-  timerIntervalId = setInterval(() => {
-    elapsedSec++;
-    statTime.textContent = formatElapsed(elapsedSec);
-  }, 1000);
-}
-
-/* ─ 마이크 권한 안내·거부 모달 제어 ─ */
-const micModal      = document.getElementById('micModal');       // 권한 요청 안내 모달
-const micDeniedModal= document.getElementById('micDeniedModal'); // 권한 거부 안내 모달
-
-/* 모달 표시/숨김 유틸리티 */
-function showModal(el)  { el.style.display = 'flex'; }
-function hideModal(el)  { el.style.display = 'none'; }
-
-/* 취소·닫기 버튼 이벤트 */
-document.getElementById('micCancelBtn').addEventListener('click', () => hideModal(micModal));
-document.getElementById('micDeniedCloseBtn').addEventListener('click', () => hideModal(micDeniedModal));
-
-/* 모달 배경(오버레이) 클릭 시 닫기 */
-micModal.addEventListener('click', e => { if (e.target === micModal) hideModal(micModal); });
-micDeniedModal.addEventListener('click', e => { if (e.target === micDeniedModal) hideModal(micDeniedModal); });
-
-/* "마이크 허용하기" 버튼: 모달 닫고 실제 권한 요청 진행 */
-document.getElementById('micAllowBtn').addEventListener('click', async () => {
-  hideModal(micModal);
-  await requestMicAndStart();
-});
-
-/* ─ 측정 시작 버튼 클릭 처리 ─
-   Permissions API로 현재 권한 상태를 먼저 조회하고:
-   - 'denied': 복구 안내 모달 표시
-   - 'granted'/'prompt': getUserMedia 직접 호출 */
-startBtn.addEventListener('click', async () => {
-  if (navigator.permissions) {
-    try {
-      const perm = await navigator.permissions.query({ name: 'microphone' });
-      if (perm.state === 'denied') {
-        showModal(micDeniedModal);
-        return;
-      }
-    } catch(_) { /* Permissions API 미지원 브라우저는 그냥 진행 */ }
-  }
-  await requestMicAndStart();
-});
-
-/* ─ 마이크 스트림 획득 및 측정 시작 ─
-   getUserMedia → AudioContext → AnalyserNode 연결 후 루프 시작 */
-async function requestMicAndStart() {
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showToast('❌ 이 브라우저는 마이크 API를 지원하지 않습니다. Chrome/Edge를 사용해 주세요.');
-    return;
-  }
-
-  try {
-    /* 마이크 오디오 스트림 요청 (비디오 불필요) */
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-
-    /* Web Audio API 파이프라인: 마이크 → 분석기 (스피커 연결 안 함 → 하울링 방지) */
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const source = audioCtx.createMediaStreamSource(mediaStream);
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;           // FFT 크기 (주파수 해상도)
-    analyser.smoothingTimeConstant = 0.8; // 평활화 계수 (0=순간값, 1=완전평활)
-    source.connect(analyser);
-
-    isRunning = true;
-
-    /* UI 상태: 시작 버튼 비활성화, 정지 버튼 활성화, 상태 표시등 켜기 */
-    startBtn.disabled = true;
-    stopBtn.disabled  = false;
-    statusDot.classList.add('active');
-    statusText.textContent = '측정중';
-
-    /* 루프 시작: RAF(부드러운 dB 갱신) + 타이머 + 0.5초 통계 인터벌 */
-    rafLoop();
-    startTimer();
-    intervalId = setInterval(onInterval, 500);
-
-    showToast('✅ 마이크 연결 완료! 측정을 시작합니다.');
-
-  } catch (err) {
-    console.error('마이크 오류:', err);
-    /* 오류 유형별 사용자 안내 메시지 분기 */
-    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-      showModal(micDeniedModal);           // 권한 거부 → 복구 안내 모달
-    } else if (err.name === 'NotFoundError') {
-      showToast('❌ 마이크 장치를 찾을 수 없습니다. 마이크가 연결되어 있는지 확인하세요.');
-    } else if (err.name === 'NotReadableError') {
-      showToast('❌ 마이크가 다른 앱에서 사용 중입니다. 다른 앱을 닫고 다시 시도하세요.');
-    } else {
-      showToast('❌ 마이크 오류: ' + err.message);
-    }
-  }
-}
-
-/* ─ 측정 정지: 모든 오디오 리소스·루프·인터벌 정리 ─ */
-function stopMeasurement() {
-  if (!isRunning) return;
-  isRunning = false;
-
-  cancelAnimationFrame(rafId);       // RAF 루프 취소
-  clearInterval(intervalId);         // 0.5초 통계 인터벌 해제
-  clearInterval(timerIntervalId);    // 1초 타이머 인터벌 해제
-
-  /* 마이크 트랙 정지 및 AudioContext 닫기 */
-  if (mediaStream) {
-    mediaStream.getTracks().forEach(t => t.stop());
-    mediaStream = null;
-  }
-  if (audioCtx) { audioCtx.close(); audioCtx = null; }
-  analyser = null;
-
-  /* UI 복원: 버튼 상태 원래대로, 상태 표시등 끄기 */
-  startBtn.disabled = false;
-  stopBtn.disabled  = true;
-  statusDot.classList.remove('active');
-  statusText.textContent = '정지됨';
-
-  showToast('⏹ 측정이 정지되었습니다.');
-}
-stopBtn.addEventListener('click', stopMeasurement);
-
-/* ─ 측정 기록 전체 초기화 ─
-   통계·차트·테이블·dbValues 배열을 모두 초기 상태로 리셋 */
-function clearRecords() {
-  records = [];
-  recordCount = 0;
-  dbValues = [];
-  elapsedSec = 0;
-  statMin.innerHTML = '--<span>dB</span>';
-  statMax.innerHTML = '--<span>dB</span>';
-  statAvg.innerHTML = '--<span>dB</span>';
-  statTime.textContent = '00:00:00';
-  chartLabels.length = 0;
-  chartData.length   = 0;
-  if (waveChart) waveChart.update('none');
-  recordBody.innerHTML = '<tr><td colspan="5" class="table-empty">측정을 시작하면 기록이 저장됩니다.</td></tr>';
-  showToast('🗑 기록이 초기화되었습니다.');
-}
-
-/* ─ Excel(xlsx) 파일 다운로드 ─
-   SheetJS(XLSX) 라이브러리로 측정 기록을 .xlsx 파일로 내보냄 */
-function downloadXLSX() {
-  if (records.length === 0) { showToast('⚠ 저장할 데이터가 없습니다.'); return; }
-
-  const wsData = [
-    ['SoundGuard Pro — 데시벨 측정 기록'],
-    ['내보낸 시각: ' + new Date().toLocaleString('ko-KR')],
-    [],
-    ['#', '날짜/시간', 'dB 값', '상태', '경과시간'],
-    ...records.map(r => [r.no, r.dt, parseFloat(r.db), r.status, r.elapsed])
-  ];
-
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-  // 열 너비 설정
-  ws['!cols'] = [{wch:5},{wch:22},{wch:10},{wch:12},{wch:12}];
-
-  // 헤더 병합
-  ws['!merges'] = [{ s:{r:0,c:0}, e:{r:0,c:4} }];
-
-  XLSX.utils.book_append_sheet(wb, ws, '측정기록');
-  XLSX.writeFile(wb, `soundguard_${new Date().toISOString().slice(0,10)}.xlsx`);
-  showToast('📊 Excel 파일이 저장되었습니다.');
-}
-
-/* ─ PDF 보고서 다운로드 ─
-   jsPDF + AutoTable 플러그인으로 측정 기록을 A4 PDF 파일로 내보냄
-   (jsPDF 기본 폰트가 한글을 지원하지 않아 헤더는 영문으로 처리) */
-function downloadPDF() {
-  if (records.length === 0) { showToast('⚠ 저장할 데이터가 없습니다.'); return; }
-
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
-
-  // 한글 폰트 문제: 영문으로 표시 (jsPDF 기본 폰트는 한글 미지원)
-  doc.setFontSize(16);
-  doc.setTextColor(0, 180, 220);
-  doc.text('SoundGuard Pro - Decibel Measurement Report', 14, 18);
-
-  doc.setFontSize(9);
-  doc.setTextColor(100);
-  doc.text('Exported: ' + new Date().toLocaleString('ko-KR'), 14, 26);
-
-  // 통계 요약
-  const dbs = records.map(r => parseFloat(r.db));
-  const mn  = Math.min(...dbs).toFixed(1);
-  const mx  = Math.max(...dbs).toFixed(1);
-  const av  = (dbs.reduce((a,b)=>a+b,0)/dbs.length).toFixed(1);
-
-  doc.setFontSize(10);
-  doc.setTextColor(0);
-  doc.text(`Records: ${records.length}   MIN: ${mn} dB   MAX: ${mx} dB   AVG: ${av} dB`, 14, 34);
-
-  // 테이블
-  doc.autoTable({
-    startY: 40,
-    head: [['#', 'Date/Time', 'dB', 'Status', 'Elapsed']],
-    body: records.map(r => [r.no, r.dt, r.db + ' dB', r.status, r.elapsed]),
-    styles: { fontSize: 8, cellPadding: 2 },
-    headStyles: { fillColor: [0, 130, 180], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [245, 250, 255] },
-    columnStyles: {
-      0: { cellWidth: 10 },
-      1: { cellWidth: 52 },
-      2: { cellWidth: 22 },
-      3: { cellWidth: 28 },
-      4: { cellWidth: 28 },
-    }
-  });
-
-  doc.save(`soundguard_${new Date().toISOString().slice(0,10)}.pdf`);
-  showToast('📄 PDF 파일이 저장되었습니다.');
-}
-
-/* ─ 하단 토스트 알림 표시 ─
-   2.8초 후 자동으로 사라지는 일시적 상태 메시지 */
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2800);
-}
-
-/* ─ 다크모드 / 라이트모드 토글 ─
-   body에 dark-mode 클래스를 추가/제거하며 차트 색상도 함께 변경 */
-document.getElementById('themeBtn').addEventListener('click', () => {
-  document.body.classList.toggle('dark-mode');
-  const isDark = document.body.classList.contains('dark-mode');
-  document.getElementById('themeBtn').textContent = isDark ? '☀️' : '🌙';
-
-  // 차트 색상 재조정
-  if (waveChart) {
-    const gridColor = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(37,120,255,0.07)';
-    const tickColor = isDark ? '#4a6080' : '#7a99c8';
-    const lineColor = isDark ? '#00d4ff' : '#2578ff';
-    const fillColor = isDark ? 'rgba(0,212,255,0.07)' : 'rgba(37,120,255,0.08)';
-    waveChart.options.scales.x.grid.color = gridColor;
-    waveChart.options.scales.y.grid.color = gridColor;
-    waveChart.options.scales.x.ticks.color = tickColor;
-    waveChart.options.scales.y.ticks.color = tickColor;
-    waveChart.data.datasets[0].borderColor = lineColor;
-    waveChart.data.datasets[0].backgroundColor = fillColor;
-    waveChart.update('none');
-  }
-});
-
-/* ─ PWA 홈화면 추가 기능 ─
-   beforeinstallprompt 이벤트를 저장했다가 사용자가 버튼 클릭 시 표시 */
-window.addEventListener('beforeinstallprompt', e => {
-  e.preventDefault();
-  deferredPrompt = e;
-  document.getElementById('installBtn').style.display = 'flex'; // 설치 버튼 노출
-});
-
-document.getElementById('installBtn').addEventListener('click', async () => {
-  if (!deferredPrompt) return;
-  deferredPrompt.prompt();
-  const { outcome } = await deferredPrompt.userChoice;
-  if (outcome === 'accepted') showToast('📲 홈화면에 추가되었습니다!');
-  deferredPrompt = null;
-  document.getElementById('installBtn').style.display = 'none'; // 설치 후 버튼 숨김
-});
-
-/* PWA Manifest를 Blob으로 동적 생성하여 <link rel="manifest">에 연결
-   - 별도 manifest.json 파일 없이 오프라인에서도 PWA 설치 지원 */
-(function createManifest() {
-  const manifest = {
-    name: 'SoundGuard Pro',
-    short_name: 'SoundGuard',
-    description: '산업현장용 실시간 데시벨 측정기',
-    start_url: '.',
-    display: 'standalone',
-    background_color: '#f0f6ff',
-    theme_color: '#2578ff',
-    icons: [
-      { src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="%230a0e1a"/><text y=".9em" font-size="80">🎙</text></svg>', sizes: '192x192', type: 'image/svg+xml' }
-    ]
-  };
-  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
-  document.getElementById('manifest-link').href = URL.createObjectURL(blob);
-})();
-
-/* ─ 앱 초기화: 페이지 로드 시 Chart.js 차트 생성 ─ */
-initChart();
-
-/* Service Worker 등록: PWA 오프라인 지원
-   - install: skipWaiting으로 즉시 활성화
-   - fetch: 네트워크 실패 시 캐시에서 응답 */
-if ('serviceWorker' in navigator) {
-  const swCode = `
-    const CACHE = 'soundguard-v1';
-    self.addEventListener('install', e => {
-      self.skipWaiting();
-    });
-    self.addEventListener('fetch', e => {
-      e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
-    });
-  `;
-  /* Service Worker 코드를 Blob URL로 등록 (외부 sw.js 파일 없이 인라인으로 처리) */
-  const blob = new Blob([swCode], { type: 'application/javascript' });
-  navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(() => {});
-}
-</script>
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.7.1/jspdf.plugin.autotable.min.js"></script>
+<script src="../../assets/js/utils.js"></script>
+<script src="./app.js"></script>
 </body>
 </html>
-
-<!--
- * 만든사람
- * - 이름: 김지훈
- * - 이메일: hljihun98@gmail.com
- * 만든 날짜: 2026-06-03
- -->

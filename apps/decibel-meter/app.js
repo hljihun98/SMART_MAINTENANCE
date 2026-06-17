@@ -69,8 +69,9 @@ const BELT_IDS = [
 
 /* ---------- 전역 상태 ---------- */
 let audioCtx=null, analyser=null, srcNode=null, micStream=null;
-let floatBuf=null, byteBuf=null, rafId=null;
+let floatBuf=null, byteBuf=null, waveformBuf=null, rafId=null;
 let measuring=false, held=false;
+let dispFreq=0;
 let peakBuffer=[];
 let currentResult=null;
 let activeBeltType=null;   // 현재 측정 중인 벨트 타입 ('lifting'|'drive')
@@ -82,19 +83,23 @@ let activeSlotIdx=0;       // 현재 slots[] 인덱스
 let measureStartTs=0;
 let collecting=false, strikeTs=0, collectStartTs=0, collectEndTs=0, collectedSnapshots=[];
 let lastStrikeAt=0;
+let guideActive=false, guideStartTs=0, guidePeriodMs=3000, guidePeakFired=false;
+let collectionMaxRms=0;
 let noiseReduction={enabled:false};
 let noiseProfile=null;
 let noiseProfileReady=false;
 let targetLock={enabled:false, widthPct:30};
 let lockCenter=NaN, lockLoBin=-1, lockHiBin=-1;
+let flowEnabled=true;
+let simpleHistory=[];
 
 /* ---------- DOM 캐시 ---------- */
 const $ = id => document.getElementById(id);
 const inMass=$('inMass'), inWidth=$('inWidth'), inSpan=$('inSpan'), inCF=$('inCF'), inTargetN=$('inTargetN'), inTolPct=$('inTolPct'), selFFT=$('selFFT');
 const btnStart=$('btnStart'), btnStop=$('btnStop'), btnHold=$('btnHold'),
       btnSave=$('btnSave'), btnSkip=$('btnSkip'), btnClear=$('btnClear'),
-      btnCSV=$('btnCSV'), btnPDF=$('btnPDF'), btnNextSession=$('btnNextSession'),
-      btnCancelSetup=$('btnCancelSetup');
+      btnCSV=$('btnCSV'), btnPDF=$('btnPDF'),
+      btnCancelSetup=$('btnCancelSetup'), btnAddRobot=$('btnAddRobot');
 const inUnit=$('inUnit');
 const inDriveMeas=$('inDriveMeas'), inLiftingMeas=$('inLiftingMeas');
 
@@ -108,6 +113,14 @@ function updateReportButtons(){
 /* ---------- 측정 플로우 단계 ---------- */
 let currentStep=1;
 function setStep(n){
+  currentStep=n;
+  if(!flowEnabled){
+    const fs2=$('fs2'), fs3=$('fs3');
+    if(fs2) fs2.className='flow-step s-active';
+    if(fs3) fs3.className='flow-step s-active';
+    if(btnCancelSetup) btnCancelSetup.style.display='none';
+    return;
+  }
   for(let i=1;i<=5;i++){
     const si=$('si'+i), fs=$('fs'+i);
     if(si) si.className='step-item'+(i<n?' s-done':i===n?' s-active':'');
@@ -165,9 +178,32 @@ function buildActiveSlots(){
     });
 }
 
+/* ---------- 단순 모드 벨트 사양 빠른 선택 ---------- */
+function applyBeltPreset(type){
+  const p = BELT_PRESETS[type];
+  if(!p) return;
+  inMass.value = p.mass;
+  inWidth.value = p.width;
+  inSpan.value = p.span;
+  inCF.value = p.cf.toFixed(3);
+  inTargetN.value = p.targetN;
+  inTolPct.value = p.tolPct;
+  refreshPresetEstimate();
+  document.querySelectorAll('.belt-preset-btn').forEach(b => b.classList.remove('bpb-active'));
+  const btn = $('preset' + (type === 'drive' ? 'Drive' : 'Lifting'));
+  if(btn) btn.classList.add('bpb-active');
+  toast(p.label + ' 사양을 적용했습니다.', 'ok');
+}
+
 /* ---------- 슬롯 프리셋 적용 ---------- */
 function applySlotPreset(slot){
   activeBeltType = slot.type;
+  const changed = [];
+  if(isFinite(slot.mass) && inMass.value !== '' && parseFloat(inMass.value) !== slot.mass)
+    changed.push(`Mass ${inMass.value}→${slot.mass}`);
+  if(isFinite(slot.span) && inSpan.value !== '' && parseFloat(inSpan.value) !== slot.span)
+    changed.push(`Span ${inSpan.value}→${slot.span}`);
+  if(changed.length) toast(`${slot.label} 전환: ${changed.join(', ')} 으로 조건 변경됨`, 'warn', 4000);
   inMass.value = slot.mass; inWidth.value = slot.width;
   inSpan.value = slot.span; inCF.value = slot.cf.toFixed(3);
   inTargetN.value = slot.targetN; inTolPct.value = slot.tolPct;
@@ -188,17 +224,54 @@ function updateSlotProgress(){
 }
 function updateProgressChip(){ updateSlotProgress(); }  // 하위호환
 
+/* ---------- 호기 큐에 추가 ---------- */
+function addRobotToQueue(){
+  const unit = inUnit ? inUnit.value.trim() : '';
+  if(!unit){ toast('호기 번호를 입력해주세요.','err'); inUnit&&inUnit.focus(); return; }
+  if(selectedDriveIds.size+selectedLiftingIds.size===0){ toast('벨트를 1개 이상 선택해주세요.','err'); return; }
+  if(robots.some(r=>r.unit===unit&&!r.completedAt)){
+    toast(unit+'호기가 이미 추가되어 있습니다.','err'); return;
+  }
+  const slots = buildActiveSlots();
+  if(!slots.length){ toast('활성화된 벨트 슬롯이 없습니다.','err'); return; }
+  const robot = { id:Date.now(), unit, createdAt:new Date(), startedAt:null, completedAt:null, slots };
+  robots.push(robot);
+  renderRobotProgress();
+  renderRobots();
+  updateReportButtons();
+  updateSessionSwitchRow();
+  inUnit.value='';
+  inUnit.focus();
+  saveState();
+  toast(unit+'호기가 추가되었습니다.','ok');
+}
+
 /* ---------- 로봇 시퀀스 시작 ---------- */
 function saveResult(){ saveCurrentSlot(); }  // btnSave 이벤트 호환
 
 function initRobotIfNeeded(){
-  const unit = inUnit ? inUnit.value.trim() : '';
-  if(!unit){ toast('호기 번호를 입력해주세요.','err'); return false; }
-  if(selectedDriveIds.size+selectedLiftingIds.size===0){ toast('벨트를 1개 이상 선택해주세요.','err'); return false; }
   if(activeRobot) return true;  // 이미 진행 중
+
+  // 1순위: 큐에서 대기 중인 첫 호기 선택
+  const pending = robots.find(r=>!r.startedAt);
+  if(pending){
+    activeRobot = pending;
+    pending.startedAt = new Date();
+    activeSlotIdx = 0;
+    applySlotPreset(pending.slots[0]);
+    renderRobotProgress();
+    renderRobots();
+    updateSessionSwitchRow();
+    return true;
+  }
+
+  // 2순위(폴백): Step 1 현재 입력으로 즉시 생성
+  const unit = inUnit ? inUnit.value.trim() : '';
+  if(!unit){ toast('호기를 추가하거나 호기 번호를 입력해주세요.','err'); return false; }
+  if(selectedDriveIds.size+selectedLiftingIds.size===0){ toast('벨트를 1개 이상 선택해주세요.','err'); return false; }
   const slots = buildActiveSlots();
   if(!slots.length){ toast('활성화된 벨트 슬롯이 없습니다.','err'); return false; }
-  const robot = { id:Date.now(), unit, createdAt:new Date(), completedAt:null, slots };
+  const robot = { id:Date.now(), unit, createdAt:new Date(), startedAt:new Date(), completedAt:null, slots };
   robots.push(robot);
   activeRobot = robot;
   activeSlotIdx = 0;
@@ -214,12 +287,36 @@ function saveCurrentSlot(){
   if(!currentResult||!isFinite(currentResult.freq)){
     toast('유효한 주파수가 없습니다.','err'); return;
   }
+  if(!flowEnabled){
+    const {targetN,tolPct}=readTarget();
+    let judge='--';
+    if(isFinite(targetN)&&isFinite(tolPct)){
+      const lower=targetN*(1-tolPct/100), upper=targetN*(1+tolPct/100);
+      judge=currentResult.corrN>=lower&&currentResult.corrN<=upper?'OK':'NG';
+    }
+    simpleHistory.push({time:new Date(),freq:currentResult.freq,corrN:currentResult.corrN,
+      rawN:currentResult.rawN,kgf:currentResult.kgf,conf:currentResult.confidence||0,
+      mass:currentResult.mass,width:currentResult.width,span:currentResult.span,cf:currentResult.cf,
+      targetN,tolPct,judge});
+    beep(1320,80);
+    renderSimpleHistory();
+    saveState();
+    toast('저장되었습니다.','ok');
+    resetForNextMeasurement(false);
+    setStep(2);
+    startMeasure();
+    return;
+  }
   if(!activeRobot){ toast('호기가 설정되지 않았습니다.','err'); return; }
   const slot = activeRobot.slots[activeSlotIdx];
+  slot.mass = currentResult.mass; slot.width = currentResult.width;
+  slot.span = currentResult.span; slot.cf = currentResult.cf;
   const lower = slot.targetN*(1-slot.tolPct/100), upper = slot.targetN*(1+slot.tolPct/100);
   const judge = currentResult.corrN>=lower && currentResult.corrN<=upper ? 'OK' : 'NG';
   slot.values.push({freq:currentResult.freq, corrN:currentResult.corrN, kgf:currentResult.kgf,
     rawN:currentResult.rawN, conf:currentResult.confidence||0, time:new Date(), judge});
+  beep(1320, 80);
+  saveState();
 
   const slotDone = slot.values.length >= slot.measCount;
   if(slotDone){
@@ -231,12 +328,31 @@ function saveCurrentSlot(){
     const allDone = activeRobot.slots.every(s=>s.completedAt);
     if(allDone){
       activeRobot.completedAt = new Date();
+      const completedUnit = activeRobot.unit;
       renderRobots();
       renderRobotProgress();
-      resetForNextMeasurement(true);
-      setStep(4);
-      showNextRobotPrompt();
-      toast('모든 벨트 측정 완료!','ok',4800);
+
+      const nextPending = robots.find(r=>!r.startedAt);
+      if(nextPending){
+        activeRobot = null; activeSlotIdx = 0;
+        resetForNextMeasurement(false);
+        activeRobot = nextPending;
+        nextPending.startedAt = new Date();
+        activeSlotIdx = 0;
+        applySlotPreset(nextPending.slots[0]);
+        renderRobotProgress();
+        renderRobots();
+        updateSessionSwitchRow();
+        toast(completedUnit+'호기 완료 → '+nextPending.unit+'호기 측정을 시작합니다.','ok',4000);
+        setStep(2);
+        startMeasure();
+      } else {
+        activeRobot = null;
+        resetForNextMeasurement(true);
+        setStep(4);
+        updateSessionSwitchRow();
+        toast('모든 호기 측정 완료! 보고서를 다운로드하세요.','ok',4800);
+      }
       return;
     }
     activeSlotIdx++;
@@ -264,6 +380,7 @@ function skipMeasurement(){
   resetForNextMeasurement(false);
   setStep(2);
   startMeasure();
+  saveState();
 }
 
 /* ---------- 현재 호기 설정 취소 ---------- */
@@ -273,18 +390,21 @@ function cancelCurrentRobot(){
   if(hasMeasurements &&
      !confirm('이미 저장된 측정값이 있습니다.\n현재 호기 측정을 취소하면 미완료 상태로 남습니다. 계속할까요?')) return;
   if(measuring) stopMeasure();
-  if(!hasMeasurements) robots=robots.filter(r=>r!==activeRobot);
+  robots=robots.filter(r=>r!==activeRobot);
   activeRobot=null; activeSlotIdx=0; currentResult=null;
   renderRobots();
+  renderRobotProgress();
   updateReportButtons();
   setStep(1);
   updateSessionSwitchRow();
+  saveState();
   toast('측정 설정을 취소했습니다.','warn');
 }
 
 /* ---------- 측정 초기화 ---------- */
 function resetForNextMeasurement(done){
-  currentResult=null;
+  currentResult=null; dispFreq=0;
+  if(waveformBuf){ waveformBuf.fill(128); drawWaveform(); }
   btnSave.disabled=true; if(btnSkip) btnSkip.disabled=true;
   if(!measuring){
     btnStart.disabled=false; btnStop.disabled=true; btnHold.disabled=true;
@@ -309,32 +429,10 @@ function cancelSlotMeasurement(vi){
   toast((vi+1)+'회차 측정값을 삭제했습니다.','warn');
 }
 
-/* ---------- 다음 호기 프롬프트 ---------- */
-function showNextRobotPrompt(){
-  const p=$('nextRobotPrompt'), cfg=$('nextRobotCfg'), ns=$('btnNextSession');
-  if(p){
-    const driveStr = selectedDriveIds.size > 0 ? [...selectedDriveIds].join('·') : '없음';
-    const liftStr  = selectedLiftingIds.size > 0 ? [...selectedLiftingIds].join('·') : '없음';
-    if(cfg) cfg.textContent = '구동모듈: '+driveStr+' · 리프팅: '+liftStr;
-    p.style.display='block';
-  }
-  if(ns) ns.style.display='none';
-}
-function startNextRobot(sameConfig){
-  const p=$('nextRobotPrompt'); if(p) p.style.display='none';
-  activeRobot=null; activeSlotIdx=0;
-  if(inUnit) inUnit.value='';
-  if(!sameConfig){
-    selectedDriveIds=new Set();
-    selectedLiftingIds=new Set();
-    refreshBeltBtns('drive'); refreshBeltBtns('lifting');
-  }
-  updateSlotProgress();
-  setStep(1);
-  if(inUnit) inUnit.focus();
-  toast(sameConfig ? '호기 번호를 입력하세요.' : '호기 번호와 벨트 구성을 설정하세요.','ok');
-}
-function promptNextRobot(){ showNextRobotPrompt(); }  // step1 버튼 호환
+/* ---------- 다음 호기 프롬프트 (자동 진행으로 대체 — stub 유지) ---------- */
+function showNextRobotPrompt(){}
+function startNextRobot(){}
+function promptNextRobot(){}
 
 /* ---------- Step 1 세션 전환 행 ---------- */
 function updateSessionSwitchRow(){
@@ -342,51 +440,127 @@ function updateSessionSwitchRow(){
   if(!row||!info) return;
   if(robots.length>0){
     const done=robots.filter(r=>r.completedAt).length;
-    info.textContent='현재 '+robots.length+'개 호기 (완료 '+done+'개)';
+    const pending=robots.filter(r=>!r.startedAt).length;
+    info.textContent='총 '+robots.length+'개 호기 · 완료 '+done+' · 대기 '+pending;
     row.style.display='flex';
   }else{ row.style.display='none'; }
 }
 
-/* ---------- 로봇 진행 표시 (Step 4) ---------- */
+/* ---------- 로봇 진행 표시 (Step 4) — robots[] 전체 카드 렌더링 ---------- */
 function renderRobotProgress(){
   const el=$('sessionProgress'); if(!el) return;
-  const unitTag=$('fs4Unit');
-  if(unitTag) unitTag.textContent = activeRobot ? ' — '+(activeRobot.unit ? activeRobot.unit+'호기' : '(미설정)') : '';
-  if(!activeRobot){ el.innerHTML=''; return; }
-  const isCurrent = (si) => si===activeSlotIdx && !activeRobot.completedAt;
-  el.innerHTML = activeRobot.slots.map((slot, si)=>{
-    const done = !!slot.completedAt;
-    const active = isCurrent(si);
-    const chips = slot.values.map((v,vi)=>{
-      const cls = v.judge==='OK' ? 'prog-ok' : 'prog-ng';
-      return `<div class="prog-chip ${cls}">
-        ${active ? `<button class="prog-del" onclick="cancelSlotMeasurement(${vi})" title="취소">✕</button>` : ''}
-        <span class="prog-num">${vi+1}회</span>
-        <span class="prog-val">${v.corrN.toFixed(1)}</span>
-        <span class="prog-unit">N</span>
+  if(!robots.length){
+    el.innerHTML='<div class="robot-empty">추가된 호기가 없습니다.</div>';
+    return;
+  }
+  el.innerHTML = robots.map(robot=>{
+    const isPending = !robot.startedAt;
+    const isActive  = robot === activeRobot;
+    const isDone    = !!robot.completedAt;
+
+    /* ── 대기 중 카드 ── */
+    if(isPending){
+      const driveKeys = robot.slots.filter(s=>s.type==='drive').map(s=>s.key).join(' · ') || '없음';
+      const liftKeys  = robot.slots.filter(s=>s.type==='lifting').map(s=>s.key).join(' · ') || '없음';
+      return `<div class="robot-card robot-pending">
+        <div class="robot-card-head">
+          <span class="robot-unit">${robot.unit}호기</span>
+          <span class="robot-tag robot-tag-pending">대기</span>
+          <button class="robot-del" onclick="deleteRobot(${robot.id})" title="삭제">✕</button>
+        </div>
+        <div class="robot-card-config">구동 ${driveKeys} · 리프팅 ${liftKeys}</div>
+      </div>`;
+    }
+
+    /* ── 완료 카드 (컴팩트) ── */
+    if(isDone){
+      const chips = robot.slots.map(slot=>{
+        if(!slot.values.length) return '';
+        const cls = slot.avgJudge==='OK' ? 'prog-ok' : 'prog-ng';
+        return `<div class="prog-chip ${cls}">
+          <span class="prog-num">${slot.label}</span>
+          <span class="prog-val">${slot.average!=null?slot.average.toFixed(1):'—'}</span>
+          <span class="prog-unit">N</span>
+        </div>`;
+      }).join('');
+      return `<div class="robot-card robot-done">
+        <div class="robot-card-head">
+          <span class="robot-unit">${robot.unit}호기</span>
+          <span class="robot-tag robot-tag-done">✓ 완료</span>
+          <button class="robot-del" onclick="deleteRobot(${robot.id})" title="삭제">✕</button>
+        </div>
+        <div class="prog-grid">${chips}</div>
+      </div>`;
+    }
+
+    /* ── 측정 중 카드 (기존 슬롯 상세) ── */
+    const isCurrent = (si) => si===activeSlotIdx && !robot.completedAt;
+    const slotsHtml = robot.slots.map((slot,si)=>{
+      const done   = !!slot.completedAt;
+      const active = isCurrent(si);
+      const chips = slot.values.map((v,vi)=>{
+        const cls = v.judge==='OK' ? 'prog-ok' : 'prog-ng';
+        return `<div class="prog-chip ${cls}">
+          ${active?`<button class="prog-del" onclick="cancelSlotMeasurement(${vi})" title="취소">✕</button>`:''}
+          <span class="prog-num">${vi+1}회</span>
+          <span class="prog-val">${v.corrN.toFixed(1)}</span>
+          <span class="prog-unit">N</span>
+        </div>`;
+      }).join('');
+      const empties = done ? '' : Array.from({length:slot.measCount-slot.values.length},(_,i)=>
+        `<div class="prog-chip prog-empty"><span class="prog-num">${slot.values.length+i+1}회</span><span class="prog-val">—</span></div>`
+      ).join('');
+      const avgBlock = done && slot.average!=null ?
+        `<div class="prog-avg ${slot.avgJudge==='OK'?'avg-ok':'avg-ng'}">
+           <span class="avg-label">평균</span><span class="avg-val">${slot.average.toFixed(1)} N</span>
+           <span class="avg-judge">${slot.avgJudge}</span>
+         </div>` : '';
+      const statusTag = done ? '<span class="slot-tag-done">✓</span>' :
+                        active ? '<span class="slot-tag-now">측정 중</span>' : '';
+      return `<div class="slot-section ${active?'slot-cur':''}${done?' slot-done':''}">
+        <div class="slot-head"><span class="slot-key">${slot.label}</span>${statusTag}</div>
+        <div class="prog-grid">${chips}${empties}</div>${avgBlock}
       </div>`;
     }).join('');
-    const empties = done ? '' : Array.from({length:slot.measCount-slot.values.length},(_,i)=>
-      `<div class="prog-chip prog-empty"><span class="prog-num">${slot.values.length+i+1}회</span><span class="prog-val">—</span></div>`
-    ).join('');
-    const avgBlock = done && slot.average!=null ?
-      `<div class="prog-avg ${slot.avgJudge==='OK'?'avg-ok':'avg-ng'}">
-         <span class="avg-label">평균</span><span class="avg-val">${slot.average.toFixed(1)} N</span>
-         <span class="avg-judge">${slot.avgJudge}</span>
-       </div>` : '';
-    const statusTag = done ? '<span class="slot-tag-done">✓</span>' :
-                      active ? '<span class="slot-tag-now">측정 중</span>' : '';
-    return `<div class="slot-section ${active?'slot-cur':''}${done?' slot-done':''}">
-      <div class="slot-head"><span class="slot-key">${slot.label}</span>${statusTag}</div>
-      <div class="prog-grid">${chips}${empties}</div>${avgBlock}
+
+    return `<div class="robot-card robot-active">
+      <div class="robot-card-head">
+        <span class="robot-unit">${robot.unit}호기</span>
+        <span class="robot-tag robot-tag-active">측정 중</span>
+        <button class="robot-del" onclick="deleteRobot(${robot.id})" title="삭제">✕</button>
+      </div>
+      ${slotsHtml}
     </div>`;
   }).join('');
+
   updateSessionSwitchRow();
 }
+
+/* ---------- 호기 삭제 ---------- */
+function deleteRobot(id){
+  const robot = robots.find(r=>r.id===id);
+  if(!robot) return;
+  const isActive = robot === activeRobot;
+  const hasMeasurements = robot.slots.some(s=>s.values.length>0);
+  if(hasMeasurements){
+    if(!confirm(robot.unit+'호기를 삭제할까요? 저장된 측정값도 함께 삭제됩니다.')) return;
+  }
+  if(isActive){
+    if(measuring) stopMeasure();
+    activeRobot=null; activeSlotIdx=0; currentResult=null;
+  }
+  robots=robots.filter(r=>r.id!==id);
+  renderRobots(); renderRobotProgress(); updateReportButtons(); updateSessionSwitchRow();
+  if(isActive) setStep(1);
+  saveState();
+  toast(robot.unit+'호기가 삭제됐습니다.','warn');
+}
+
 const estFreq=$('estFreq'), kconst=$('kconst'), btnEstimate=$('btnEstimate');
 const statusDot=$('statusDot'), statusText=$('statusText'), statusPill=$('statusPill');
 const liveFreq=$('liveFreq'), livePeak=$('livePeak'), meterFill=$('meterFill'), meterVal=$('meterVal');
-const canvas=$('spectrum'), ctx=canvas.getContext('2d');
+const canvas=$('spectrum'), ctx=canvas&&canvas.getContext('2d');
+const waveCanvas=$('waveform'), waveCtx=waveCanvas&&waveCanvas.getContext('2d');
 const resTarget=$('resTarget'), resJudge=$('resJudge'), resJudgeWrap=$('resJudgeWrap');
 
 /* ================================================================
@@ -482,7 +656,7 @@ function micUnavailableMessage(){
    ================================================================ */
 async function startMeasure(){
   if(measuring) return;
-  if(!activeRobot){ if(!initRobotIfNeeded()) return; }
+  if(flowEnabled && !activeRobot){ if(!initRobotIfNeeded()) return; }
   if(!validateInputs()) return;
   if(!canUseMicrophone()){
     setStatus('bad','마이크 사용 불가','UNAVAILABLE');
@@ -521,6 +695,7 @@ async function startMeasure(){
     srcNode.connect(analyser);
     floatBuf = new Float32Array(analyser.frequencyBinCount);
     byteBuf  = new Uint8Array(analyser.frequencyBinCount);
+    waveformBuf = new Uint8Array(analyser.fftSize);
   }catch(err){
     setStatus('bad','오디오 초기화 실패','ERROR');
     toast('오디오 초기화에 실패했습니다: '+err.message, 'err');
@@ -552,12 +727,17 @@ function stopMeasure(){
   btnStart.disabled=false; btnStop.disabled=true; btnHold.disabled=true; btnSave.disabled=true;
   if(btnSkip) btnSkip.disabled=true;
   selFFT.disabled=false;
-  held=false;
+  held=false; dispFreq=0;
   btnHold.innerHTML='<span class="ico">⏸</span> 고정';
   btnHold.classList.remove('active');
   setStatus('ready','대기 중','READY');
   meterFill.style.width='0%'; meterVal.textContent='0%';
   liveFreq.textContent='--'; livePeak.textContent='대기'; livePeak.style.color='var(--muted)';
+  if(waveformBuf){ waveformBuf.fill(128); drawWaveform(); }
+  guideActive=false; guidePeakFired=false;
+  const swG=$('swGuide');
+  if(swG){ swG.setAttribute('aria-pressed','false'); swG.classList.remove('on'); }
+  const chip=$('guideChip'); if(chip) chip.style.display='none';
 }
 
 /* ================================================================
@@ -615,23 +795,43 @@ function analyzeLoop(){
   meterFill.style.width=lvlPct+'%'; meterVal.textContent=lvlPct+'%';
 
   drawSpectrum(byteDraw, binHz, minBin, maxBin, peakBin);
+  drawWaveform();
 
   const now = Date.now();
   const rms = computeRMS();
   if(!collecting){
-    if(rms > 0.08 && (now - lastStrikeAt) > 3000){
-      strikeTs = now; lastStrikeAt = now;
-      collecting = true; collectStartTs = strikeTs + 500; collectEndTs = strikeTs + 2000; collectedSnapshots = [];
+    if(guideActive){
+      // 가이드 모드: 사인파 피크에서 자동 트리거
+      const elapsed=(Date.now()-guideStartTs)%guidePeriodMs;
+      const phase=(elapsed/guidePeriodMs)*2*Math.PI;
+      const sineVal=Math.sin(phase);
+      if(sineVal>0.95 && !guidePeakFired){
+        guidePeakFired=true;
+        const ts=Date.now();
+        strikeTs=ts; lastStrikeAt=ts;
+        collecting=true; collectStartTs=ts+300; collectEndTs=ts+1800; collectedSnapshots=[];
+        collectionMaxRms=0;
+        beep(880, 80);
+        setStatus('listen','피크 — 지금 튕겨주세요!','COLLECTING');
+      }
+      if(sineVal<0) guidePeakFired=false;
+    } else if(rms > 0.08 && (now - lastStrikeAt) > 3000){
+      // 일반 모드: RMS 충격 감지 (기존 동작 그대로)
+      strikeTs=now; lastStrikeAt=now;
+      collecting=true; collectStartTs=strikeTs+500; collectEndTs=strikeTs+2000; collectedSnapshots=[];
+      beep(880, 80);
       setStatus('listen','충격 감지 — 0.5s 무시 후 1.5s 분석','COLLECTING');
     }
   } else {
+    collectionMaxRms = Math.max(collectionMaxRms, rms);
     if(now > collectEndTs){
       collecting = false;
       finalizeCollection();
     }else if(now >= collectStartTs){
       const det = detectFundamentalBandpass(floatBuf, binHz, minBin, maxBin);
       if(det) collectedSnapshots.push({t:now, f:det.freq, mag:det.mag});
-      liveFreq.textContent = det?det.freq.toFixed(1):'--';
+      if(det){ dispFreq = dispFreq ? dispFreq*0.65+det.freq*0.35 : det.freq; liveFreq.textContent=dispFreq.toFixed(1); }
+      else { liveFreq.textContent='--'; }
     }
     rafId=requestAnimationFrame(analyzeLoop); return;
   }
@@ -661,14 +861,15 @@ function analyzeLoop(){
       pushPeak(f);
       const stable = stableFreq();
       const unstable = isUnstable();
-      liveFreq.textContent = f.toFixed(1);
+      dispFreq = dispFreq ? dispFreq*0.65+f*0.35 : f;
+      liveFreq.textContent = dispFreq.toFixed(1);
       livePeak.textContent='검출'; livePeak.style.color='var(--green)';
       if(unstable){
         setStatus('noise','측정 불안정 — 반복 측정해주세요','UNSTABLE');
       }else{
         setStatus('good','신호 검출','DETECTED');
       }
-      updateResult(stable);
+      // updateResult는 finalizeCollection()에서만 호출 — outer loop에서 호출하면 배경 소음이 결과를 오염시킴
     }
   }
 
@@ -760,7 +961,7 @@ function detectFundamentalBandpass(floatBuf, binHz, globalMinBin, globalMaxBin){
   cands.sort((a,b)=>b.mag-a.mag);
   if(!cands.length) return null;
   const selected = [];
-  for(const c of cands.slice(0,12).reverse()){
+  for(const c of cands.slice(0,12)){
     const f = c.bin * binHz;
     let isHarm=false;
     for(const s of selected){
@@ -858,6 +1059,11 @@ function updateResult(freq, extConf){
 }
 
 function finalizeCollection(){
+  if(guideActive && collectionMaxRms < 0.02){
+    setStatus('listen','대기 중 — 벨트를 튕겨주세요','LISTENING');
+    toast('벨트 튕김이 감지되지 않았습니다. 사인파 피크에 맞춰 튕겨주세요.','warn',2500);
+    return;
+  }
   if(!collectedSnapshots.length){
     setStatus('listen','유효한 스냅샷이 없습니다','READY');
     toast('충격은 감지되었으나 유효한 주파수를 수집하지 못했습니다. 다시 시도하세요.','err');
@@ -907,9 +1113,13 @@ function finalizeCollection(){
     if(audioCtx){ try{audioCtx.close();}catch(e){} audioCtx=null; }
     analyser=null;
     btnStart.disabled=false; btnStop.disabled=true; selFFT.disabled=false; btnHold.disabled=true;
+    if(waveformBuf){ waveformBuf.fill(128); drawWaveform(); }
+    beep(1100, 150);
     toast('측정이 자동으로 종료되었습니다. 결과가 고정되었습니다.','ok');
   }else{
+    held=true; btnHold.classList.add('active'); btnHold.innerHTML='<span class="ico">▶</span> 고정 해제';
     setStatus('weak','결과 불안정 — 재측정 권장','UNSTABLE');
+    beep(660, 80);
     toast('측정이 완료되었으나 안정성이 낮습니다 (Confidence '+Math.round(confidence)+'%).','warn');
   }
 }
@@ -918,6 +1128,7 @@ function finalizeCollection(){
    스펙트럼 그래프
    ================================================================ */
 function setupCanvas(){
+  if(!canvas||!ctx) return;
   const dpr=window.devicePixelRatio||1;
   const w=canvas.clientWidth, h=200;
   canvas.width=Math.round(w*dpr);
@@ -925,6 +1136,7 @@ function setupCanvas(){
   ctx.setTransform(dpr,0,0,dpr,0,0);
 }
 function drawSpectrum(byte, binHz, minBin, maxBin, peakBin){
+  if(!canvas||!ctx) return;
   const W=canvas.clientWidth, H=200;
   ctx.clearRect(0,0,W,H);
   if(!byte || byte.length===0){ return; }
@@ -984,6 +1196,98 @@ function drawSpectrum(byte, binHz, minBin, maxBin, peakBin){
 }
 
 /* ================================================================
+   파형 오실로스코프 (타이밍 가이드)
+   ================================================================ */
+function setupWaveformCanvas(){
+  if(!waveCanvas) return;
+  const dpr=window.devicePixelRatio||1;
+  const w=waveCanvas.clientWidth, h=72;
+  waveCanvas.width=Math.round(w*dpr);
+  waveCanvas.height=Math.round(h*dpr);
+  waveCtx.setTransform(dpr,0,0,dpr,0,0);
+}
+function drawWaveform(){
+  if(!waveCtx || !waveformBuf) return;
+  const W=waveCanvas.clientWidth, H=72;
+
+  /* ── 가이드 모드: 스크롤 사인파 애니메이션 ── */
+  if(guideActive && !collecting){
+    const elapsed=(Date.now()-guideStartTs)%guidePeriodMs;
+    const phase=(elapsed/guidePeriodMs)*2*Math.PI;
+    const sineNow=Math.sin(phase);
+    const nearPeak=sineNow>0.80;
+
+    waveCtx.fillStyle='#111827'; waveCtx.fillRect(0,0,W,H);
+    waveCtx.strokeStyle='#374151'; waveCtx.lineWidth=1;
+    waveCtx.beginPath(); waveCtx.moveTo(0,H/2); waveCtx.lineTo(W,H/2); waveCtx.stroke();
+
+    waveCtx.beginPath();
+    for(let x=0;x<W;x++){
+      const wPhase=phase-(1-(x/W))*2*Math.PI;
+      const v=Math.sin(wPhase);
+      const y=H/2-v*(H/2-8);
+      x===0 ? waveCtx.moveTo(x,y) : waveCtx.lineTo(x,y);
+    }
+    waveCtx.strokeStyle=nearPeak?'#22c55e':'#0099CC';
+    waveCtx.lineWidth=nearPeak?2.5:1.5;
+    waveCtx.stroke();
+
+    const dotY=H/2-sineNow*(H/2-8);
+    waveCtx.beginPath();
+    waveCtx.arc(W-2,dotY,nearPeak?7:3,0,2*Math.PI);
+    waveCtx.fillStyle=nearPeak?'#22c55e':'#0099CC';
+    waveCtx.fill();
+
+    if(sineNow>0.95){
+      waveCtx.fillStyle='#22c55e';
+      waveCtx.font='bold 12px sans-serif';
+      waveCtx.textAlign='center';
+      waveCtx.fillText('지금!',W/2,15);
+    }
+    return;
+  }
+
+  /* ── 마이크 모드: 시간축 오실로스코프 ── */
+  if(analyser) analyser.getByteTimeDomainData(waveformBuf);
+  waveCtx.fillStyle=collecting?'#0c1e35':'#111827';
+  waveCtx.fillRect(0,0,W,H);
+  waveCtx.strokeStyle='#374151'; waveCtx.lineWidth=1;
+  waveCtx.beginPath(); waveCtx.moveTo(0,H/2); waveCtx.lineTo(W,H/2); waveCtx.stroke();
+  waveCtx.strokeStyle=collecting?'#38bdf8':'#94a3b8';
+  waveCtx.lineWidth=1.5;
+  waveCtx.beginPath();
+  for(let x=0;x<W;x++){
+    const i=Math.floor(x/W*waveformBuf.length);
+    const v=waveformBuf[i]/128-1;
+    const y=H/2+v*(H/2-5);
+    x===0 ? waveCtx.moveTo(x,y) : waveCtx.lineTo(x,y);
+  }
+  waveCtx.stroke();
+  if(collecting && collectStartTs){
+    const elapsed=Math.max(0,Date.now()-collectStartTs);
+    const total=collectEndTs-collectStartTs;
+    const pct=Math.min(1,elapsed/total);
+    waveCtx.fillStyle='rgba(56,189,248,.5)';
+    waveCtx.fillRect(0,H-3,W*pct,3);
+  }
+}
+
+/* ================================================================
+   삑 소리 (AudioContext oscillator)
+   ================================================================ */
+function beep(freq=880, ms=110){
+  if(!audioCtx) return;
+  try{
+    const osc=audioCtx.createOscillator(), g=audioCtx.createGain();
+    osc.connect(g); g.connect(audioCtx.destination);
+    osc.frequency.value=freq;
+    g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+ms/1000);
+    osc.start(audioCtx.currentTime); osc.stop(audioCtx.currentTime+ms/1000);
+  }catch(e){}
+}
+
+/* ================================================================
    측정값 고정
    ================================================================ */
 function toggleHold(){
@@ -1005,6 +1309,7 @@ function toggleHold(){
    결과 테이블 렌더링 (transposed: rows=벨트ID, columns=호기)
    ================================================================ */
 function renderRobots(){
+  if(!flowEnabled){ renderSimpleHistory(); return; }
   const head=$('histHead'), body=$('histBody');
   if(!head||!body) return;
   if(!robots.length){
@@ -1049,12 +1354,136 @@ function renderRobots(){
 }
 function renderSessions(){ renderRobots(); }  // 하위호환
 
+/* ================================================================
+   localStorage 상태 저장 / 복원
+   ================================================================ */
+function dateReplacer(key, val){
+  if(val instanceof Date) return {__type:'Date', iso:val.toISOString()};
+  return val;
+}
+function dateReviver(key, val){
+  if(val && val.__type==='Date') return new Date(val.iso);
+  return val;
+}
+function saveState(){
+  try{
+    const data={version:1, flowEnabled, robots, simpleHistory};
+    localStorage.setItem('beltTension_v1', JSON.stringify(data, dateReplacer));
+  }catch(e){}
+}
+function loadState(){
+  try{
+    const raw=localStorage.getItem('beltTension_v1');
+    if(!raw) return;
+    const data=JSON.parse(raw, dateReviver);
+    if(data.version!==1) return;
+    robots=data.robots||[];
+    simpleHistory=data.simpleHistory||[];
+    flowEnabled=data.flowEnabled??true;
+  }catch(e){}
+}
+
+/* ================================================================
+   단순 측정 모드 (플로우 OFF)
+   ================================================================ */
+function renderSimpleHistory(){
+  const head=$('histHead'), body=$('histBody');
+  if(!head||!body) return;
+  if(!simpleHistory.length){
+    head.innerHTML='<tr><th colspan="5" style="text-align:center;color:#9CA3AF;">저장된 측정이 없습니다.</th></tr>';
+    body.innerHTML='';
+    return;
+  }
+  head.innerHTML=`<tr>
+    <th>회차</th><th>주파수 (Hz)</th><th>장력 (N)</th><th>판정</th><th>시각</th>
+  </tr>`;
+  body.innerHTML=simpleHistory.map((v,i)=>{
+    const ok=v.judge==='OK', ng=v.judge==='NG';
+    const cls=ok?'val-ok':ng?'val-ng':'';
+    return `<tr>
+      <td style="text-align:center;">${i+1}회</td>
+      <td style="text-align:center;">${v.freq.toFixed(1)}</td>
+      <td class="${cls}" style="text-align:center;font-weight:700;">${v.corrN.toFixed(1)} N</td>
+      <td class="${cls}" style="text-align:center;font-weight:700;">${v.judge}</td>
+      <td style="text-align:center;">${fmtTime(v.time)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function downloadSimpleCSV(){
+  if(!simpleHistory.length){ toast('다운로드할 측정이 없습니다.','err'); return; }
+  const header=['회차','주파수(Hz)','장력(N)','kgf','판정','시각'];
+  const rows=simpleHistory.map((v,i)=>[
+    i+1, v.freq.toFixed(2), v.corrN.toFixed(2), v.kgf.toFixed(3), v.judge, fmtTime(v.time,true)
+  ]);
+  const csv='﻿'+[header,...rows].map(l=>l.join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const stamp=fmtTime(new Date(),true).replace(/[: ]/g,'-');
+  a.href=url; a.download='belt_tension_simple_'+stamp+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('CSV 파일을 다운로드했습니다.','ok');
+}
+
+function setFlowMode(enabled){
+  if(enabled && simpleHistory.length > 0){
+    if(!confirm('단순 측정 기록이 있습니다. 플로우 모드로 전환하면 해당 기록이 보이지 않습니다. 계속할까요?')) return false;
+  }
+  if(!enabled && robots.length > 0){
+    if(!confirm('세션 데이터가 있습니다. 단순 모드로 전환하면 세션이 보이지 않습니다. 계속할까요?')) return false;
+  }
+  flowEnabled=enabled;
+  if(measuring) stopMeasure();
+  activeRobot=null; activeSlotIdx=0; currentResult=null;
+
+  const stepBar=document.querySelector('.step-bar');
+  const flowOnlyEls=['fs1','fs4','fs5'];
+  const simCSV=$('btnSimpleCSV');
+  const presetRow=$('beltPresetRow');
+
+  if(enabled){
+    if(stepBar) stepBar.style.display='';
+    flowOnlyEls.forEach(id=>{ const el=$(id); if(el) el.style.display=''; });
+    const prog=$('measureProgress'); if(prog) prog.style.display='';
+    if(simCSV) simCSV.style.display='none';
+    if(presetRow) presetRow.style.display='none';
+    renderRobots();
+    setStep(1);
+  } else {
+    if(stepBar) stepBar.style.display='none';
+    flowOnlyEls.forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
+    const prog=$('measureProgress'); if(prog) prog.style.display='none';
+    if(simCSV) simCSV.style.display='';
+    if(presetRow) presetRow.style.display='';
+    const fs2=$('fs2'), fs3=$('fs3');
+    if(fs2) fs2.className='flow-step s-active';
+    if(fs3) fs3.className='flow-step s-active';
+    if(btnCancelSetup) btnCancelSetup.style.display='none';
+    renderSimpleHistory();
+  }
+}
+
 function clearHistory(){
+  if(!flowEnabled){
+    if(!simpleHistory.length){ toast('초기화할 측정이 없습니다.'); return; }
+    if(confirm('모든 측정 기록을 삭제할까요?')){
+      simpleHistory=[];
+      currentResult=null;
+      btnSave.disabled=true; if(btnSkip) btnSkip.disabled=true;
+      renderSimpleHistory();
+      saveState();
+      toast('측정 기록을 초기화했습니다.','warn');
+    }
+    return;
+  }
   if(!robots.length){ toast('초기화할 측정이 없습니다.'); return; }
   if(confirm('모든 측정 기록을 삭제할까요?')){
     robots=[]; activeRobot=null; activeSlotIdx=0;
-    renderRobots(); setStep(1);
-    updateSlotProgress();
+    renderRobots(); renderRobotProgress(); setStep(1);
+    updateSlotProgress(); updateReportButtons();
+    saveState();
     toast('측정 기록을 초기화했습니다.','warn');
   }
 }
@@ -1278,7 +1707,40 @@ btnHold.addEventListener('click', toggleHold);
 btnSave.addEventListener('click', saveCurrentSlot);
 if(btnSkip) btnSkip.addEventListener('click', skipMeasurement);
 if(btnCancelSetup) btnCancelSetup.addEventListener('click', cancelCurrentRobot);
+if(btnAddRobot) btnAddRobot.addEventListener('click', addRobotToQueue);
 btnClear.addEventListener('click', clearHistory);
+// 가이드 모드 스위치
+const swGuide=$('swGuide');
+if(swGuide){
+  swGuide.addEventListener('click',()=>{
+    guideActive=!guideActive;
+    swGuide.setAttribute('aria-pressed', guideActive);
+    swGuide.classList.toggle('on', guideActive);
+    const chip=$('guideChip');
+    if(chip) chip.style.display=guideActive?'inline-flex':'none';
+    if(guideActive){ guideStartTs=Date.now(); guidePeakFired=false; }
+  });
+}
+document.querySelectorAll('.guide-period-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    guidePeriodMs=parseInt(btn.dataset.period,10);
+    if(guideActive) guideStartTs=Date.now();
+    document.querySelectorAll('.guide-period-btn').forEach(b=>b.classList.remove('is-active'));
+    btn.classList.add('is-active');
+  });
+});
+// 주파수 스펙트럼 토글
+const swSpectrum=$('swSpectrum'), spectrumPanel=$('spectrumPanel');
+if(swSpectrum&&spectrumPanel){
+  swSpectrum.addEventListener('click',()=>{
+    const on=swSpectrum.getAttribute('aria-pressed')==='true';
+    const next=!on;
+    swSpectrum.setAttribute('aria-pressed',next);
+    swSpectrum.classList.toggle('on',next);
+    spectrumPanel.style.display=next?'':'none';
+    if(next) setupCanvas();
+  });
+}
 btnCSV.addEventListener('click', downloadCSV);
 btnPDF.addEventListener('click', downloadPDF);
 btnEstimate.addEventListener('click', ()=>{
@@ -1343,6 +1805,21 @@ selLockWidth.addEventListener('change', ()=>{
   [inMass,inWidth,inSpan,inCF,inTargetN,estFreq,kconst].forEach(el=>el.addEventListener(evt, updateAssistInfo));
 });
 
+/* ---------- 측정 플로우 토글 ---------- */
+const swFlow=$('swFlow'), btnSimpleCSV=$('btnSimpleCSV');
+if(swFlow){
+  swFlow.addEventListener('click',()=>{
+    const next=swFlow.getAttribute('aria-pressed')!=='true';
+    if(setFlowMode(next) === false) return;  // confirm 취소 시 버튼 상태 유지
+    swFlow.setAttribute('aria-pressed',next?'true':'false');
+    saveState();
+    toast(next
+      ?'측정 플로우 ON — 세션 관리 모드로 전환됩니다.'
+      :'측정 플로우 OFF — 단순 측정 모드로 전환됩니다.','ok');
+  });
+}
+if(btnSimpleCSV) btnSimpleCSV.addEventListener('click', downloadSimpleCSV);
+
 window.addEventListener('resize', setupCanvas);
 window.addEventListener('beforeunload', ()=>{ if(measuring) stopMeasure(); });
 
@@ -1396,8 +1873,28 @@ function renderConfidenceRing(pct){
 
 window.addEventListener('load', ()=>{
   setupCanvas();
+  setupWaveformCanvas();
   drawSpectrum(new Uint8Array(0),1,1,0,-1);
-  setStep(1);
+
+  loadState();  // localStorage 복원
+
+  // flowEnabled 상태에 따라 UI 초기화
+  const swFlowEl=$('swFlow');
+  if(swFlowEl) swFlowEl.setAttribute('aria-pressed', flowEnabled?'true':'false');
+  if(!flowEnabled){
+    const stepBar=document.querySelector('.step-bar');
+    if(stepBar) stepBar.style.display='none';
+    ['fs1','fs4','fs5'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
+    const prog=$('measureProgress'); if(prog) prog.style.display='none';
+    const simCSV=$('btnSimpleCSV'); if(simCSV) simCSV.style.display='';
+    const presetRow=$('beltPresetRow'); if(presetRow) presetRow.style.display='';
+    const fs2=$('fs2'), fs3=$('fs3');
+    if(fs2) fs2.className='flow-step s-active';
+    if(fs3) fs3.className='flow-step s-active';
+  } else {
+    setStep(1);
+  }
+
   refreshBeltBtns('drive'); refreshBeltBtns('lifting');
   updateSlotProgress();
   renderRobots();
@@ -1409,4 +1906,6 @@ window.addEventListener('load', ()=>{
     toast(micUnavailableMessage(), 'err');
     btnStart.disabled=true;
   }
+  if(robots.length||simpleHistory.length)
+    toast('이전 측정 데이터를 복원했습니다.','ok',2500);
 });

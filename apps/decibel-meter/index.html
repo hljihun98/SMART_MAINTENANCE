@@ -102,8 +102,14 @@
     </div>
   </section>
 
-  <!-- ===== SPECTRUM ===== -->
+  <!-- ===== WAVEFORM (timing oscilloscope) ===== -->
   <section class="panel">
+    <div class="panel-title"><span class="ko">파형</span><span class="en">타이밍 가이드 — 잔잔할 때 튕기세요</span></div>
+    <div class="canvas-box waveform-box"><canvas id="waveform"></canvas></div>
+  </section>
+
+  <!-- ===== SPECTRUM ===== -->
+  <section class="panel" id="spectrumPanel" style="display:none;">
     <div class="panel-title"><span class="ko">주파수 스펙트럼</span><span class="en">10–5000 Hz</span></div>
     <div class="canvas-box"><canvas id="spectrum"></canvas></div>
   </section>
@@ -180,11 +186,14 @@
         </div>
       </div>
 
+      <div class="session-add-row">
+        <button id="btnAddRobot" class="btn btn-add-robot" type="button">
+          <span class="ico">＋</span> 추가
+        </button>
+      </div>
+
       <div id="sessionSwitchRow" class="session-switch-row" style="display:none">
         <div class="session-switch-label" id="sessionSwitchInfo"></div>
-        <button class="btn btn-new-session" type="button" onclick="promptNextRobot()">
-          <span class="ico">＋</span> 새 호기 측정
-        </button>
       </div>
     </div>
 
@@ -214,20 +223,8 @@
 
     <!-- Step 4 : 회차 진행 -->
     <div class="flow-step" id="fs4">
-      <div class="flow-step-head"><span class="fs-badge">4</span>회차 진행<span id="fs4Unit" class="fs4-unit"></span></div>
+      <div class="flow-step-head"><span class="fs-badge">4</span>회차 진행</div>
       <div id="sessionProgress" class="session-progress-box"></div>
-      <!-- 다음 호기 구성 선택 (로봇 완료 시 표시) -->
-      <div id="nextRobotPrompt" class="next-robot-prompt" style="display:none">
-        <div class="next-robot-q">다음 호기도 같은 구성으로 측정하시겠습니까?</div>
-        <div class="next-robot-cfg" id="nextRobotCfg"></div>
-        <div class="next-robot-btns">
-          <button class="btn btn-primary" onclick="startNextRobot(true)">동일 구성</button>
-          <button class="btn btn-secondary" onclick="startNextRobot(false)">새로 설정</button>
-        </div>
-      </div>
-      <button id="btnNextSession" class="btn btn-next-session" type="button" style="display:none">
-        <span class="ico">＋</span> 새 호기 측정
-      </button>
     </div>
 
     <!-- Step 5 : 보고서 -->
@@ -237,6 +234,11 @@
         <button id="btnPDF" class="btn btn-pdf" type="button"><span class="ico">⤓</span> PDF 보고서</button>
         <button id="btnCSV" class="btn" type="button"><span class="ico">⤓</span> CSV</button>
       </div>
+    </div>
+
+    <!-- 세션 초기화 -->
+    <div class="flow-reset-row">
+      <button id="btnClear" class="btn btn-reset-session" type="button"><span class="ico">↺</span> 세션 초기화</button>
     </div>
   </section>
 
@@ -269,6 +271,43 @@
       </div>
     </div>
 
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name">가이드 모드
+          <span id="guideChip" class="assist-chip assist-chip-guide" style="display:none;">
+            <button class="guide-period-btn" data-period="1000">1s</button>
+            <button class="guide-period-btn" data-period="2000">2s</button>
+            <button class="guide-period-btn is-active" data-period="3000">3s</button>
+            <button class="guide-period-btn" data-period="4000">4s</button>
+          </span>
+        </div>
+        <div class="toggle-desc">사인파 피크 타이밍에 벨트를 튕기면 앱이 자동으로 측정 창을 열어 분석합니다.</div>
+      </div>
+      <div class="toggle-ctrl">
+        <button id="swGuide" class="switch" type="button" aria-pressed="false" aria-label="가이드 모드"><span class="knob"></span></button>
+      </div>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name">주파수 스펙트럼</div>
+        <div class="toggle-desc">FFT 주파수 분포 그래프를 표시합니다. 기본값: 꺼짐.</div>
+      </div>
+      <div class="toggle-ctrl">
+        <button id="swSpectrum" class="switch" type="button" aria-pressed="false" aria-label="주파수 스펙트럼"><span class="knob"></span></button>
+      </div>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name">측정 플로우</div>
+        <div class="toggle-desc">세션 설정·회차 진행·보고서 등 전체 측정 플로우를 사용합니다. 끄면 단순 측정 모드로 전환됩니다.</div>
+      </div>
+      <div class="toggle-ctrl">
+        <button id="swFlow" class="switch" type="button" aria-pressed="true" aria-label="측정 플로우"><span class="knob"></span></button>
+      </div>
+    </div>
+
     <div class="assist-note">노이즈 저감은 측정 직전 조용한 상태에서 자동 학습됩니다. 측정 대상 고정은 예상 주파수(또는 목표 장력)가 있을 때 가장 정확합니다.</div>
   </section>
 
@@ -276,6 +315,22 @@
   <details class="panel" open>
     <summary>측정 조건 설정 <span class="sum-en">Conditions</span> <span class="chev">⌄</span></summary>
     <div class="panel-body">
+
+      <!-- 벨트 사양 빠른 선택 (단순 모드에서만 표시) -->
+      <div id="beltPresetRow" class="belt-preset-row" style="display:none;">
+        <div class="belt-preset-label">벨트 사양</div>
+        <div class="belt-preset-btns">
+          <button class="belt-preset-btn" id="presetDrive" type="button" onclick="applyBeltPreset('drive')">
+            <span class="bpb-name">구동모듈 벨트</span>
+            <span class="bpb-spec">170 N ±20%</span>
+          </button>
+          <button class="belt-preset-btn" id="presetLifting" type="button" onclick="applyBeltPreset('lifting')">
+            <span class="bpb-name">리프팅 벨트</span>
+            <span class="bpb-spec">500 N ±10%</span>
+          </button>
+        </div>
+      </div>
+
       <div class="form-grid">
         <div class="field">
           <label>Mass <span class="unit">g/m</span></label>
@@ -337,26 +392,6 @@
     </div>
   </section>
 
-  <!-- ===== HISTORY ===== -->
-  <section class="panel">
-    <div class="history-toolbar">
-      <div class="panel-title" style="margin:0;"><span class="ko">측정 기록</span></div>
-      <div class="history-actions">
-        <button id="btnClear" class="btn" type="button"><span class="ico">↺</span> 초기화</button>
-      </div>
-    </div>
-    <div class="table-scroll">
-      <table id="histTable">
-        <thead id="histHead">
-          <tr>
-            <th colspan="3" style="text-align:center;color:#9CA3AF;">저장된 측정이 없습니다.</th>
-          </tr>
-        </thead>
-        <tbody id="histBody">
-        </tbody>
-      </table>
-    </div>
-  </section>
 
   <!-- ===== HELP ===== -->
   <details class="panel">

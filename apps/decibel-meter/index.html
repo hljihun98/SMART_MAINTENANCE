@@ -40,17 +40,32 @@
     <span id="statusPill" class="status-pill">READY</span>
   </div>
 
-  <!-- ===== HERO RESULT ===== -->
+  <!-- ===== HERO + LIVE ANALYSIS (통합 카드) ===== -->
   <section class="hero">
     <div class="hero-head">
       <span class="hero-label">보정 후 장력 · Corrected</span>
       <span id="resJudgeWrap"><span id="resJudge">--</span></span>
     </div>
-    <div class="hero-readout">
-      <span id="resTensionN">--</span>
-      <span class="hero-unit">N</span>
+
+    <div class="hero-main">
+      <div class="hero-nums">
+        <div class="hero-readout">
+          <span id="resTensionN">--</span>
+          <span class="hero-unit">N</span>
+          <span class="hero-kgf"><span id="resTensionKgf">--</span> kgf</span>
+        </div>
+      </div>
+      <div class="hero-conf">
+        <div class="conf-ring">
+          <svg class="ring-svg" viewBox="0 0 64 64">
+            <circle class="ring-bg" cx="32" cy="32" r="26"/>
+            <circle id="confArc" class="ring-arc" cx="32" cy="32" r="26"/>
+          </svg>
+          <div class="conf-center"><span id="resConf">--</span><i>%</i></div>
+        </div>
+        <div class="conf-label">Confidence</div>
+      </div>
     </div>
-    <div class="hero-kgf"><span id="resTensionKgf">--</span> kgf</div>
 
     <div class="gauge" id="gaugeWrap">
       <div class="gauge-scale">
@@ -64,12 +79,10 @@
       </div>
       <div class="gauge-cap">목표 <b id="resTarget">--</b></div>
     </div>
-  </section>
 
-  <!-- ===== LIVE ANALYSIS ===== -->
-  <section class="panel">
-    <div class="panel-title"><span class="ko">실시간 분석</span><span class="en">Live Analysis</span></div>
-    <div class="live-row">
+    <div class="hero-sep"></div>
+
+    <div class="hero-freq-row">
       <div class="stat">
         <div class="stat-k">검출 주파수</div>
         <div class="stat-v"><span id="resFreq">--</span><i>Hz</i></div>
@@ -78,14 +91,6 @@
         <div class="stat-k">현재 주파수</div>
         <div class="stat-v accent"><span id="liveFreq">--</span><i>Hz</i></div>
       </div>
-      <div class="conf-ring">
-        <svg class="ring-svg" viewBox="0 0 64 64">
-          <circle class="ring-bg" cx="32" cy="32" r="26"/>
-          <circle id="confArc" class="ring-arc" cx="32" cy="32" r="26"/>
-        </svg>
-        <div class="conf-center"><span id="resConf">--</span><i>%</i></div>
-      </div>
-      <div class="conf-label">Confidence</div>
     </div>
 
     <div class="signal">
@@ -104,7 +109,7 @@
 
   <!-- ===== WAVEFORM (timing oscilloscope) ===== -->
   <section class="panel">
-    <div class="panel-title"><span class="ko">파형</span><span class="en">타이밍 가이드 — 잔잔할 때 튕기세요</span></div>
+    <div class="panel-title"><span class="ko">타이밍 가이드</span><span class="en">잔잔할 때 Span 중앙을 튕기세요</span></div>
     <div class="canvas-box waveform-box"><canvas id="waveform"></canvas></div>
   </section>
 
@@ -167,7 +172,7 @@
         </div>
         <div class="meas-count-row" id="driveMeasRow">
           <span class="meas-count-lbl">측정 횟수</span>
-          <input id="inDriveMeas" class="count-input" type="number" inputmode="numeric" min="1" max="20" value="1">
+          <input id="inDriveMeas" class="count-input" type="number" inputmode="numeric" min="1" max="20" value="8">
           <span class="count-unit">회</span>
         </div>
       </div>
@@ -181,7 +186,7 @@
         </div>
         <div class="meas-count-row" id="liftingMeasRow">
           <span class="meas-count-lbl">측정 횟수</span>
-          <input id="inLiftingMeas" class="count-input" type="number" inputmode="numeric" min="1" max="20" value="1">
+          <input id="inLiftingMeas" class="count-input" type="number" inputmode="numeric" min="1" max="20" value="8">
           <span class="count-unit">회</span>
         </div>
       </div>
@@ -250,6 +255,13 @@
       <div class="toggle-info">
         <div class="toggle-name">노이즈 저감
           <span id="nrChip" class="assist-chip" style="display:none;">학습 중</span>
+          <span id="nrLevelWrap" class="assist-sel" style="display:none;margin-left:6px;">강도 <select id="selNrLevel">
+            <option value="1">1 약함</option>
+            <option value="2">2 낮음</option>
+            <option value="3" selected>3 보통</option>
+            <option value="4">4 높음</option>
+            <option value="5">5 강함</option>
+          </select></span>
         </div>
         <div class="toggle-desc">주변 소음 스펙트럼을 학습해 실시간 신호에서 차감합니다. 모터·전원 험 등 정상 소음에 강합니다.</div>
       </div>

@@ -83,7 +83,7 @@ body{
 #resJudgeWrap.judge-ng{border-color:rgba(251,106,120,.45);background:rgba(251,106,120,.12);color:var(--red);}
 #resJudgeWrap.judge-ng::before{color:var(--red);opacity:.7;}
 
-.hero-readout{display:flex;align-items:baseline;gap:10px;margin:10px 0 2px;}
+.hero-readout{display:flex;align-items:baseline;gap:8px;margin:6px 0 0;}
 #resTensionN{font-family:var(--mono);font-weight:800;font-size:66px;line-height:.92;
   color:var(--amber);letter-spacing:-.04em;font-variant-numeric:tabular-nums;
   text-shadow:none;}
@@ -91,8 +91,19 @@ body{
 .hero-kgf{font-family:var(--mono);font-size:16px;font-weight:500;color:var(--text-dim);letter-spacing:.01em;}
 .hero-kgf #resTensionKgf{color:var(--text);font-weight:700;}
 
+/* 통합 카드: 장력 + Confidence 나란히 배치 */
+.hero-main{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+.hero-nums{flex:1;min-width:0;}
+.hero-conf{display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0;padding-top:4px;}
+.hero-conf .conf-label{grid-column:auto;justify-self:auto;}
+/* 통합 카드 구분선 */
+.hero-sep{height:1px;background:var(--line);margin:10px 0 8px;}
+/* 주파수 2열 그리드 */
+.hero-freq-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.hero-freq-row .signal{margin-top:0;}
+
 /* target band gauge */
-.gauge{margin-top:18px;}
+.gauge{margin-top:8px;}
 .gauge-scale{display:flex;justify-content:space-between;font-family:var(--mono);
   font-size:10.5px;font-weight:600;color:var(--text-faint);margin-bottom:7px;letter-spacing:.02em;}
 .gauge-scale .mid{color:var(--text-dim);}
@@ -115,7 +126,7 @@ body{
 /* ---------- LIVE panel ---------- */
 .live-row{display:grid;grid-template-columns:1fr 1fr auto;gap:14px;align-items:center;}
 .stat .stat-k{font-size:10.5px;font-weight:600;color:var(--text-dim);letter-spacing:.02em;}
-.stat .stat-v{font-family:var(--mono);font-weight:800;font-size:27px;line-height:1.05;margin-top:5px;
+.stat .stat-v{font-family:var(--mono);font-weight:800;font-size:22px;line-height:1.05;margin-top:4px;
   font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
 .stat .stat-v i{font-style:normal;font-size:12px;font-weight:600;color:var(--text-faint);margin-left:3px;}
 .stat .stat-v.accent{color:var(--accent);}
@@ -133,6 +144,7 @@ body{
   text-transform:uppercase;letter-spacing:.1em;font-family:var(--mono);margin-top:6px;text-align:center;width:64px;}
 
 .signal{margin-top:18px;}
+.hero .signal{margin-top:8px;}
 .signal-head{display:flex;justify-content:space-between;font-size:10.5px;font-weight:600;
   color:var(--text-dim);margin-bottom:8px;letter-spacing:.02em;}
 .signal-head #meterVal{font-family:var(--mono);color:var(--text);}
@@ -141,7 +153,7 @@ body{
   background:linear-gradient(90deg,var(--green),var(--warn) 68%,var(--red));transition:width .09s linear;}
 
 .live-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;
-  margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
+  margin-top:10px;padding-top:10px;border-top:1px solid var(--line);}
 .dot-wrap{display:flex;align-items:center;gap:9px;min-width:0;}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--text-faint);flex:none;transition:background .2s;}
 .dot.live{box-shadow:0 0 0 0 var(--accent-glow);animation:pulse 1.5s infinite;}
@@ -280,6 +292,10 @@ tbody tr:nth-child(even){background:rgba(22,42,80,.025);}
   .conf-label{grid-column:1 / -1;justify-self:center;}
   .actions-sub{grid-template-columns:1fr 1fr 1fr;}
   .estimate-input{grid-template-columns:1fr;}
+  /* 한 화면 통합: 패널 여백 압축 */
+  .panel{padding:14px;margin-top:10px;}
+  .hero{padding:14px;}
+  .waveform-box canvas{height:60px;}
 }
 /* ---------- 측정 보조 토글 ---------- */
 .toggle-row{display:flex;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid var(--line);}
@@ -340,12 +356,12 @@ body{background:#F4F6F9 !important;background-image:none !important;font-size:14
 .status-pill.s-noise{color:#EA580C;border-color:#FED7AA;background:#FFF7ED;}
 .status-pill.s-bad{color:#DC2626;border-color:#FCA5A5;background:#FEF2F2;}
 .panel,.hero{background:#fff !important;border:1px solid #E5E8ED;border-radius:10px;box-shadow:none;}
-.hero{padding:18px;}
+.hero{padding:12px 14px;}
 .hero::before{display:none;}
 .panel-title .ko::before,details.panel>summary::before{background:#0099CC;}
 .panel-title .en,.brand-sub,.gauge-scale,.hero-label,.signal-head,.detail-meta{letter-spacing:.04em;}
 .panel-title .ko,details.panel>summary{font-size:13px;}
-#resTensionN{color:#111 !important;text-shadow:none;font-size:60px;}
+#resTensionN{color:#111 !important;text-shadow:none;font-size:44px;}
 .hero-unit{color:#9CA3AF !important;}
 .hero-kgf #resTensionKgf{color:#111;}
 #resJudgeWrap{background:#F4F6F9;border-color:#E5E8ED;color:#9CA3AF;}
@@ -660,10 +676,16 @@ tbody tr:nth-child(even){background:#FAFBFC;}
   border:1.5px solid #E5E8ED;border-radius:8px;
   padding:14px 15px;margin-bottom:10px;background:#fff;
   transition:border-color .25s,background .25s;
+  display:none;
 }
 .flow-step:last-child{margin-bottom:0;}
-.flow-step.s-active{border-color:#0099CC;background:#F0F9FF;}
-.flow-step.s-done{border-color:#A7F3D0;background:#F0FDF9;}
+.flow-step.s-active{border-color:#0099CC;background:#F0F9FF;display:block;}
+.flow-step.s-done{border-color:#A7F3D0;background:#F0FDF9;display:block;}
+/* 활성 단계 바로 다음 단계도 표시 (예: Step1 활성 → Step2 측정 버튼 보임) */
+.flow-step.s-active+.flow-step{display:block;}
+/* 완료 단계: 헤더만 표시, 내부 컨트롤 숨김 */
+.flow-step.s-done>*:not(.flow-step-head){display:none;}
+.flow-step.s-done .flow-step-head{margin-bottom:0;}
 .flow-step-head{
   display:flex;align-items:center;gap:9px;
   font-size:13px;font-weight:700;color:#111;margin-bottom:12px;

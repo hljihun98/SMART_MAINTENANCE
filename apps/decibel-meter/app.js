@@ -13,8 +13,6 @@ const BROADBAND_RATIO = 0.45;
 const BUF_SIZE = 5;
 const OUTLIER_TOL = 0.12;
 const G = 9.80665;
-/* 충격 감지 임계값: 시간영역 RMS 기준 (0~1 범위, 낮을수록 민감) */
-const STRIKE_RMS_THRESH = 0.025;
 
 /* ---------- PDF 헬퍼 (센서점검 앱 동일 스타일) ---------- */
 const PDF_FONT = "'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',Arial,sans-serif";
@@ -88,9 +86,15 @@ let lastStrikeAt=0;
 let guideActive=false, guideStartTs=0, guidePeriodMs=3000, guidePeakFired=false;
 let collectionMaxRms=0;
 let noiseReduction={enabled:false};
-let noiseLevel=3;
 let noiseProfile=null;
 let noiseProfileReady=false;
+let filterStrength=2;   // 1~4: 노이즈 필터 강도 & 충격감지 임계값 연동
+let ambientRms=0.02;    // 적응형 주변 RMS (EMA 추적)
+let learnElapsedMs=0;   // 재학습: 조용한 구간 누적 시간
+let learnLastTs=null;   // 재학습: 직전 조용한 프레임 타임스탬프
+let learnLastPct=-1;    // throttle: 동일 pct 중복 DOM 업데이트 방지
+let learnRequested=false; // 재학습 버튼 클릭 시에만 true — 자동 학습 방지
+const LEARN_DURATION_MS=3000;  // 학습 완료까지 필요한 조용한 시간 (ms)
 let targetLock={enabled:false, widthPct:30};
 let lockCenter=NaN, lockLoBin=-1, lockHiBin=-1;
 let flowEnabled=true;
@@ -116,6 +120,7 @@ function updateReportButtons(){
 /* ---------- 측정 플로우 단계 ---------- */
 let currentStep=1;
 function setStep(n){
+  document.body.dataset.step = String(n);
   currentStep=n;
   if(!flowEnabled){
     const fs2=$('fs2'), fs3=$('fs3');
@@ -465,11 +470,11 @@ function renderRobotProgress(){
     if(isPending){
       const driveKeys = robot.slots.filter(s=>s.type==='drive').map(s=>s.key).join(' · ') || '없음';
       const liftKeys  = robot.slots.filter(s=>s.type==='lifting').map(s=>s.key).join(' · ') || '없음';
-      return `<div class="robot-card robot-pending">
+      return `<div class="robot-card robot-pending robot-clickable" onclick="startRobotFromProgress(${robot.id})">
         <div class="robot-card-head">
           <span class="robot-unit">${robot.unit}호기</span>
-          <span class="robot-tag robot-tag-pending">대기</span>
-          <button class="robot-del" onclick="deleteRobot(${robot.id})" title="삭제">✕</button>
+          <span class="robot-tag robot-tag-pending">▶ 클릭하여 시작</span>
+          <button class="robot-del" onclick="event.stopPropagation();deleteRobot(${robot.id})" title="삭제">✕</button>
         </div>
         <div class="robot-card-config">구동 ${driveKeys} · 리프팅 ${liftKeys}</div>
       </div>`;
@@ -496,15 +501,16 @@ function renderRobotProgress(){
       </div>`;
     }
 
-    /* ── 측정 중 카드 (기존 슬롯 상세) ── */
-    const isCurrent = (si) => si===activeSlotIdx && !robot.completedAt;
+    /* ── 측정 중/일시중지 카드 ── */
+    // isCurrent: activeRobot인 경우에만 현재 슬롯 강조
+    const isCurrent = (si) => isActive && si===activeSlotIdx;
     const slotsHtml = robot.slots.map((slot,si)=>{
       const done   = !!slot.completedAt;
-      const active = isCurrent(si);
+      const cur    = isCurrent(si);
       const chips = slot.values.map((v,vi)=>{
         const cls = v.judge==='OK' ? 'prog-ok' : 'prog-ng';
         return `<div class="prog-chip ${cls}">
-          ${active?`<button class="prog-del" onclick="cancelSlotMeasurement(${vi})" title="취소">✕</button>`:''}
+          ${cur?`<button class="prog-del" onclick="event.stopPropagation();cancelSlotMeasurement(${vi})" title="취소">✕</button>`:''}
           <span class="prog-num">${vi+1}회</span>
           <span class="prog-val">${v.corrN.toFixed(1)}</span>
           <span class="prog-unit">N</span>
@@ -519,17 +525,22 @@ function renderRobotProgress(){
            <span class="avg-judge">${slot.avgJudge}</span>
          </div>` : '';
       const statusTag = done ? '<span class="slot-tag-done">✓</span>' :
-                        active ? '<span class="slot-tag-now">측정 중</span>' : '';
-      return `<div class="slot-section ${active?'slot-cur':''}${done?' slot-done':''}">
+                        cur  ? '<span class="slot-tag-now">측정 중</span>' :
+                               '<span class="slot-tag-goto">탭하여 이동</span>';
+      const clickAttr = done ? '' : `onclick="switchToSlot(${robot.id},${si})"`;
+      return `<div class="slot-section ${cur?'slot-cur':''}${done?' slot-done':' slot-goto'}" ${clickAttr}>
         <div class="slot-head"><span class="slot-key">${slot.label}</span>${statusTag}</div>
         <div class="prog-grid">${chips}${empties}</div>${avgBlock}
       </div>`;
     }).join('');
 
-    return `<div class="robot-card robot-active">
+    const robotTag = isActive
+      ? '<span class="robot-tag robot-tag-active">측정 중</span>'
+      : '<span class="robot-tag robot-tag-paused">일시중지</span>';
+    return `<div class="robot-card robot-active${isActive?'':' robot-paused'}">
       <div class="robot-card-head">
         <span class="robot-unit">${robot.unit}호기</span>
-        <span class="robot-tag robot-tag-active">측정 중</span>
+        ${robotTag}
         <button class="robot-del" onclick="deleteRobot(${robot.id})" title="삭제">✕</button>
       </div>
       ${slotsHtml}
@@ -537,6 +548,42 @@ function renderRobotProgress(){
   }).join('');
 
   updateSessionSwitchRow();
+}
+
+/* ---------- 세션 진행 — 슬롯 직접 이동 ---------- */
+function switchToSlot(robotId, slotIdx){
+  const robot = robots.find(r=>r.id===robotId);
+  if(!robot) return;
+  const slot = robot.slots[slotIdx];
+  if(!slot) return;
+  if(measuring) stopMeasure();
+  if(!robot.startedAt) robot.startedAt = new Date();
+  activeRobot = robot;
+  activeSlotIdx = slotIdx;
+  applySlotPreset(slot);
+  renderRobotProgress();
+  renderRobots();
+  updateSessionSwitchRow();
+  setStep(2);
+  saveState();
+  toast(robot.unit+'호기 '+slot.label+' 측정으로 이동합니다.','ok');
+}
+
+/* ---------- 대기 호기 클릭으로 시작 ---------- */
+function startRobotFromProgress(id){
+  const robot = robots.find(r=>r.id===id);
+  if(!robot || robot.startedAt) return;
+  if(measuring) stopMeasure();
+  activeRobot = robot;
+  robot.startedAt = new Date();
+  activeSlotIdx = 0;
+  applySlotPreset(robot.slots[0]);
+  renderRobotProgress();
+  renderRobots();
+  updateSessionSwitchRow();
+  setStep(2);
+  saveState();
+  toast(robot.unit+'호기 측정을 시작합니다.','ok');
 }
 
 /* ---------- 호기 삭제 ---------- */
@@ -559,7 +606,7 @@ function deleteRobot(id){
   toast(robot.unit+'호기가 삭제됐습니다.','warn');
 }
 
-const estFreq=$('estFreq'), kconst=$('kconst'), btnEstimate=$('btnEstimate');
+const estFreq=$('estFreq'), kconst=$('kconst');
 const statusDot=$('statusDot'), statusText=$('statusText'), statusPill=$('statusPill');
 const liveFreq=$('liveFreq'), livePeak=$('livePeak'), meterFill=$('meterFill'), meterVal=$('meterVal');
 const canvas=$('spectrum'), ctx=canvas&&canvas.getContext('2d');
@@ -639,7 +686,13 @@ function refreshPresetEstimate(){
   const targetN = parseFloat(inTargetN.value);
   const cf = parseFloat(inCF.value);
   const expectedFreq = calcExpectedFreq(mass, width, span, targetN, cf);
-  if(isFinite(expectedFreq)) estFreq.value = expectedFreq.toFixed(2);
+  if(isFinite(expectedFreq)){
+    estFreq.value = expectedFreq.toFixed(2);
+  } else {
+    const k = parseFloat(kconst.value)||1000;
+    if(isFinite(span) && span>0) estFreq.value = (k/span).toFixed(2);
+  }
+  updateAssistInfo();
 }
 function canUseMicrophone(){
   return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.isSecureContext);
@@ -707,6 +760,7 @@ async function startMeasure(){
   }
 
   measuring=true; held=false; peakBuffer=[];
+  ambientRms=0.02;    // 측정 시작 시 기준선 리셋 (filterStrength=2 기준 초기 임계값 ≈ 0.08)
   measureStartTs=Date.now();
   btnStart.disabled=true; btnStop.disabled=false; btnHold.disabled=false; btnSave.disabled=true;
   setStep(2);
@@ -714,6 +768,9 @@ async function startMeasure(){
   selFFT.disabled=true;
   setStatus('listen','측정 중 — 벨트를 튕겨주세요','LISTENING');
   toast('측정을 시작했습니다. 벨트 Span 중앙을 가볍게 튕기세요.', 'ok');
+  if(noiseReduction.enabled && !noiseProfileReady){
+    setNoiseChip(learnRequested ? '학습 중 0%' : '재학습 버튼으로 학습');
+  }
   analyzeLoop();
 }
 
@@ -738,6 +795,7 @@ function stopMeasure(){
   liveFreq.textContent='--'; livePeak.textContent='대기'; livePeak.style.color='var(--muted)';
   if(waveformBuf){ waveformBuf.fill(128); drawWaveform(); }
   guideActive=false; guidePeakFired=false;
+  learnLastTs=null;  // 측정 중지 시 학습 타이머 일시 정지 (재시작 시 시간 점프 방지)
   const swG=$('swGuide');
   if(swG){ swG.setAttribute('aria-pressed','false'); swG.classList.remove('on'); }
   const chip=$('guideChip'); if(chip) chip.style.display='none';
@@ -803,6 +861,9 @@ function analyzeLoop(){
   const now = Date.now();
   const rms = computeRMS();
   if(!collecting){
+    // 비수집 구간에서 ambient RMS EMA 추적 (충격음이 기준선을 오염시키지 않도록)
+    ambientRms = 0.98 * ambientRms + 0.02 * rms;
+
     if(guideActive){
       // 가이드 모드: 사인파 피크에서 자동 트리거
       const elapsed=(Date.now()-guideStartTs)%guidePeriodMs;
@@ -818,12 +879,18 @@ function analyzeLoop(){
         setStatus('listen','피크 — 지금 튕겨주세요!','COLLECTING');
       }
       if(sineVal<0) guidePeakFired=false;
-    } else if(rms > STRIKE_RMS_THRESH && (now - lastStrikeAt) > 3000){
-      // 일반 모드: RMS 충격 감지 (기존 동작 그대로)
-      strikeTs=now; lastStrikeAt=now;
-      collecting=true; collectStartTs=strikeTs+500; collectEndTs=strikeTs+2000; collectedSnapshots=[];
-      beep(880, 80);
-      setStatus('listen','충격 감지 — 0.5s 무시 후 1.5s 분석','COLLECTING');
+    } else {
+      // 일반 모드: 적응형 동적 임계값 (ambient × triggerK)
+      const K_MAP = [2.5, 4.0, 6.0, 8.0];
+      const triggerK = K_MAP[filterStrength - 1];
+      const dynamicThreshold = Math.max(0.04, ambientRms * triggerK);
+      if(rms > dynamicThreshold && (now - lastStrikeAt) > 3000){
+        strikeTs=now; lastStrikeAt=now;
+        collecting=true; collectStartTs=strikeTs+500; collectEndTs=strikeTs+2000; collectedSnapshots=[];
+        collectionMaxRms=0;
+        beep(880, 80);
+        setStatus('listen','충격 감지 — 0.5s 무시 후 1.5s 분석','COLLECTING');
+      }
     }
   } else {
     collectionMaxRms = Math.max(collectionMaxRms, rms);
@@ -896,22 +963,16 @@ function computeRMS(){
   return Math.sqrt(s/tbuf.length);
 }
 
-const NR_LEVELS=[
-  null,
-  {alpha:0.5,  floorRatio:0.15},
-  {alpha:1.0,  floorRatio:0.10},
-  {alpha:1.5,  floorRatio:0.06},
-  {alpha:2.5,  floorRatio:0.03},
-  {alpha:4.0,  floorRatio:0.01},
-];
-
 function applyNoiseReduction(floatBuf, byteBuf, binHz){
   const N=floatBuf.length;
   if(!noiseProfile || noiseProfile.length!==N){ noiseProfile=new Float32Array(N); noiseProfileReady=false; }
-  const rms=computeRMS();
-  const quiet=(!collecting) && rms<0.05;
+  const afterCooldown=!collecting && (Date.now()-lastStrikeAt > 2500);
+  // 프로파일 갱신: 재학습 진행 중 OR 학습 완료 후 느린 드리프트 추적
+  const quiet=afterCooldown && (learnRequested || noiseProfileReady);
   const beta=noiseProfileReady?0.92:0.6;
-  const {alpha, floorRatio}=NR_LEVELS[noiseLevel]||NR_LEVELS[3];
+  const ALPHA_MAP=[1.0, 1.5, 2.5, 3.5];
+  const alpha=ALPHA_MAP[filterStrength-1];
+  const floorRatio=0.06;
   const minDb=analyser?analyser.minDecibels:-100, maxDb=analyser?analyser.maxDecibels:-30;
   const rng=Math.max(1,maxDb-minDb);
   const out=new Uint8Array(N);
@@ -926,7 +987,23 @@ function applyNoiseReduction(floatBuf, byteBuf, binHz){
     let b=(cdb-minDb)/rng*255;
     out[i]=b<0?0:(b>255?255:b);
   }
-  if(quiet && !noiseProfileReady){ noiseProfileReady=true; setNoiseChip('적용 중'); }
+  if(afterCooldown && learnRequested && !noiseProfileReady){
+    const nowMs=performance.now();
+    if(learnLastTs!==null) learnElapsedMs+=nowMs-learnLastTs;
+    learnLastTs=nowMs;
+    const pct=Math.min(100,Math.round(learnElapsedMs/LEARN_DURATION_MS*100));
+    if(pct!==learnLastPct){ learnLastPct=pct; setNoiseChip(`학습 중 ${pct}%`); }
+    if(learnElapsedMs>=LEARN_DURATION_MS){
+      noiseProfileReady=true;
+      learnRequested=false;
+      learnLastTs=null;
+      learnLastPct=-1;
+      setNoiseChip('학습완료');
+      toast('현장 소음 학습 완료 — 이 환경에 맞춰 노이즈 저감이 적용됩니다.','ok');
+    }
+  } else if(!afterCooldown && learnRequested && !noiseProfileReady){
+    learnLastTs=null;  // 여진 쿨다운 중 타이머 일시 정지
+  }
   return out;
 }
 
@@ -1061,12 +1138,6 @@ function updateResult(freq, extConf){
   $('resTensionN').textContent=corrN.toFixed(1);
   $('resTensionKgf').textContent=kgf.toFixed(2);
   $('resFreq').textContent=freq.toFixed(1);
-  $('resRawN').textContent=rawN.toFixed(1);
-  $('resMass').textContent=mass;
-  $('resWidth').textContent=width;
-  $('resSpan').textContent=span;
-  $('resCF').textContent=cf.toFixed(3);
-  $('resTime').textContent=fmtTime(currentResult.time);
   try{ renderTargetGauge(corrN, targetN, tolPct, judgeOk); }catch(e){}
 }
 
@@ -1097,8 +1168,14 @@ function finalizeCollection(){
   const bandMin = Math.max(1, Math.floor(MIN_FREQ/binHz));
   const bandMax = Math.min(floatBuf.length-2, Math.ceil(MAX_FREQ/binHz));
   let avgNoise = 0, cnt=0;
-  for(let i=bandMin;i<=bandMax;i++){ avgNoise += Math.pow(10,(floatBuf[i]||-200)/20); cnt++; }
-  avgNoise = cnt? avgNoise/cnt : 1e-6;
+  if(noiseReduction.enabled && noiseProfile && noiseProfileReady){
+    // 학습된 프로파일을 noise floor로 사용 — 수집 신호(노이즈 저감 적용)와 동일 기준으로 SNR 계산
+    for(let i=bandMin;i<=bandMax;i++){ avgNoise += noiseProfile[i]; cnt++; }
+    avgNoise = cnt? avgNoise/cnt : 1e-6;
+  } else {
+    for(let i=bandMin;i<=bandMax;i++){ avgNoise += Math.pow(10,(floatBuf[i]||-200)/20); cnt++; }
+    avgNoise = cnt? avgNoise/cnt : 1e-6;
+  }
   const avgMag = mags.reduce((s,v)=>s+v,0)/mags.length;
   const snr = avgMag / Math.max(1e-6, avgNoise);
   const agreement = filtered.length / Math.max(1,last.length);
@@ -1379,7 +1456,7 @@ function dateReviver(key, val){
 }
 function saveState(){
   try{
-    const data={version:1, flowEnabled, robots, simpleHistory};
+    const data={version:1, flowEnabled, robots, simpleHistory, filterStrength};
     localStorage.setItem('beltTension_v1', JSON.stringify(data, dateReplacer));
   }catch(e){}
 }
@@ -1392,6 +1469,7 @@ function loadState(){
     robots=data.robots||[];
     simpleHistory=data.simpleHistory||[];
     flowEnabled=data.flowEnabled??true;
+    filterStrength=(data.filterStrength>=1&&data.filterStrength<=4)?data.filterStrength:2;
   }catch(e){}
 }
 
@@ -1453,14 +1531,12 @@ function setFlowMode(enabled){
   const stepBar=document.querySelector('.step-bar');
   const flowOnlyEls=['fs1','fs4','fs5'];
   const simCSV=$('btnSimpleCSV');
-  const presetRow=$('beltPresetRow');
 
   if(enabled){
     if(stepBar) stepBar.style.display='';
     flowOnlyEls.forEach(id=>{ const el=$(id); if(el) el.style.display=''; });
     const prog=$('measureProgress'); if(prog) prog.style.display='';
     if(simCSV) simCSV.style.display='none';
-    if(presetRow) presetRow.style.display='none';
     renderRobots();
     setStep(1);
   } else {
@@ -1468,10 +1544,10 @@ function setFlowMode(enabled){
     flowOnlyEls.forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
     const prog=$('measureProgress'); if(prog) prog.style.display='none';
     if(simCSV) simCSV.style.display='';
-    if(presetRow) presetRow.style.display='';
     const fs2=$('fs2'), fs3=$('fs3');
     if(fs2) fs2.className='flow-step s-active';
     if(fs3) fs3.className='flow-step s-active';
+    document.body.dataset.step = '2';
     if(btnCancelSetup) btnCancelSetup.style.display='none';
     renderSimpleHistory();
   }
@@ -1541,7 +1617,8 @@ async function downloadPDF(){
     const {jsPDF} = window.jspdf;
     const doc = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
     const W=210, M=14;
-    const now = fmtTime(new Date(), true);
+    const lastTs = robots.reduce((mx,r)=>{ const t=r.completedAt?new Date(r.completedAt).getTime():0; return t>mx?t:mx; }, 0);
+    const now = fmtTime(lastTs ? new Date(lastTs) : new Date(), true);
 
     /* ---- 열 너비 ---- */
     const TW = {id:16, round:14, freq:40, tension:52, judge:26, time:34};
@@ -1571,7 +1648,7 @@ async function downloadPDF(){
     const allOK = robots.every(r=>r.slots.every(s=>!s.completedAt||s.avgJudge==='OK'));
     const ngCount = robots.reduce((n,r)=>n+r.slots.filter(s=>s.avgJudge==='NG').length, 0);
     pdfText(doc,
-      '호기: '+robots.length+'   NG 슬롯: '+ngCount+'   출력일시: '+now,
+      '호기: '+robots.length+'   NG 슬롯: '+ngCount+'   측정완료: '+now,
       M, y-2, {size:7.5, color:[90,90,90]});
     y += 5;
 
@@ -1755,26 +1832,19 @@ if(swSpectrum&&spectrumPanel){
 }
 btnCSV.addEventListener('click', downloadCSV);
 btnPDF.addEventListener('click', downloadPDF);
-btnEstimate.addEventListener('click', ()=>{
-  const span = parseFloat(inSpan.value);
-  const k = parseFloat(kconst.value)||1000;
-  if(!isFinite(span) || span<=0){ toast('Span 값을 입력해주세요.','err'); return; }
-  const est = k / span;
-  estFreq.value = est.toFixed(2);
-  toast('예상 주파수를 계산했습니다: '+estFreq.value+' Hz','ok');
-});
 ['input','change'].forEach(evt=>{
   inMass.addEventListener(evt, refreshPresetEstimate);
   inWidth.addEventListener(evt, refreshPresetEstimate);
   inSpan.addEventListener(evt, refreshPresetEstimate);
   inCF.addEventListener(evt, refreshPresetEstimate);
   inTargetN.addEventListener(evt, refreshPresetEstimate);
+  kconst.addEventListener(evt, refreshPresetEstimate);
 });
 
 /* ---------- 측정 보조 토글 ---------- */
 const swNoise=$('swNoise'), swLock=$('swLock'), btnRelearn=$('btnRelearn'),
       selLockWidth=$('selLockWidth'), lockWidthWrap=$('lockWidthWrap'),
-      selNrLevel=$('selNrLevel'), nrLevelWrap=$('nrLevelWrap');
+      selFilterStrength=$('selFilterStrength'), filterStrengthRow=$('filterStrengthRow');
 function setSwitch(btn,on){ btn.setAttribute('aria-pressed', on?'true':'false'); }
 function updateAssistInfo(){
   const el=document.getElementById('lockDesc');
@@ -1791,20 +1861,23 @@ swNoise.addEventListener('click', ()=>{
   noiseReduction.enabled=!noiseReduction.enabled;
   setSwitch(swNoise, noiseReduction.enabled);
   btnRelearn.style.display = noiseReduction.enabled?'inline-flex':'none';
-  nrLevelWrap.style.display = noiseReduction.enabled?'inline-flex':'none';
+  if(filterStrengthRow) filterStrengthRow.style.display = noiseReduction.enabled?'block':'none';
   if(noiseReduction.enabled){
-    noiseProfile=null; noiseProfileReady=false; setNoiseChip('학습 중');
-    toast('노이즈 저감 ON — 조용한 상태에서 주변 소음을 자동 학습합니다.','ok');
+    // 프로파일 유지 — ON/OFF 토글로 재학습 불필요
+    if(noiseProfileReady){ setNoiseChip('학습완료'); }
+    else if(learnRequested){ setNoiseChip(`학습 중 ${Math.min(100,Math.round(learnElapsedMs/LEARN_DURATION_MS*100))}%`); }
+    else { setNoiseChip('재학습 버튼으로 학습'); }
+    toast('노이즈 저감 ON','ok');
   }else{ setNoiseChip(''); toast('노이즈 저감 OFF','warn'); }
 });
-selNrLevel.addEventListener('change', ()=>{
-  noiseLevel=+selNrLevel.value;
-  noiseProfile=null; noiseProfileReady=false; setNoiseChip('학습 중');
-  toast('노이즈 저감 강도 '+noiseLevel+'단계 — 소음 프로파일을 다시 학습합니다.','ok');
+if(selFilterStrength) selFilterStrength.addEventListener('change', ()=>{
+  filterStrength=parseInt(selFilterStrength.value,10)||2;
+  saveState();
 });
 btnRelearn.addEventListener('click', ()=>{
-  noiseProfile=null; noiseProfileReady=false; setNoiseChip('학습 중');
-  toast('소음 프로파일을 다시 학습합니다.','ok');
+  noiseProfile=null; noiseProfileReady=false; learnRequested=true;
+  learnElapsedMs=0; learnLastTs=null; learnLastPct=-1; setNoiseChip('학습 중 0%');
+  toast('소음 프로파일 초기화 — 측정 중 3초간 현장 소음을 다시 학습합니다.','ok');
 });
 swLock.addEventListener('click', ()=>{
   targetLock.enabled=!targetLock.enabled;
@@ -1906,14 +1979,15 @@ window.addEventListener('load', ()=>{
     ['fs1','fs4','fs5'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
     const prog=$('measureProgress'); if(prog) prog.style.display='none';
     const simCSV=$('btnSimpleCSV'); if(simCSV) simCSV.style.display='';
-    const presetRow=$('beltPresetRow'); if(presetRow) presetRow.style.display='';
     const fs2=$('fs2'), fs3=$('fs3');
     if(fs2) fs2.className='flow-step s-active';
     if(fs3) fs3.className='flow-step s-active';
+    document.body.dataset.step = '2';
   } else {
     setStep(1);
   }
 
+  if(selFilterStrength) selFilterStrength.value=String(filterStrength);
   refreshBeltBtns('drive'); refreshBeltBtns('lifting');
   updateSlotProgress();
   renderRobots();

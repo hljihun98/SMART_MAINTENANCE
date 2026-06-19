@@ -1,20 +1,17 @@
 <!--
- * 음파식 벨트 장력 측정기
+ * 음파식 벨트 장력 측정기 v2.0
  *
  * 주요 기능
  * - 마이크 음파 분석: Web Audio API FFT를 이용해 10~5000 Hz 대역의 피크 주파수를 실시간으로 검출합니다.
  * - 장력 자동 계산: T[N] = 4 × Mass × Width × Span² × Frequency² × 1e-9 공식으로 벨트 장력을 계산하며, 보정계수(CF)를 적용합니다.
  * - 목표 장력 게이지: 허용 오차 범위를 시각적 게이지로 표시하고 OK/NG 판정을 제공합니다.
  * - 노이즈 저감: 주변 소음 스펙트럼을 학습한 뒤 실시간 신호에서 차감(스펙트럴 서브트랙션)합니다.
- * - 측정 대상 고정: 예상 주파수 주변의 좁은 밴드만 탐색해 엉뚱한 피크를 무시합니다.
- * - 프리셋 지원: 리프팅 벨트(500 N ±10%), 구동모듈 벨트(170 N ±20%) 프리셋을 제공합니다.
- * - 측정 기록·내보내기: 측정값을 표에 누적 저장하고 CSV 파일로 내보낼 수 있습니다.
+ *   · 필터 강도 1~4: alpha(주파수 감산)와 충격감지 동적 임계값(ambientRms × triggerK)이 연동됩니다.
+ * - 측정 플로우: 호기 번호·벨트 ID·회차를 관리하는 세션 모드와 단순 측정 모드를 지원합니다.
+ * - 보고서: CSV·PDF 보고서를 내보낼 수 있습니다.
  *
- * 만든 사람
- * - 이름: 김지훈
- * - 이메일: hljihun98@gmail.com
- *
- * 만든 날짜: 2026-06-03
+ * 만든 사람: 이름: 김지훈 / 이메일: hljihun98@gmail.com
+ * 만든 날짜: 2026-06-03 / v2.0: 2026-06-18
  -->
 <!DOCTYPE html>
 <html lang="ko">
@@ -23,7 +20,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#F4F6F9">
 <title>음파식 벨트 텐션 측정기</title>
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="stylesheet" href="../../assets/css/common.css">
 <link rel="stylesheet" href="./style.css">
 </head>
@@ -35,37 +31,110 @@
     <div class="tb-left">
       <img class="tb-logo" id="tb-logo" src="../../logo.png" alt="HL Robotics">
       <span class="tb-name">음파식 벨트 텐션 측정기</span>
-      <span class="tb-version">v1.0.0</span>
+      <span class="tb-version">v2.0</span>
     </div>
+    <a class="home-btn" href="../../index.html" title="메인 포털로 이동"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>메인으로</a>
     <span id="statusPill" class="status-pill">READY</span>
   </div>
 
-  <!-- ===== HERO + LIVE ANALYSIS (통합 카드) ===== -->
+  <!-- ===== STEP BAR ===== -->
+  <div class="step-bar">
+    <div id="si1" class="step-item">
+      <div class="step-dot"><span>1</span></div>
+      <div class="step-lbl">호기 설정</div>
+    </div>
+    <div id="sc12" class="step-conn"></div>
+    <div id="si2" class="step-item">
+      <div class="step-dot"><span>2</span></div>
+      <div class="step-lbl">측정</div>
+    </div>
+    <div id="sc23" class="step-conn"></div>
+    <div id="si3" class="step-item">
+      <div class="step-dot"><span>3</span></div>
+      <div class="step-lbl">결과</div>
+    </div>
+    <div id="sc34" class="step-conn"></div>
+    <div id="si4" class="step-item">
+      <div class="step-dot"><span>4</span></div>
+      <div class="step-lbl">보고서</div>
+    </div>
+    <div id="sc45" class="step-conn"></div>
+    <div id="si5" class="step-item">
+      <div class="step-dot"><span>5</span></div>
+      <div class="step-lbl">기록</div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 1: 호기 설정 ===== -->
+  <section class="flow-step" id="fs1">
+    <div class="flow-step-head">
+      <span class="fs-badge">1</span>호기 설정
+      <button id="btnCancelSetup" class="btn btn-cancel-setup" type="button" style="display:none; margin-left:auto; width:auto; min-height:34px; padding:0 14px; font-size:12px;">현재 호기 취소</button>
+    </div>
+
+    <!-- 구동모듈 벨트 ID 선택 -->
+    <div class="session-field">
+      <div class="session-label">구동모듈 벨트 <span class="belt-spec-tag">170 N ±20%</span></div>
+      <div id="driveCountBtns" class="belt-count-btns">
+        <button class="cnt-btn cnt-active" data-key="none" onclick="clearBeltGroup('drive')">없음</button>
+        <button class="cnt-btn" data-key="ID1" onclick="toggleBeltId('ID1')">ID1</button>
+        <button class="cnt-btn" data-key="ID2" onclick="toggleBeltId('ID2')">ID2</button>
+        <button class="cnt-btn" data-key="ID3" onclick="toggleBeltId('ID3')">ID3</button>
+        <button class="cnt-btn" data-key="ID4" onclick="toggleBeltId('ID4')">ID4</button>
+      </div>
+      <div id="driveMeasRow" class="meas-count-row" style="display:none;">
+        <span class="meas-count-lbl">측정 횟수</span>
+        <input id="inDriveMeas" class="count-input" type="number" inputmode="numeric" min="1" max="10" value="3">
+        <span class="count-unit">회</span>
+      </div>
+    </div>
+
+    <!-- 리프팅 벨트 ID 선택 -->
+    <div class="session-field">
+      <div class="session-label">리프팅 벨트 <span class="belt-spec-tag">500 N ±10%</span></div>
+      <div id="liftingCountBtns" class="belt-count-btns">
+        <button class="cnt-btn cnt-active" data-key="none" onclick="clearBeltGroup('lifting')">없음</button>
+        <button class="cnt-btn" data-key="ID5" onclick="toggleBeltId('ID5')">ID5</button>
+        <button class="cnt-btn" data-key="ID6" onclick="toggleBeltId('ID6')">ID6</button>
+      </div>
+      <div id="liftingMeasRow" class="meas-count-row" style="display:none;">
+        <span class="meas-count-lbl">측정 횟수</span>
+        <input id="inLiftingMeas" class="count-input" type="number" inputmode="numeric" min="1" max="10" value="3">
+        <span class="count-unit">회</span>
+      </div>
+    </div>
+
+    <!-- 호기 번호 입력 -->
+    <div class="session-field">
+      <div class="session-label">호기 번호</div>
+      <input id="inUnit" class="flow-unit-input" type="text" inputmode="text" placeholder="예: 1 또는 A-01" autocomplete="off">
+    </div>
+
+    <!-- 호기 추가 버튼 -->
+    <div class="session-add-row">
+      <button id="btnAddRobot" class="btn-add-robot" type="button">
+        <span class="ico">+</span> 호기 추가
+      </button>
+    </div>
+
+    <!-- 세션 전환 행 -->
+    <div id="sessionSwitchRow" class="session-switch-row" style="display:none;">
+      <span id="sessionSwitchInfo" class="session-switch-label"></span>
+      <button class="btn btn-new-session" type="button" onclick="setStep(2);startMeasure();">측정 시작</button>
+    </div>
+  </section>
+
+  <!-- ===== HERO RESULT ===== -->
   <section class="hero">
     <div class="hero-head">
       <span class="hero-label">보정 후 장력 · Corrected</span>
       <span id="resJudgeWrap"><span id="resJudge">--</span></span>
     </div>
-
-    <div class="hero-main">
-      <div class="hero-nums">
-        <div class="hero-readout">
-          <span id="resTensionN">--</span>
-          <span class="hero-unit">N</span>
-          <span class="hero-kgf"><span id="resTensionKgf">--</span> kgf</span>
-        </div>
-      </div>
-      <div class="hero-conf">
-        <div class="conf-ring">
-          <svg class="ring-svg" viewBox="0 0 64 64">
-            <circle class="ring-bg" cx="32" cy="32" r="26"/>
-            <circle id="confArc" class="ring-arc" cx="32" cy="32" r="26"/>
-          </svg>
-          <div class="conf-center"><span id="resConf">--</span><i>%</i></div>
-        </div>
-        <div class="conf-label">Confidence</div>
-      </div>
+    <div class="hero-readout">
+      <span id="resTensionN">--</span>
+      <span class="hero-unit">N</span>
     </div>
+    <div class="hero-kgf"><span id="resTensionKgf">--</span> kgf</div>
 
     <div class="gauge" id="gaugeWrap">
       <div class="gauge-scale">
@@ -79,10 +148,17 @@
       </div>
       <div class="gauge-cap">목표 <b id="resTarget">--</b></div>
     </div>
+  </section>
 
-    <div class="hero-sep"></div>
+  <!-- ===== STEP 2: LIVE ANALYSIS ===== -->
+  <section class="flow-step" id="fs2">
+    <div class="panel-title">
+      <span class="ko">실시간 분석</span>
+      <span class="en">Live Analysis</span>
+      <span id="measureProgress" class="progress-chip" style="display:none;margin-left:auto;"></span>
+    </div>
 
-    <div class="hero-freq-row">
+    <div class="live-row">
       <div class="stat">
         <div class="stat-k">검출 주파수</div>
         <div class="stat-v"><span id="resFreq">--</span><i>Hz</i></div>
@@ -91,6 +167,14 @@
         <div class="stat-k">현재 주파수</div>
         <div class="stat-v accent"><span id="liveFreq">--</span><i>Hz</i></div>
       </div>
+      <div class="conf-ring">
+        <svg class="ring-svg" viewBox="0 0 64 64">
+          <circle class="ring-bg" cx="32" cy="32" r="26"/>
+          <circle id="confArc" class="ring-arc" cx="32" cy="32" r="26"/>
+        </svg>
+        <div class="conf-center"><span id="resConf">--</span><i>%</i></div>
+      </div>
+      <div class="conf-label">Confidence</div>
     </div>
 
     <div class="signal">
@@ -107,163 +191,81 @@
     </div>
   </section>
 
-  <!-- ===== WAVEFORM (timing oscilloscope) ===== -->
-  <section class="panel">
-    <div class="panel-title"><span class="ko">타이밍 가이드</span><span class="en">잔잔할 때 Span 중앙을 튕기세요</span></div>
+  <!-- ===== WAVEFORM / GUIDE ===== -->
+  <section class="panel" style="margin-top:10px;" id="waveformSection">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <span style="font-size:13px;font-weight:700;color:#111;">파형 · 타이밍 가이드</span>
+      <span id="guideChip" class="assist-chip assist-chip-guide" style="display:none;">가이드 ON
+        <button class="guide-period-btn is-active" data-period="3000" type="button">3 s</button>
+        <button class="guide-period-btn" data-period="4000" type="button">4 s</button>
+        <button class="guide-period-btn" data-period="5000" type="button">5 s</button>
+      </span>
+      <button id="swGuide" class="switch" type="button" aria-pressed="false" aria-label="타이밍 가이드" style="margin-left:auto;"><span class="knob"></span></button>
+    </div>
     <div class="canvas-box waveform-box"><canvas id="waveform"></canvas></div>
   </section>
 
-  <!-- ===== SPECTRUM ===== -->
-  <section class="panel" id="spectrumPanel" style="display:none;">
-    <div class="panel-title"><span class="ko">주파수 스펙트럼</span><span class="en">10–5000 Hz</span></div>
-    <div class="canvas-box"><canvas id="spectrum"></canvas></div>
-  </section>
+  <!-- 스펙트럼 캔버스 (측정 보조 토글로 제어) -->
+  <div id="spectrumPanel" class="canvas-box" style="display:none;margin-top:10px;"><canvas id="spectrum"></canvas></div>
 
-  <!-- ===== MEASUREMENT FLOW ===== -->
-  <section class="panel flow-panel">
-    <div class="panel-title"><span class="ko">측정 플로우</span><span class="en">Measurement Flow</span></div>
-
-    <!-- 단계 표시 바 -->
-    <div class="step-bar">
-      <div class="step-item s-active" id="si1">
-        <div class="step-dot"><span>1</span></div>
-        <div class="step-lbl">세션<br>설정</div>
-      </div>
-      <div class="step-conn" id="sc12"></div>
-      <div class="step-item" id="si2">
-        <div class="step-dot"><span>2</span></div>
-        <div class="step-lbl">텐션<br>측정</div>
-      </div>
-      <div class="step-conn" id="sc23"></div>
-      <div class="step-item" id="si3">
-        <div class="step-dot"><span>3</span></div>
-        <div class="step-lbl">저장/<br>스킵</div>
-      </div>
-      <div class="step-conn" id="sc34"></div>
-      <div class="step-item" id="si4">
-        <div class="step-dot"><span>4</span></div>
-        <div class="step-lbl">회차<br>진행</div>
-      </div>
-      <div class="step-conn" id="sc45"></div>
-      <div class="step-item" id="si5">
-        <div class="step-dot"><span>5</span></div>
-        <div class="step-lbl">보고서</div>
-      </div>
-    </div>
-
-    <!-- Step 1 : 호기 설정 -->
-    <div class="flow-step s-active" id="fs1">
-      <div class="flow-step-head"><span class="fs-badge">1</span>호기 설정</div>
-
-      <div class="session-field">
-        <div class="session-label">호기 번호</div>
-        <input id="inUnit" class="flow-unit-input" type="number" inputmode="numeric"
-               min="1" step="1" autocomplete="off" placeholder="예) 11">
-      </div>
-
-      <div class="session-field">
-        <div class="session-label">구동모듈 벨트 <span class="belt-spec-tag">170 N ±20% · ID1~ID4</span></div>
-        <div class="belt-count-btns" id="driveCountBtns">
-          <button class="cnt-btn cnt-active" data-key="none" onclick="clearBeltGroup('drive')">없음</button>
-          <button class="cnt-btn" data-key="ID1" onclick="toggleBeltId('ID1')">ID1</button>
-          <button class="cnt-btn" data-key="ID2" onclick="toggleBeltId('ID2')">ID2</button>
-          <button class="cnt-btn" data-key="ID3" onclick="toggleBeltId('ID3')">ID3</button>
-          <button class="cnt-btn" data-key="ID4" onclick="toggleBeltId('ID4')">ID4</button>
-        </div>
-        <div class="meas-count-row" id="driveMeasRow">
-          <span class="meas-count-lbl">측정 횟수</span>
-          <input id="inDriveMeas" class="count-input" type="number" inputmode="numeric" min="1" max="20" value="8">
-          <span class="count-unit">회</span>
-        </div>
-      </div>
-
-      <div class="session-field">
-        <div class="session-label">리프팅 벨트 <span class="belt-spec-tag">500 N ±10% · ID5~ID6</span></div>
-        <div class="belt-count-btns" id="liftingCountBtns">
-          <button class="cnt-btn cnt-active" data-key="none" onclick="clearBeltGroup('lifting')">없음</button>
-          <button class="cnt-btn" data-key="ID5" onclick="toggleBeltId('ID5')">ID5</button>
-          <button class="cnt-btn" data-key="ID6" onclick="toggleBeltId('ID6')">ID6</button>
-        </div>
-        <div class="meas-count-row" id="liftingMeasRow">
-          <span class="meas-count-lbl">측정 횟수</span>
-          <input id="inLiftingMeas" class="count-input" type="number" inputmode="numeric" min="1" max="20" value="8">
-          <span class="count-unit">회</span>
-        </div>
-      </div>
-
-      <div class="session-add-row">
-        <button id="btnAddRobot" class="btn btn-add-robot" type="button">
-          <span class="ico">＋</span> 추가
-        </button>
-      </div>
-
-      <div id="sessionSwitchRow" class="session-switch-row" style="display:none">
-        <div class="session-switch-label" id="sessionSwitchInfo"></div>
-      </div>
-    </div>
-
-    <!-- Step 2 : 텐션 측정 -->
-    <div class="flow-step" id="fs2">
-      <div class="flow-step-head">
-        <span class="fs-badge">2</span>텐션 측정
-        <span id="measureProgress" class="progress-chip">0 / 8</span>
-      </div>
+  <!-- ===== ACTIONS ===== -->
+  <section class="actions">
+    <div class="actions-row">
       <button id="btnStart" class="btn btn-start"><span class="ico">●</span> 측정 시작</button>
-      <div class="flow-row-btns">
-        <button id="btnStop" class="btn btn-stop" disabled><span class="ico">■</span> 중지</button>
-        <button id="btnHold" class="btn btn-hold" disabled><span class="ico">⏸</span> 고정</button>
-      </div>
-      <button id="btnCancelSetup" class="btn btn-cancel-setup" type="button" style="display:none"><span class="ico">✕</span> 설정 취소</button>
-    </div>
-
-    <!-- Step 3 : 저장 / 스킵 -->
-    <div class="flow-step" id="fs3">
-      <div class="flow-step-head"><span class="fs-badge">3</span>저장 / 스킵</div>
-      <div class="flow-hint">측정이 안정화되면 이 회차를 저장하거나 스킵할 수 있습니다.<br>스킵하면 이 측정을 제외하고 다시 시도합니다.</div>
-      <div class="save-skip-row">
-        <button id="btnSave" class="btn btn-save" disabled><span class="ico">＋</span> 저장</button>
-        <button id="btnSkip" class="btn btn-skip" disabled><span class="ico">↷</span> 스킵</button>
-      </div>
-    </div>
-
-    <!-- Step 4 : 회차 진행 -->
-    <div class="flow-step" id="fs4">
-      <div class="flow-step-head"><span class="fs-badge">4</span>회차 진행</div>
-      <div id="sessionProgress" class="session-progress-box"></div>
-    </div>
-
-    <!-- Step 5 : 보고서 -->
-    <div class="flow-step" id="fs5">
-      <div class="flow-step-head"><span class="fs-badge">5</span>보고서 생성</div>
-      <div class="flow-row-btns">
-        <button id="btnPDF" class="btn btn-pdf" type="button"><span class="ico">⤓</span> PDF 보고서</button>
-        <button id="btnCSV" class="btn" type="button"><span class="ico">⤓</span> CSV</button>
-      </div>
-    </div>
-
-    <!-- 세션 초기화 -->
-    <div class="flow-reset-row">
-      <button id="btnClear" class="btn btn-reset-session" type="button"><span class="ico">↺</span> 세션 초기화</button>
+      <button id="btnStop" class="btn btn-stop" disabled><span class="ico">■</span> 중지</button>
+      <button id="btnHold" class="btn btn-hold" disabled><span class="ico">⏸</span> 측정값 고정</button>
     </div>
   </section>
 
-  <!-- ===== ASSIST (노이즈 저감 / 측정 대상 고정) ===== -->
-  <section class="panel">
-    <div class="panel-title"><span class="ko">측정 보조</span><span class="en">Assist</span></div>
+  <!-- ===== STEP 3: 결과 저장 ===== -->
+  <section class="flow-step" id="fs3" style="margin-top:14px;">
+    <div class="flow-step-head"><span class="fs-badge">3</span>결과 저장</div>
+    <div class="save-skip-row">
+      <button id="btnSave" class="btn btn-save" disabled><span class="ico">＋</span> 저장</button>
+      <button id="btnSkip" class="btn btn-skip" disabled><span class="ico">→</span> 스킵</button>
+    </div>
+  </section>
+
+  <!-- ===== STEP 4: 보고서 & 세션 진행 ===== -->
+  <section class="flow-step" id="fs4" style="margin-top:10px;">
+    <div class="flow-step-head"><span class="fs-badge">4</span>보고서 · 세션 진행</div>
+    <div id="sessionProgress" class="session-progress-box"></div>
+    <div class="flow-row-btns" style="margin-top:12px;">
+      <button id="btnCSV" class="btn" type="button" disabled><span class="ico">⤓</span> CSV</button>
+      <button id="btnPDF" class="btn btn-pdf" type="button" disabled><span class="ico">⤓</span> PDF 보고서</button>
+    </div>
+  </section>
+
+  <!-- ===== ASSIST (노이즈 저감 / 측정 대상 고정 / 플로우) ===== -->
+  <details class="panel" id="assistSection" open style="margin-top:14px;">
+    <summary>측정 보조 <span class="sum-en">Assist</span> <span class="chev">⌄</span></summary>
+    <div class="panel-body">
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name">주파수 스펙트럼</div>
+        <div class="toggle-desc">10–5000 Hz 실시간 FFT 스펙트럼을 표시합니다.</div>
+      </div>
+      <div class="toggle-ctrl">
+        <button id="swSpectrum" class="switch" type="button" aria-pressed="false" aria-label="스펙트럼 표시"><span class="knob"></span></button>
+      </div>
+    </div>
 
     <div class="toggle-row">
       <div class="toggle-info">
         <div class="toggle-name">노이즈 저감
           <span id="nrChip" class="assist-chip" style="display:none;">학습 중</span>
-          <span id="nrLevelWrap" class="assist-sel" style="display:none;margin-left:6px;">강도 <select id="selNrLevel">
-            <option value="1">1 약함</option>
-            <option value="2">2 낮음</option>
-            <option value="3" selected>3 보통</option>
-            <option value="4">4 높음</option>
-            <option value="5">5 강함</option>
-          </select></span>
         </div>
         <div class="toggle-desc">주변 소음 스펙트럼을 학습해 실시간 신호에서 차감합니다. 모터·전원 험 등 정상 소음에 강합니다.</div>
+        <div id="filterStrengthRow" class="assist-sel" style="margin-top:6px; display:none;">
+          필터 강도&nbsp;
+          <select id="selFilterStrength">
+            <option value="1">약 (민감)</option>
+            <option value="2" selected>중 (기본)</option>
+            <option value="3">강 (소음 환경)</option>
+            <option value="4">최강 (모바일·고소음)</option>
+          </select>
+        </div>
       </div>
       <div class="toggle-ctrl">
         <button id="btnRelearn" class="mini-btn" type="button" style="display:none;">재학습</button>
@@ -285,64 +287,33 @@
 
     <div class="toggle-row">
       <div class="toggle-info">
-        <div class="toggle-name">가이드 모드
-          <span id="guideChip" class="assist-chip assist-chip-guide" style="display:none;">
-            <button class="guide-period-btn" data-period="1000">1s</button>
-            <button class="guide-period-btn" data-period="2000">2s</button>
-            <button class="guide-period-btn is-active" data-period="3000">3s</button>
-            <button class="guide-period-btn" data-period="4000">4s</button>
-          </span>
-        </div>
-        <div class="toggle-desc">사인파 피크 타이밍에 벨트를 튕기면 앱이 자동으로 측정 창을 열어 분석합니다.</div>
-      </div>
-      <div class="toggle-ctrl">
-        <button id="swGuide" class="switch" type="button" aria-pressed="false" aria-label="가이드 모드"><span class="knob"></span></button>
-      </div>
-    </div>
-
-    <div class="toggle-row">
-      <div class="toggle-info">
-        <div class="toggle-name">주파수 스펙트럼</div>
-        <div class="toggle-desc">FFT 주파수 분포 그래프를 표시합니다. 기본값: 꺼짐.</div>
-      </div>
-      <div class="toggle-ctrl">
-        <button id="swSpectrum" class="switch" type="button" aria-pressed="false" aria-label="주파수 스펙트럼"><span class="knob"></span></button>
-      </div>
-    </div>
-
-    <div class="toggle-row">
-      <div class="toggle-info">
         <div class="toggle-name">측정 플로우</div>
-        <div class="toggle-desc">세션 설정·회차 진행·보고서 등 전체 측정 플로우를 사용합니다. 끄면 단순 측정 모드로 전환됩니다.</div>
+        <div class="toggle-desc">ON: 호기별 세션 관리 (벨트 ID·회차 추적) · OFF: 단순 직접 저장 모드</div>
       </div>
       <div class="toggle-ctrl">
+        <button id="btnSimpleCSV" class="mini-btn" type="button" style="display:none;">CSV</button>
         <button id="swFlow" class="switch" type="button" aria-pressed="true" aria-label="측정 플로우"><span class="knob"></span></button>
       </div>
     </div>
 
-    <div class="assist-note">노이즈 저감은 측정 직전 조용한 상태에서 자동 학습됩니다. 측정 대상 고정은 예상 주파수(또는 목표 장력)가 있을 때 가장 정확합니다.</div>
-  </section>
+    <div class="assist-note">노이즈 저감은 측정 직전 조용한 상태에서 자동 학습됩니다. 모바일에서 오감지가 잦으면 필터 강도를 높이세요 — 충격감지 임계값도 함께 올라갑니다.</div>
+    </div><!-- panel-body -->
+  </details>
 
   <!-- ===== CONDITIONS ===== -->
   <details class="panel" open>
     <summary>측정 조건 설정 <span class="sum-en">Conditions</span> <span class="chev">⌄</span></summary>
     <div class="panel-body">
-
-      <!-- 벨트 사양 빠른 선택 (단순 모드에서만 표시) -->
-      <div id="beltPresetRow" class="belt-preset-row" style="display:none;">
-        <div class="belt-preset-label">벨트 사양</div>
-        <div class="belt-preset-btns">
-          <button class="belt-preset-btn" id="presetDrive" type="button" onclick="applyBeltPreset('drive')">
-            <span class="bpb-name">구동모듈 벨트</span>
-            <span class="bpb-spec">170 N ±20%</span>
-          </button>
-          <button class="belt-preset-btn" id="presetLifting" type="button" onclick="applyBeltPreset('lifting')">
-            <span class="bpb-name">리프팅 벨트</span>
-            <span class="bpb-spec">500 N ±10%</span>
-          </button>
-        </div>
+      <div class="belt-preset-btns" style="margin-bottom:14px;">
+        <button id="presetDrive" class="belt-preset-btn" type="button" onclick="applyBeltPreset('drive')">
+          <span class="bpb-name">구동모듈</span>
+          <span class="bpb-spec">170 N ±20% · 2.8 g/m</span>
+        </button>
+        <button id="presetLifting" class="belt-preset-btn" type="button" onclick="applyBeltPreset('lifting')">
+          <span class="bpb-name">리프팅</span>
+          <span class="bpb-spec">500 N ±10% · 4.2 g/m</span>
+        </button>
       </div>
-
       <div class="form-grid">
         <div class="field">
           <label>Mass <span class="unit">g/m</span></label>
@@ -371,9 +342,8 @@
         <div class="field full">
           <label>예상 주파수 <span class="unit">Hz · estimate</span></label>
           <div class="estimate-input">
-            <input id="estFreq" type="number" inputmode="decimal" step="any" placeholder="직접 입력 또는 계산">
+            <input id="estFreq" type="number" inputmode="decimal" step="any" placeholder="자동 계산">
             <input id="kconst" type="number" inputmode="decimal" step="any" value="1000" title="k constant" placeholder="k">
-            <button id="btnEstimate" class="btn" type="button">계산</button>
           </div>
         </div>
         <div class="field full">
@@ -385,25 +355,25 @@
           </select>
         </div>
       </div>
-      <div class="note">입력값은 모바일에서 자동으로 1열로 전환됩니다. <b>목표 장력</b>과 <b>허용오차</b>를 넣으면 상단 게이지에 합·부 범위가 표시됩니다.</div>
+      <div class="note">입력값은 모바일에서 자동으로 1열로 전환됩니다. <b>목표 장력</b>과 <b>허용오차</b>를 넣으면 상단 게이지에 허용 범위가 표시됩니다.</div>
     </div>
   </details>
 
-  <!-- ===== DETAIL RESULT ===== -->
-  <section class="panel">
-    <div class="panel-title"><span class="ko">상세 결과</span><span class="en">Detail</span></div>
-    <div class="detail-grid">
-      <div class="mini"><div class="k">계산 장력 (보정 전)</div><div class="v"><span id="resRawN">--</span> N</div></div>
-      <div class="mini"><div class="k">측정 시간</div><div class="v" style="font-size:15px;"><span id="resTime">--</span></div></div>
+  <!-- ===== STEP 5: 기록 ===== -->
+  <section class="flow-step" id="fs5" style="margin-top:10px;">
+    <div class="flow-step-head">
+      <span class="fs-badge">5</span>측정 기록
+      <button id="btnClear" class="btn" type="button" style="margin-left:auto; min-height:36px; padding:0 12px; font-size:12px;"><span class="ico">↺</span> 초기화</button>
     </div>
-    <div class="detail-meta">
-      <span>Mass <b id="resMass">--</b></span>
-      <span>Width <b id="resWidth">--</b></span>
-      <span>Span <b id="resSpan">--</b></span>
-      <span>CF <b id="resCF">--</b></span>
+    <div class="table-scroll">
+      <table>
+        <thead id="histHead">
+          <tr><th colspan="3" style="text-align:center;color:#9CA3AF;">저장된 측정이 없습니다.</th></tr>
+        </thead>
+        <tbody id="histBody"></tbody>
+      </table>
     </div>
   </section>
-
 
   <!-- ===== HELP ===== -->
   <details class="panel">
@@ -412,7 +382,11 @@
       <div class="help-grid">
         <div class="help-item">
           <div class="title">측정 방법</div>
-          <div class="text">측정 시작 후 Span 중앙부를 짧고 선명하게 튕겨 주세요. 검출 주파수와 장력이 안정될 때까지 1~2회 반복하면 정확도가 좋아집니다.</div>
+          <div class="text">측정 시작 후 Span 중앙부를 짧고 선명하게 튕겨 주세요. 충격 감지 후 0.5초 무시, 1.5초 분석합니다. 안정적으로 감지되면 자동으로 결과가 고정됩니다.</div>
+        </div>
+        <div class="help-item">
+          <div class="title">모바일 오감지 대처</div>
+          <div class="text">측정 보조 → 노이즈 저감 ON 후 필터 강도를 <b>3(강)</b> 또는 <b>4(최강)</b>으로 높이세요. 주변 소음 대비 배수(triggerK)가 함께 올라가 오감지를 억제합니다.</div>
         </div>
         <div class="help-item">
           <div class="title">환경 주의</div>
@@ -432,7 +406,6 @@
 <div id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.7.1/jspdf.plugin.autotable.min.js"></script>
 <script src="../../assets/js/utils.js"></script>
 <script src="./app.js"></script>
 </body>

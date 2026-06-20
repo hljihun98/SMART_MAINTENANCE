@@ -9,7 +9,7 @@
 | 센서 보고서 | `apps/sensor-report/` | PARKIE 로봇 진동·온도 센서 점검 및 PDF 보고서 생성 | 사용 가능 |
 | 벨트 장력계 | `apps/belt-tension/` | 마이크 음파 분석으로 컨베이어 벨트 장력(N) 측정 | 사용 가능 |
 | ROBOSTOCK | `apps/test/` | 로봇 부품 재고·BOM·공수산정·작업인원 일정 통합 관리 | 사용 가능 |
-| 데시벨 측정 | `apps/decibel-meter/` | 실시간 소음 레벨(dB SPL) 측정 및 이력 기록 | 개발 중 |
+| 벨트 장력계 2.0 | `apps/belt-tension-2.0/` | 음파 FFT 분석으로 벨트 장력(N) 측정 · 노이즈 저감 · CSV/PDF 보고서 | 사용 가능 |
 
 ## 기술 스택
 

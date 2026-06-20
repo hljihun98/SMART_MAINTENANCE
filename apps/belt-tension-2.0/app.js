@@ -370,9 +370,7 @@ function saveCurrentSlot(){
         renderRobotProgress();
         renderRobots();
         updateSessionSwitchRow();
-        toast(completedUnit+'호기 완료 → '+nextPending.unit+'호기 측정을 시작합니다.','ok',4000);
-        setStep(2);
-        startMeasure();
+        toast(completedUnit+'호기 완료 → '+nextPending.unit+'호기 벨트를 튕겨주세요.','ok',4000);
       } else {
         activeRobot = null;
         resetForNextMeasurement(true);
@@ -388,8 +386,6 @@ function saveCurrentSlot(){
     renderRobots();
     resetForNextMeasurement(false);
     applySlotPreset(activeRobot.slots[activeSlotIdx]);
-    setStep(2);
-    startMeasure();
   }else{
     const rem = slot.measCount - slot.values.length;
     toast('저장 ('+slot.values.length+'/'+slot.measCount+'회) · 남은: '+rem,'ok');
@@ -773,9 +769,6 @@ async function startMeasure(){
   selFFT.disabled=true;
   setStatus('listen','측정 중 — 벨트를 튕겨주세요','LISTENING');
   toast('측정을 시작했습니다. 벨트 Span 중앙을 가볍게 튕기세요.', 'ok');
-  if(noiseReduction.enabled && !noiseProfileReady){
-    setNoiseChip(learnRequested ? '학습 중 0%' : '재학습 버튼으로 학습');
-  }
   analyzeLoop();
 }
 
@@ -1330,16 +1323,75 @@ function drawWaveform(){
   waveCtx.fillRect(0,0,W,H);
   waveCtx.strokeStyle='#374151'; waveCtx.lineWidth=1;
   waveCtx.beginPath(); waveCtx.moveTo(0,H/2); waveCtx.lineTo(W,H/2); waveCtx.stroke();
-  waveCtx.strokeStyle=collecting?'#38bdf8':'#94a3b8';
+
+  /* ── 노이즈 저감 밴드 시각화 ── */
+  const NR_ALPHA=[1.0,1.5,2.5,3.5];
+  const nrAlpha=NR_ALPHA[(filterStrength||2)-1];
+  const halfH=H/2-5;
+  let suppressPx=0;
+  if(noiseReduction.enabled && ambientRms>0){
+    const noisePx=Math.min(ambientRms*halfH, halfH);
+    suppressPx=Math.min(noisePx*nrAlpha, halfH);
+    if(noiseProfileReady){
+      // ① 원래 소음 수준 밴드 (황색 — "이만큼이 배경 소음")
+      waveCtx.fillStyle='rgba(251,191,36,0.12)';
+      waveCtx.fillRect(0, H/2-noisePx, W, noisePx*2);
+      // ② 억제 구간 밴드 (파랑 — "필터가 잘라내는 범위")
+      waveCtx.fillStyle='rgba(56,189,248,0.15)';
+      waveCtx.fillRect(0, H/2-suppressPx, W, suppressPx*2);
+      // ③ 억제 경계 점선
+      waveCtx.save();
+      waveCtx.setLineDash([4,4]);
+      waveCtx.strokeStyle='rgba(56,189,248,0.5)';
+      waveCtx.lineWidth=1;
+      waveCtx.beginPath();
+      waveCtx.moveTo(0,H/2-suppressPx); waveCtx.lineTo(W,H/2-suppressPx);
+      waveCtx.moveTo(0,H/2+suppressPx); waveCtx.lineTo(W,H/2+suppressPx);
+      waveCtx.stroke();
+      waveCtx.restore();
+      // ④ NR 강도 텍스트
+      waveCtx.fillStyle='rgba(56,189,248,0.8)';
+      waveCtx.font='bold 9px sans-serif';
+      waveCtx.textAlign='right';
+      waveCtx.fillText('NR ×'+['1.0','1.5','2.5','3.5'][(filterStrength||2)-1], W-4, 11);
+      waveCtx.textAlign='left';
+    } else if(learnRequested){
+      // 학습 중: 황색 점선만 (ambientRms 기반, 아직 불안정)
+      waveCtx.save();
+      waveCtx.setLineDash([2,6]);
+      waveCtx.strokeStyle='rgba(251,191,36,0.4)';
+      waveCtx.lineWidth=1;
+      waveCtx.beginPath();
+      waveCtx.moveTo(0,H/2-noisePx); waveCtx.lineTo(W,H/2-noisePx);
+      waveCtx.moveTo(0,H/2+noisePx); waveCtx.lineTo(W,H/2+noisePx);
+      waveCtx.stroke();
+      waveCtx.restore();
+    }
+  }
+
+  /* ── 파형 그리기 (억제 구간=회색, 신호 구간=밝은색) ── */
   waveCtx.lineWidth=1.5;
   waveCtx.beginPath();
+  let lastInNoise=null;
   for(let x=0;x<W;x++){
     const i=Math.floor(x/W*waveformBuf.length);
     const v=waveformBuf[i]/128-1;
     const y=H/2+v*(H/2-5);
-    x===0 ? waveCtx.moveTo(x,y) : waveCtx.lineTo(x,y);
+    const inNoise=suppressPx>0 && Math.abs(v*(H/2-5))<=suppressPx;
+    if(inNoise!==lastInNoise){
+      if(x>0) waveCtx.stroke();
+      waveCtx.strokeStyle=inNoise
+        ? (collecting?'#4B5563':'#374151')
+        : (collecting?'#38bdf8':'#94a3b8');
+      waveCtx.beginPath();
+      waveCtx.moveTo(x,y);
+      lastInNoise=inNoise;
+    } else {
+      x===0 ? waveCtx.moveTo(x,y) : waveCtx.lineTo(x,y);
+    }
   }
   waveCtx.stroke();
+
   if(collecting && collectStartTs){
     const elapsed=Math.max(0,Date.now()-collectStartTs);
     const total=collectEndTs-collectStartTs;
@@ -1810,9 +1862,10 @@ btnPDF.addEventListener('click', downloadPDF);
 });
 
 /* ---------- 측정 보조 토글 ---------- */
-const swNoise=$('swNoise'), swLock=$('swLock'), btnRelearn=$('btnRelearn'),
+const swNoise=$('swNoise'), swLock=$('swLock'),
       selLockWidth=$('selLockWidth'), lockWidthWrap=$('lockWidthWrap'),
-      selFilterStrength=$('selFilterStrength'), filterStrengthRow=$('filterStrengthRow');
+      selFilterStrength=$('selFilterStrength'), filterStrengthRow=$('filterStrengthRow'),
+      btnLearn=$('btnLearn'), learnRow=$('learnRow');
 function setSwitch(btn,on){ btn.setAttribute('aria-pressed', on?'true':'false'); }
 function updateAssistInfo(){
   const el=document.getElementById('lockDesc');
@@ -1825,27 +1878,33 @@ function updateAssistInfo(){
     ? ('중심 ≈ '+c.toFixed(1)+' Hz · ±'+targetLock.widthPct+'% 대역만 탐색합니다.')
     : '예상 주파수나 목표 장력을 입력하면 중심이 설정됩니다.';
 }
+function startNoiseLearn(){
+  noiseProfile=null; noiseProfileReady=false; learnRequested=true;
+  learnElapsedMs=0; learnLastTs=null; learnLastPct=-1; setNoiseChip('학습 중 0%');
+}
 swNoise.addEventListener('click', ()=>{
   noiseReduction.enabled=!noiseReduction.enabled;
   setSwitch(swNoise, noiseReduction.enabled);
-  btnRelearn.style.display = noiseReduction.enabled?'inline-flex':'none';
-  if(filterStrengthRow) filterStrengthRow.style.display = noiseReduction.enabled?'block':'none';
-  if(noiseReduction.enabled){
-    // 프로파일 유지 — ON/OFF 토글로 재학습 불필요
+  const show=noiseReduction.enabled;
+  if(filterStrengthRow) filterStrengthRow.style.display=show?'block':'none';
+  if(learnRow) learnRow.style.display=show?'flex':'none';
+  if(show){
     if(noiseProfileReady){ setNoiseChip('학습완료'); }
     else if(learnRequested){ setNoiseChip(`학습 중 ${Math.min(100,Math.round(learnElapsedMs/LEARN_DURATION_MS*100))}%`); }
-    else { setNoiseChip('재학습 버튼으로 학습'); }
+    else { setNoiseChip(''); }
     toast('노이즈 저감 ON','ok');
-  }else{ setNoiseChip(''); toast('노이즈 저감 OFF','warn'); }
+  }else{
+    learnRequested=false;
+    setNoiseChip(''); toast('노이즈 저감 OFF','warn');
+  }
 });
 if(selFilterStrength) selFilterStrength.addEventListener('change', ()=>{
   filterStrength=parseInt(selFilterStrength.value,10)||2;
   saveState();
 });
-btnRelearn.addEventListener('click', ()=>{
-  noiseProfile=null; noiseProfileReady=false; learnRequested=true;
-  learnElapsedMs=0; learnLastTs=null; learnLastPct=-1; setNoiseChip('학습 중 0%');
-  toast('소음 프로파일 초기화 — 측정 중 3초간 현장 소음을 다시 학습합니다.','ok');
+if(btnLearn) btnLearn.addEventListener('click', ()=>{
+  startNoiseLearn();
+  toast('측정 중 3초간 현장 소음을 학습합니다.','ok');
 });
 swLock.addEventListener('click', ()=>{
   targetLock.enabled=!targetLock.enabled;

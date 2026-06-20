@@ -251,22 +251,23 @@
 
     <div class="toggle-row">
       <div class="toggle-info">
-        <div class="toggle-name">노이즈 저감
-          <span id="nrChip" class="assist-chip" style="display:none;">학습 중</span>
-        </div>
-        <div class="toggle-desc">주변 소음 스펙트럼을 학습해 실시간 신호에서 차감합니다. 모터·전원 험 등 정상 소음에 강합니다.</div>
+        <div class="toggle-name">노이즈 저감</div>
+        <div class="toggle-desc">주변 소음 스펙트럼을 차감해 측정 정확도를 높입니다. 모터·전원 험 등 정상 소음에 강합니다.</div>
         <div id="filterStrengthRow" class="assist-sel" style="margin-top:6px; display:none;">
           필터 강도&nbsp;
           <select id="selFilterStrength">
-            <option value="1">약 (민감)</option>
-            <option value="2" selected>중 (기본)</option>
-            <option value="3">강 (소음 환경)</option>
-            <option value="4">최강 (모바일·고소음)</option>
+            <option value="1">약 — 조용한 환경</option>
+            <option value="2" selected>중 — 일반 공장</option>
+            <option value="3">강 — 환풍기·기계음</option>
+            <option value="4">최강 — 고소음 환경</option>
           </select>
+        </div>
+        <div id="learnRow" class="assist-sel" style="margin-top:6px; display:none; align-items:center; gap:8px;">
+          <button id="btnLearn" class="mini-btn" type="button">현장 맞춤 학습</button>
+          <span id="nrChip" class="assist-chip" style="display:none;"></span>
         </div>
       </div>
       <div class="toggle-ctrl">
-        <button id="btnRelearn" class="mini-btn" type="button" style="display:none;">재학습</button>
         <button id="swNoise" class="switch" type="button" aria-pressed="false" aria-label="노이즈 저감"><span class="knob"></span></button>
       </div>
     </div>

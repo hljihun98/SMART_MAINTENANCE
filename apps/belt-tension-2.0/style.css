@@ -766,8 +766,9 @@ tbody tr:nth-child(even){background:#FAFBFC;}
   .actions-row .btn-start{font-size:13px;min-height:40px;}
   .actions-row .btn .ico{display:none;}
 
-  /* 비활성 플로우 스텝 숨기기 */
-  .flow-step:not(.s-active){display:none;}
+  /* 비활성 플로우 스텝 숨기기 — Step 4(보고서)는 항상 스크롤로 접근 가능 */
+  .flow-step:not(.s-active):not(#fs4){display:none;}
+  #fs4{margin-top:14px;}
 
   /* 스펙트럼: 모바일에서 숨김 (파형으로 충분) */
   #spectrumPanel{display:none !important;}

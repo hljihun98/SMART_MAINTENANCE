@@ -7,7 +7,7 @@ var APPS = [
   { href:'./apps/belt-tension/', accent:'#0EA5A4', accentBg:'#E3F6F5',
     icon:'<circle cx="6" cy="12" r="3"/><circle cx="18" cy="12" r="3"/><path d="M6 9h12"/><path d="M6 15h12"/>',
     tag:'장력 N', name:'벨트 장력계', desc:'컨베이어 벨트의 장력을 측정하고 기준값과 비교합니다.', ready:true },
-  { href:'./apps/decibel-meter/', accent:'#7C3AED', accentBg:'#F1ECFE',
+  { href:'./apps/belt-tension-2.0/', accent:'#7C3AED', accentBg:'#F1ECFE',
     icon:'<path d="M4 10v4"/><path d="M8 7v10"/><path d="M12 4v16"/><path d="M16 8v8"/><path d="M20 11v2"/>',
     tag:'소음 dB', name:'데시벨 측정', desc:'설비 가동 소음 레벨을 실시간으로 측정합니다.', ready:true },
   { href:'./apps/test/', accent:'#94A3B8', accentBg:'#EEF1F4', icoColor:'#64748B', tagColor:'#64748B',

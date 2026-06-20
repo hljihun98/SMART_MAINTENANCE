@@ -174,15 +174,13 @@ canvas{display:block;width:100%;height:200px;}
 .btn:active{transform:scale(.975);}
 .btn:disabled{opacity:.38;cursor:not-allowed;}
 .btn .ico{font-size:14px;line-height:1;}
-.btn-start{width:100%;min-height:62px;font-size:17px;font-weight:800;letter-spacing:.02em;
+.btn-start{min-height:52px;font-size:15px;font-weight:800;letter-spacing:.02em;
   color:#04221f;border:none;
   background:linear-gradient(135deg,#48e3cb 0%, #18b9a3 100%);
   box-shadow:0 14px 26px -14px rgba(12,169,154,.45), inset 0 1px 0 rgba(255,255,255,.45);}
 .btn-start:hover{filter:brightness(1.05);}
 .btn-stop{color:#fff;border-color:transparent;background:linear-gradient(135deg,#f2596a,#d23b4c);}
 .btn-stop:disabled{background:var(--surface-3);color:var(--text);}
-.btn-hold{color:var(--warn);border-color:rgba(244,196,78,.3);}
-.btn-hold.active{background:rgba(244,196,78,.14);}
 .btn-save{color:var(--green);border-color:rgba(86,217,140,.3);}
 
 /* ---------- collapsibles ---------- */
@@ -216,7 +214,7 @@ select{font-size:15px;}
 .field input::placeholder{color:var(--text-faint);font-weight:400;}
 .field input:focus, select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow);}
 .field input.invalid{border-color:var(--red);box-shadow:0 0 0 3px rgba(251,106,120,.18);}
-.estimate-input{display:grid;grid-template-columns:1fr 96px auto;gap:9px;align-items:stretch;}
+.estimate-input{display:grid;grid-template-columns:1fr 96px;gap:9px;align-items:stretch;}
 .estimate-input input{font-size:15px;}
 .estimate-input .btn{min-height:0;padding:0 16px;font-size:13px;}
 .note{margin-top:13px;padding:12px 14px;border-radius:var(--r-xs);font-size:12px;line-height:1.6;
@@ -332,6 +330,15 @@ body{background:#F4F6F9 !important;background-image:none !important;font-size:14
 .tb-logo{height:22px;width:auto;display:block;object-fit:contain;flex:none;}
 .tb-name{font-size:11px;color:#9CA3AF;border-left:1px solid #E5E8ED;padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
 .tb-version{flex:none;font-size:11px;color:#6B7280;background:#F4F6F9;border:1px solid #E5E8ED;border-radius:999px;padding:2px 8px;}
+.home-btn{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#6B7280;text-decoration:none;background:#F4F6F9;border:1px solid #E5E8ED;border-radius:999px;padding:4px 10px;white-space:nowrap;transition:background .15s,color .15s;flex:none;}
+.home-btn:hover{background:#E5E8ED;color:#374151;}
+.actions{margin-top:14px;}
+.actions-row{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;}
+.actions-row .btn{min-height:52px;font-size:13px;}
+.actions-sub{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px;}
+.actions-sub .btn{min-height:48px;font-size:13px;}
+.robot-clickable{cursor:pointer;transition:border-color .15s,box-shadow .15s;}
+.robot-clickable:hover{border-color:#0099CC;box-shadow:0 0 0 2px rgba(0,153,204,.12);}
 .status-pill{flex:none;font-family:var(--kr);font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:none;padding:5px 11px;border-radius:999px;border:1px solid #E5E8ED;background:#F4F6F9;color:#6B7280;box-shadow:none;}
 .status-pill::before{width:6px;height:6px;opacity:1;}
 .status-pill.s-listen{color:#0369A1;border-color:#BAE6FD;background:#F0F9FF;}
@@ -381,8 +388,6 @@ body{background:#F4F6F9 !important;background-image:none !important;font-size:14
 .btn-stop{background:#DC2626;color:#fff;border-color:transparent;}
 .btn-stop:hover{background:#B91C1C;}
 .btn-stop:disabled{background:#fff;color:#111;}
-.btn-hold{color:#B45309;border-color:#FDE68A;background:#FFFBEB;}
-.btn-hold.active{background:#FEF3C7;}
 .btn-save{color:#059669;border-color:#A7F3D0;background:#ECFDF5;}
 .mini-btn{font-family:var(--kr);border-radius:8px;background:#fff;border:1px solid #E5E8ED;color:#6B7280;}
 .assist-sel select{border-radius:8px;}
@@ -447,10 +452,6 @@ tbody tr:nth-child(even){background:#FAFBFC;}
 .progress-chip.has-data{background:#F0F9FF;border-color:#BAE6FD;color:#0369A1;}
 
 /* 저장/스킵 버튼 행 */
-.save-skip-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;}
-.btn-skip{color:#B45309;border-color:#FDE68A;background:#FFFBEB;}
-.btn-skip:hover{background:#FEF3C7;}
-
 /* 설정 취소 버튼 (Step 2) */
 .btn-cancel-setup{
   width:100%;margin-top:10px;min-height:40px;font-size:12px;
@@ -564,15 +565,21 @@ tbody tr:nth-child(even){background:#FAFBFC;}
 /* 슬롯별 섹션 (step 4) */
 .slot-section{
   border:1.5px solid #E5E8ED;border-radius:10px;padding:12px;margin-bottom:10px;
-  background:#fff;
+  background:#fff;transition:border-color .15s,box-shadow .15s;
 }
 .slot-section.slot-cur{border-color:#0099CC;background:#F0F9FF;}
 .slot-section.slot-done{background:#F9FAFB;opacity:.92;}
+.slot-section.slot-goto{cursor:pointer;}
+.slot-section.slot-goto:hover{border-color:#0099CC;box-shadow:0 0 0 2px rgba(0,153,204,.12);}
 .slot-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
 .slot-key{font-size:13px;font-weight:800;color:#111;letter-spacing:.01em;}
 .slot-tag-now{font-size:10px;font-weight:700;color:#0369A1;background:#BAE6FD;
   padding:2px 8px;border-radius:999px;}
 .slot-tag-done{font-size:13px;color:#059669;font-weight:700;}
+.slot-tag-goto{font-size:10px;font-weight:600;color:#6B7280;background:#F4F6F9;
+  padding:2px 8px;border-radius:999px;}
+.robot-tag-paused{background:#F4F6F9;color:#6B7280;border:1px solid #E5E8ED;font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;}
+.robot-paused{opacity:.85;}
 
 /* ─────────────────────────────────────────────
    STEP 1 — 추가 버튼 행
@@ -634,7 +641,7 @@ tbody tr:nth-child(even){background:#FAFBFC;}
 ───────────────────────────────────────────── */
 
 /* 단계 표시 바 */
-.step-bar{display:flex;align-items:flex-start;margin:0 0 16px;}
+.step-bar{display:flex;align-items:flex-start;margin:14px 0 16px;}
 .step-item{display:flex;flex-direction:column;align-items:center;gap:5px;flex:1;min-width:0;}
 .step-dot{
   width:26px;height:26px;border-radius:50%;
@@ -737,3 +744,58 @@ tbody tr:nth-child(even){background:#FAFBFC;}
 .unit-ok-btn:hover{background:#047857;}
 .unit-cancel-btn{background:#F4F6F9;color:#6B7280;border:1px solid #E5E8ED;}
 .unit-cancel-btn:hover{background:#E5E8ED;}
+
+/* ─────────────────────────────────────────────
+   모바일 한 화면 레이아웃 (≤ 480px)
+───────────────────────────────────────────── */
+@media(max-width:480px){
+  /* 상단바 고정 — statusPill이 항상 보임 */
+  .topbar{position:sticky;top:0;z-index:20;}
+
+  /* 하단 액션 버튼 고정 — 패딩 축소 */
+  .actions{
+    position:fixed;bottom:0;left:0;right:0;z-index:20;
+    background:#F4F6F9;border-top:1px solid #E5E8ED;
+    padding:7px 14px calc(env(safe-area-inset-bottom) + 7px);
+  }
+  /* 고정 하단 버튼 높이만큼 본문 여백 */
+  body{padding-bottom:calc(env(safe-area-inset-bottom) + 70px);}
+
+  /* 버튼 높이·폰트 축소, 아이콘 숨김 */
+  .actions-row .btn{min-height:40px;font-size:12px;padding:6px 8px;}
+  .actions-row .btn-start{font-size:13px;min-height:40px;}
+  .actions-row .btn .ico{display:none;}
+
+  /* 비활성 플로우 스텝 숨기기 */
+  .flow-step:not(.s-active){display:none;}
+
+  /* 스펙트럼: 모바일에서 숨김 (파형으로 충분) */
+  #spectrumPanel{display:none !important;}
+
+  /* 측정 중(step 2): 게이지 숨겨 세로 공간 확보
+     상태는 sticky topbar의 statusPill로 확인 가능 */
+  body[data-step="2"] .gauge{display:none;}
+}
+
+/* ─────────────────────────────────────────────
+   모바일 세션 미니 진행 배너 (Step 2 내부)
+───────────────────────────────────────────── */
+.session-mini-progress{
+  flex-direction:column;gap:5px;
+  background:#EFF6FF;border:1px solid #BAE6FD;border-radius:8px;
+  padding:10px 12px;margin-bottom:12px;
+}
+.smp-robot{font-size:13px;font-weight:800;color:#0369A1;}
+.smp-slot {font-size:12px;font-weight:600;color:#111;}
+.smp-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:3px;}
+.smp-chip{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;
+  border:1px solid #E5E8ED;background:#fff;color:#6B7280;}
+.smp-chip-done{background:#D1FAE5;border-color:#A7F3D0;color:#059669;}
+.smp-chip-cur {background:#DBEAFE;border-color:#93C5FD;color:#1D4ED8;}
+.smp-chip-todo{background:#F4F6F9;border-color:#E5E8ED;color:#9CA3AF;}
+
+/* 데스크톱에서는 숨김 — Step 4 카드로 충분 */
+@media(min-width:481px){
+  .session-mini-progress{display:none !important;}
+}
+

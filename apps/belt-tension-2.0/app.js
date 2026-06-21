@@ -95,9 +95,11 @@ let learnLastTs=null;   // 재학습: 직전 조용한 프레임 타임스탬프
 let learnLastPct=-1;    // throttle: 동일 pct 중복 DOM 업데이트 방지
 let learnRequested=false; // 재학습 버튼 클릭 시에만 true — 자동 학습 방지
 const LEARN_DURATION_MS=3000;  // 학습 완료까지 필요한 조용한 시간 (ms)
-let targetLock={enabled:false, widthPct:30};
+let targetLock={enabled:true, widthPct:30};
 let lockCenter=NaN, lockLoBin=-1, lockHiBin=-1;
+let adaptiveTrigger=false;  // true=적응형(v2), false=고정 0.08(v1 클래식)
 let flowEnabled=true;
+let nrHintShown=false, unstableCount=0;  // 노이즈 저감 안내 토스트 (세션 내 1회)
 let simpleHistory=[];
 
 /* ---------- DOM 캐시 ---------- */
@@ -229,7 +231,8 @@ function updateSlotProgress(){
       if(!slot){ el.textContent=''; }
       else{
         const cur=slot.values.length, max=slot.measCount;
-        el.textContent = slot.label+' · '+cur+' / '+max;
+        const unit = flowEnabled && activeRobot ? activeRobot.unit+'호기 · ' : '';
+        el.textContent = unit + slot.label+' · '+cur+' / '+max;
         el.className = 'progress-chip'+(cur>0?' has-data':'');
       }
     }
@@ -253,6 +256,28 @@ function updateSlotProgress(){
 }
 function updateProgressChip(){ updateSlotProgress(); }  // 하위호환
 
+/* ---------- 호기 대기열 미리보기 카드 (Step 1) ---------- */
+function renderRobotQueuePreview(){
+  const el=$('robotQueuePreview');
+  if(!el) return;
+  if(robots.length===0){ el.style.display='none'; return; }
+  el.style.display='block';
+  el.innerHTML=robots.map(r=>{
+    const driveSlots=r.slots.filter(s=>s.type==='drive').map(s=>s.label).join(', ');
+    const liftSlots=r.slots.filter(s=>s.type==='lifting').map(s=>s.label).join(', ');
+    const canDelete=!r.startedAt;
+    const parts=[driveSlots?'구동 '+driveSlots:'', liftSlots?'리프팅 '+liftSlots:''].filter(Boolean);
+    const measCount=r.slots[0]?.measCount||1;
+    return `<div class="rq-card">
+      <div class="rq-unit">${r.unit}호기</div>
+      <div class="rq-info">${parts.join(' · ')} · ${measCount}회</div>
+      ${canDelete
+        ?`<button class="rq-del" onclick="deleteRobot(${r.id})" type="button">삭제</button>`
+        :`<span class="rq-started">측정중</span>`}
+    </div>`;
+  }).join('');
+}
+
 /* ---------- 호기 큐에 추가 ---------- */
 function addRobotToQueue(){
   const unit = inUnit ? inUnit.value.trim() : '';
@@ -269,6 +294,7 @@ function addRobotToQueue(){
   renderRobots();
   updateReportButtons();
   updateSessionSwitchRow();
+  renderRobotQueuePreview();
   inUnit.value='';
   inUnit.focus();
   saveState();
@@ -294,7 +320,21 @@ function initRobotIfNeeded(){
     return true;
   }
 
-  // 2순위(폴백): Step 1 현재 입력으로 즉시 생성
+  // 2순위: 페이지 재로드 후 미완료 호기 재개 (startedAt 있으나 completedAt 없음)
+  const inProgress = robots.find(r=>r.startedAt && !r.completedAt);
+  if(inProgress){
+    activeRobot = inProgress;
+    activeSlotIdx = Math.max(0, inProgress.slots.findIndex(s=>!s.completedAt));
+    applySlotPreset(inProgress.slots[activeSlotIdx]);
+    renderRobotProgress();
+    renderRobots();
+    updateSessionSwitchRow();
+    saveState();
+    toast(inProgress.unit+'호기 측정을 재개합니다.','ok');
+    return true;
+  }
+
+  // 3순위(폴백): Step 1 현재 입력으로 즉시 생성
   const unit = inUnit ? inUnit.value.trim() : '';
   if(!unit){ toast('호기를 추가하거나 호기 번호를 입력해주세요.','err'); return false; }
   if(selectedDriveIds.size+selectedLiftingIds.size===0){ toast('벨트를 1개 이상 선택해주세요.','err'); return false; }
@@ -343,7 +383,6 @@ function saveCurrentSlot(){
   slot.values.push({freq:currentResult.freq, corrN:currentResult.corrN, kgf:currentResult.kgf,
     rawN:currentResult.rawN, conf:currentResult.confidence||0, time:new Date(), judge});
   beep(1320, 80);
-  saveState();
 
   const slotDone = slot.values.length >= slot.measCount;
   if(slotDone){
@@ -361,10 +400,11 @@ function saveCurrentSlot(){
 
       const nextPending = robots.find(r=>!r.startedAt);
       if(nextPending){
+        nextPending.startedAt = new Date();
+        saveState(); // 슬롯·호기 완료 + 다음 호기 시작 상태까지 모두 저장
         activeRobot = null; activeSlotIdx = 0;
         resetForNextMeasurement(false);
         activeRobot = nextPending;
-        nextPending.startedAt = new Date();
         activeSlotIdx = 0;
         applySlotPreset(nextPending.slots[0]);
         renderRobotProgress();
@@ -372,6 +412,7 @@ function saveCurrentSlot(){
         updateSessionSwitchRow();
         toast(completedUnit+'호기 완료 → '+nextPending.unit+'호기 벨트를 튕겨주세요.','ok',4000);
       } else {
+        saveState(); // 슬롯·호기 완료 상태 저장
         activeRobot = null;
         resetForNextMeasurement(true);
         setStep(4);
@@ -380,6 +421,7 @@ function saveCurrentSlot(){
       }
       return;
     }
+    saveState(); // 슬롯 완료 상태(completedAt·average·avgJudge) 저장
     activeSlotIdx++;
     toast(slot.label+' 완료 (평균 '+slot.average.toFixed(1)+' N → '+slot.avgJudge+') — 다음으로 이동','ok',3000);
     renderRobotProgress();
@@ -387,6 +429,7 @@ function saveCurrentSlot(){
     resetForNextMeasurement(false);
     applySlotPreset(activeRobot.slots[activeSlotIdx]);
   }else{
+    saveState(); // 측정값 저장
     const rem = slot.measCount - slot.values.length;
     toast('저장 ('+slot.values.length+'/'+slot.measCount+'회) · 남은: '+rem,'ok');
     renderRobotProgress();
@@ -432,6 +475,7 @@ function cancelSlotMeasurement(vi){
   slot.values.splice(vi, 1);
   slot.completedAt=null; slot.average=null; slot.avgJudge=null;
   activeRobot.completedAt=null;
+  saveState(); // 회차 삭제 즉시 반영
   renderRobotProgress();
   renderRobots();
   updateSlotProgress();
@@ -602,7 +646,7 @@ function deleteRobot(id){
     activeRobot=null; activeSlotIdx=0; currentResult=null;
   }
   robots=robots.filter(r=>r.id!==id);
-  renderRobots(); renderRobotProgress(); updateReportButtons(); updateSessionSwitchRow();
+  renderRobots(); renderRobotProgress(); updateReportButtons(); updateSessionSwitchRow(); renderRobotQueuePreview();
   if(isActive) setStep(1);
   saveState();
   toast(robot.unit+'호기가 삭제됐습니다.','warn');
@@ -762,6 +806,7 @@ async function startMeasure(){
   }
 
   measuring=true; held=false; peakBuffer=[];
+  nrHintShown=false; unstableCount=0;
   ambientRms=0.02;    // 측정 시작 시 기준선 리셋 (filterStrength=2 기준 초기 임계값 ≈ 0.08)
   measureStartTs=Date.now();
   btnStart.disabled=true; btnStop.disabled=false; btnSave.disabled=true;
@@ -874,12 +919,11 @@ function analyzeLoop(){
         setStatus('listen','피크 — 지금 튕겨주세요!','COLLECTING');
       }
       if(sineVal<0) guidePeakFired=false;
-    } else {
-      // 일반 모드: 적응형 동적 임계값 (ambient × triggerK)
+    } else if(adaptiveTrigger) {
+      // 적응형 충격 감지
       const K_MAP = [2.5, 4.0, 6.0, 8.0];
-      const triggerK = K_MAP[filterStrength - 1];
-      const dynamicThreshold = Math.max(0.04, ambientRms * triggerK);
-      if(rms > dynamicThreshold && (now - lastStrikeAt) > 3000){
+      const threshold = Math.max(0.04, ambientRms * K_MAP[filterStrength - 1]);
+      if(rms > threshold && (now - lastStrikeAt) > 3000){
         strikeTs=now; lastStrikeAt=now;
         collecting=true; collectStartTs=strikeTs+500; collectEndTs=strikeTs+2000; collectedSnapshots=[];
         collectionMaxRms=0;
@@ -887,6 +931,7 @@ function analyzeLoop(){
         setStatus('listen','충격 감지 — 0.5s 무시 후 1.5s 분석','COLLECTING');
       }
     }
+    // !adaptiveTrigger: 연속 측정 모드 — 충격 감지 없이 주파수 직접 업데이트
   } else {
     collectionMaxRms = Math.max(collectionMaxRms, rms);
     if(now > collectEndTs){
@@ -931,8 +976,11 @@ function analyzeLoop(){
         setStatus('noise','측정 불안정 — 반복 측정해주세요','UNSTABLE');
       }else{
         setStatus('good','신호 검출','DETECTED');
+        if(!adaptiveTrigger){
+          updateResult(dispFreq);
+          if(btnSave) btnSave.disabled=false;
+        }
       }
-      // updateResult는 finalizeCollection()에서만 호출 — outer loop에서 호출하면 배경 소음이 결과를 오염시킴
     }
   }
 
@@ -1191,6 +1239,13 @@ function finalizeCollection(){
     setStatus('weak','결과 불안정 — 재측정 권장','UNSTABLE');
     beep(660, 80);
     toast('측정 완료 (Confidence '+Math.round(confidence)+'%). 재측정하거나 저장하세요.','warn');
+    if(!noiseReduction.enabled && !nrHintShown){
+      unstableCount++;
+      if(unstableCount>=2){
+        setTimeout(()=>toast('소음이 많으면 측정 보조 → 노이즈 저감을 켜보세요','warn',5000),3500);
+        nrHintShown=true;
+      }
+    }
   }
 }
 
@@ -1478,7 +1533,7 @@ function dateReviver(key, val){
 }
 function saveState(){
   try{
-    const data={version:1, flowEnabled, robots, simpleHistory, filterStrength};
+    const data={version:1, flowEnabled, robots, simpleHistory, filterStrength, adaptiveTrigger};
     localStorage.setItem('beltTension_v1', JSON.stringify(data, dateReplacer));
   }catch(e){}
 }
@@ -1492,6 +1547,9 @@ function loadState(){
     simpleHistory=data.simpleHistory||[];
     flowEnabled=data.flowEnabled??true;
     filterStrength=(data.filterStrength>=1&&data.filterStrength<=4)?data.filterStrength:2;
+    adaptiveTrigger=data.adaptiveTrigger===true;
+    setSwitch(swAdaptiveTrigger, adaptiveTrigger);
+    applyAdaptiveTriggerUI();
   }catch(e){}
 }
 
@@ -1686,7 +1744,7 @@ async function downloadPDF(){
     function drawColHeaders(yy){
       let hx=M;
       hColDefs.forEach(h=>{
-        doc.setFillColor(100,120,150); doc.setDrawColor(100,120,150); doc.setLineWidth(0.25);
+        doc.setFillColor(70,70,70); doc.setDrawColor(70,70,70); doc.setLineWidth(0.25);
         doc.rect(hx,yy,h.w,5.5,'FD');
         pdfText(doc,h.t,hx+h.w/2,yy+2.75,{align:'center',valign:'middle',size:6.5,bold:true,color:[255,255,255]});
         hx+=h.w;
@@ -1703,12 +1761,12 @@ async function downloadPDF(){
 
       if(y > 252){ doc.addPage(); y=14; }
 
-      /* 호기 배너 (다크 블루) */
-      doc.setFillColor(30,60,114); doc.setDrawColor(30,60,114); doc.setLineWidth(0.3);
+      /* 호기 배너 (다크 그레이) */
+      doc.setFillColor(30,30,30); doc.setDrawColor(30,30,30); doc.setLineWidth(0.3);
       doc.rect(M,y,tableW,7,'FD');
       pdfText(doc,unitStr,M+3,y+3.5,{size:9,bold:true,color:[255,255,255],valign:'middle'});
       pdfText(doc,robotJudge,M+tableW-3,y+3.5,{size:9,bold:true,
-        color:robotNG?[255,180,180]:robot.completedAt?[150,255,180]:[200,210,220],align:'right',valign:'middle'});
+        color:robotNG?[255,160,160]:robot.completedAt?[140,230,160]:[190,190,190],align:'right',valign:'middle'});
       y += 7;
 
       y = drawColHeaders(y);
@@ -1723,41 +1781,41 @@ async function downloadPDF(){
           if(y+rowH>285){ doc.addPage(); y=14; y=drawColHeaders(y); }
           const isOK=v.judge==='OK', isNG=v.judge==='NG';
           let rx=M;
-          doc.setDrawColor(200,205,215); doc.setLineWidth(0.25);
-          if(vi%2===0){ doc.setFillColor(245,248,252); doc.rect(rx,y,tableW,rowH,'F'); }
+          doc.setDrawColor(205,205,205); doc.setLineWidth(0.25);
+          if(vi%2===0){ doc.setFillColor(247,247,247); doc.rect(rx,y,tableW,rowH,'F'); }
 
           /* 벨트 ID */
           doc.rect(rx,y,TW.id,rowH);
-          pdfText(doc,slot.label,rx+TW.id/2,y+rowH/2,{size:7.5,bold:true,color:[40,40,40],align:'center',valign:'middle'});
+          pdfText(doc,slot.label,rx+TW.id/2,y+rowH/2,{size:7.5,bold:true,color:[30,30,30],align:'center',valign:'middle'});
           rx+=TW.id;
 
           /* 회차 */
           doc.rect(rx,y,TW.round,rowH);
-          pdfText(doc,(vi+1)+'회',rx+TW.round/2,y+rowH/2,{size:7,color:[60,60,60],align:'center',valign:'middle'});
+          pdfText(doc,(vi+1)+'회',rx+TW.round/2,y+rowH/2,{size:7,color:[80,80,80],align:'center',valign:'middle'});
           rx+=TW.round;
 
           /* 주파수 */
           doc.rect(rx,y,TW.freq,rowH);
-          pdfText(doc,v.freq.toFixed(1),rx+TW.freq/2,y+rowH/2,{size:7,color:[60,60,60],align:'center',valign:'middle'});
+          pdfText(doc,v.freq.toFixed(1),rx+TW.freq/2,y+rowH/2,{size:7,color:[80,80,80],align:'center',valign:'middle'});
           rx+=TW.freq;
 
           /* 장력 */
           doc.rect(rx,y,TW.tension,rowH);
           pdfText(doc,v.corrN.toFixed(1)+' N',rx+TW.tension/2,y+rowH/2,{
-            size:7,bold:isOK||isNG,color:isOK?[25,120,60]:isNG?[160,20,20]:[60,60,60],align:'center',valign:'middle'});
+            size:7,bold:isOK||isNG,color:isOK?[20,110,50]:isNG?[160,20,20]:[80,80,80],align:'center',valign:'middle'});
           rx+=TW.tension;
 
           /* 판정 */
-          if(isOK){ doc.setFillColor(220,245,225); doc.setDrawColor(80,180,100); doc.rect(rx,y,TW.judge,rowH,'FD'); }
-          else if(isNG){ doc.setFillColor(255,230,230); doc.setDrawColor(220,80,80); doc.rect(rx,y,TW.judge,rowH,'FD'); }
-          else{ doc.setFillColor(240,241,242); doc.setDrawColor(150,155,160); doc.rect(rx,y,TW.judge,rowH,'FD'); }
+          if(isOK){ doc.setFillColor(220,245,225); doc.setDrawColor(100,190,120); doc.rect(rx,y,TW.judge,rowH,'FD'); }
+          else if(isNG){ doc.setFillColor(255,228,228); doc.setDrawColor(210,70,70); doc.rect(rx,y,TW.judge,rowH,'FD'); }
+          else{ doc.setFillColor(242,242,242); doc.setDrawColor(180,180,180); doc.rect(rx,y,TW.judge,rowH,'FD'); }
           pdfText(doc,v.judge||'-',rx+TW.judge/2,y+rowH/2,{
-            size:7,bold:true,color:isOK?[25,120,60]:isNG?[160,20,20]:[130,130,130],align:'center',valign:'middle'});
+            size:7,bold:true,color:isOK?[20,110,50]:isNG?[160,20,20]:[140,140,140],align:'center',valign:'middle'});
           rx+=TW.judge;
 
           /* 시각 */
-          doc.setDrawColor(200,205,215); doc.rect(rx,y,TW.time,rowH);
-          pdfText(doc,v.time?fmtTime(v.time):'-',rx+TW.time/2,y+rowH/2,{size:6.5,color:[100,100,100],align:'center',valign:'middle'});
+          doc.setDrawColor(205,205,205); doc.rect(rx,y,TW.time,rowH);
+          pdfText(doc,v.time?fmtTime(v.time):'-',rx+TW.time/2,y+rowH/2,{size:6.5,color:[110,110,110],align:'center',valign:'middle'});
           y+=rowH;
         });
 
@@ -1766,16 +1824,20 @@ async function downloadPDF(){
           const rowH=7;
           if(y+rowH>285){ doc.addPage(); y=14; }
           const isOK=slot.avgJudge==='OK', isNG=slot.avgJudge==='NG';
-          const avgColor=isOK?[25,120,60]:isNG?[160,20,20]:[60,60,60];
-          if(isOK){ doc.setFillColor(220,245,225); doc.setDrawColor(80,180,100); }
-          else if(isNG){ doc.setFillColor(255,230,230); doc.setDrawColor(220,80,80); }
-          else{ doc.setFillColor(240,241,242); doc.setDrawColor(150,155,160); }
+          const avgColor=isOK?[20,110,50]:isNG?[160,20,20]:[80,80,80];
+          // 행 전체: 중립 회색 배경
+          doc.setFillColor(242,242,242); doc.setDrawColor(180,180,180);
           doc.setLineWidth(0.3); doc.rect(M,y,tableW,rowH,'FD');
-          pdfText(doc,slot.label+' 평균',M+TW.id/2,y+rowH/2,{size:7,bold:true,color:[40,40,40],align:'center',valign:'middle'});
-          pdfText(doc,'-',M+TW.id+TW.round/2,y+rowH/2,{size:7,color:[130,130,130],align:'center',valign:'middle'});
-          pdfText(doc,'-',M+TW.id+TW.round+TW.freq/2,y+rowH/2,{size:7,color:[130,130,130],align:'center',valign:'middle'});
+          // 판정 셀만 OK/NG 색상
+          const jx=M+TW.id+TW.round+TW.freq+TW.tension;
+          if(isOK){ doc.setFillColor(220,245,225); doc.setDrawColor(100,190,120); }
+          else if(isNG){ doc.setFillColor(255,228,228); doc.setDrawColor(210,70,70); }
+          doc.rect(jx,y,TW.judge,rowH,'FD');
+          pdfText(doc,slot.label+' 평균',M+TW.id/2,y+rowH/2,{size:7,bold:true,color:[30,30,30],align:'center',valign:'middle'});
+          pdfText(doc,'-',M+TW.id+TW.round/2,y+rowH/2,{size:7,color:[140,140,140],align:'center',valign:'middle'});
+          pdfText(doc,'-',M+TW.id+TW.round+TW.freq/2,y+rowH/2,{size:7,color:[140,140,140],align:'center',valign:'middle'});
           pdfText(doc,slot.average.toFixed(1)+' N',M+TW.id+TW.round+TW.freq+TW.tension/2,y+rowH/2,{size:8,bold:true,color:avgColor,align:'center',valign:'middle'});
-          pdfText(doc,slot.avgJudge||'-',M+TW.id+TW.round+TW.freq+TW.tension+TW.judge/2,y+rowH/2,{size:8,bold:true,color:avgColor,align:'center',valign:'middle'});
+          pdfText(doc,slot.avgJudge||'-',jx+TW.judge/2,y+rowH/2,{size:8,bold:true,color:avgColor,align:'center',valign:'middle'});
           y+=rowH;
         }
       }
@@ -1794,8 +1856,17 @@ async function downloadPDF(){
     /* ---- 저장 ---- */
     const st=new Date();
     const pn=n=>String(n).padStart(2,'0');
-    doc.save('belt_tension_report_'+st.getFullYear()+pn(st.getMonth()+1)+pn(st.getDate())+'_'+pn(st.getHours())+pn(st.getMinutes())+'.pdf');
-    toast('PDF 보고서를 다운로드했습니다.','ok');
+    const fname='belt_tension_report_'+st.getFullYear()+pn(st.getMonth()+1)+pn(st.getDate())+'_'+pn(st.getHours())+pn(st.getMinutes())+'.pdf';
+    const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if(isIOS){
+      const blob=doc.output('blob');
+      const url=URL.createObjectURL(blob);
+      window.open(url,'_blank');
+      toast('PDF가 새 탭에서 열렸습니다. 공유(↑) 버튼으로 저장하세요.','ok',5000);
+    }else{
+      doc.save(fname);
+      toast('PDF 보고서를 다운로드했습니다.','ok');
+    }
   }catch(e){
     console.error('PDF 생성 실패',e);
     toast('PDF 생성에 실패했습니다.','err');
@@ -1862,11 +1933,29 @@ btnPDF.addEventListener('click', downloadPDF);
 });
 
 /* ---------- 측정 보조 토글 ---------- */
+const swAdaptiveTrigger=$('swAdaptiveTrigger');
 const swNoise=$('swNoise'), swLock=$('swLock'),
       selLockWidth=$('selLockWidth'), lockWidthWrap=$('lockWidthWrap'),
       selFilterStrength=$('selFilterStrength'), filterStrengthRow=$('filterStrengthRow'),
       btnLearn=$('btnLearn'), learnRow=$('learnRow');
-function setSwitch(btn,on){ btn.setAttribute('aria-pressed', on?'true':'false'); }
+function setSwitch(btn,on){ if(btn) btn.setAttribute('aria-pressed', on?'true':'false'); }
+function applyAdaptiveTriggerUI(){
+  const waveSection=document.getElementById('waveformSection');
+  if(waveSection) waveSection.style.display=adaptiveTrigger?'':'none';
+  if(!adaptiveTrigger && guideActive){
+    guideActive=false;
+    if(swGuide) swGuide.setAttribute('aria-pressed','false');
+    const chip=document.getElementById('guideChip');
+    if(chip) chip.style.display='none';
+  }
+}
+swAdaptiveTrigger.addEventListener('click', ()=>{
+  adaptiveTrigger=!adaptiveTrigger;
+  setSwitch(swAdaptiveTrigger, adaptiveTrigger);
+  applyAdaptiveTriggerUI();
+  saveState();
+  toast(adaptiveTrigger ? '적응형 충격 감지 ON — 벨트를 튕겨주세요' : '연속 측정 모드 ON — 주파수가 바로바로 업데이트됩니다', adaptiveTrigger?'ok':'warn',4000);
+});
 function updateAssistInfo(){
   const el=document.getElementById('lockDesc');
   if(!el) return;
@@ -2015,9 +2104,13 @@ window.addEventListener('load', ()=>{
   }
 
   if(selFilterStrength) selFilterStrength.value=String(filterStrength);
+  setSwitch(swLock, targetLock.enabled);
+  if(lockWidthWrap) lockWidthWrap.style.display=targetLock.enabled?'inline-flex':'none';
   refreshBeltBtns('drive'); refreshBeltBtns('lifting');
   updateSlotProgress();
   renderRobots();
+  renderRobotProgress();
+  renderRobotQueuePreview();
   updateReportButtons();
   updateSessionSwitchRow();
   renderConfidenceRing(0);

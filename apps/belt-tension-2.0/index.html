@@ -104,17 +104,17 @@
       </div>
     </div>
 
-    <!-- 호기 번호 입력 -->
+    <!-- 호기 번호 입력 + 추가 버튼 (한 줄) -->
     <div class="session-field">
       <div class="session-label">호기 번호</div>
-      <input id="inUnit" class="flow-unit-input" type="text" inputmode="text" placeholder="예: 1 또는 A-01" autocomplete="off">
-    </div>
-
-    <!-- 호기 추가 버튼 -->
-    <div class="session-add-row">
-      <button id="btnAddRobot" class="btn-add-robot" type="button">
-        <span class="ico">+</span> 호기 추가
-      </button>
+      <div class="unit-input-row">
+        <span class="unit-prefix">PARKIE :</span>
+        <input id="inUnit" class="flow-unit-input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="예: 1" autocomplete="off">
+        <span class="unit-suffix">호기</span>
+        <button id="btnAddRobot" class="btn-add-robot" type="button">
+          <span class="ico">+</span> 호기 추가
+        </button>
+      </div>
     </div>
 
     <!-- 세션 전환 행 -->
@@ -122,48 +122,42 @@
       <span id="sessionSwitchInfo" class="session-switch-label"></span>
       <button class="btn btn-new-session" type="button" onclick="setStep(2);startMeasure();">측정 시작</button>
     </div>
+
+    <!-- 호기 대기열 미리보기 -->
+    <div id="robotQueuePreview" style="display:none;margin-top:12px;"></div>
   </section>
 
-  <!-- ===== HERO RESULT ===== -->
-  <section class="hero">
-    <div class="hero-head">
-      <span class="hero-label">보정 후 장력 · Corrected</span>
-      <span id="resJudgeWrap"><span id="resJudge">--</span></span>
-    </div>
-    <div class="hero-readout">
-      <span id="resTensionN">--</span>
-      <span class="hero-unit">N</span>
-    </div>
-    <div class="hero-kgf"><span id="resTensionKgf">--</span> kgf</div>
-
-    <div class="gauge" id="gaugeWrap">
-      <div class="gauge-scale">
-        <span id="gaugeLow">–</span>
-        <span class="mid">목표 범위</span>
-        <span id="gaugeHigh">–</span>
-      </div>
-      <div class="gauge-track">
-        <div id="gaugeZone" class="gauge-zone"></div>
-        <div id="gaugeMarker" class="gauge-marker"></div>
-      </div>
-      <div class="gauge-cap">목표 <b id="resTarget">--</b></div>
-    </div>
-  </section>
-
-  <!-- ===== STEP 2: LIVE ANALYSIS ===== -->
+  <!-- ===== STEP 2: 실시간 분석 + 보정 후 장력 (통합) ===== -->
   <section class="flow-step" id="fs2">
     <div class="panel-title">
       <span class="ko">실시간 분석</span>
       <span class="en">Live Analysis</span>
-      <span id="measureProgress" class="progress-chip" style="display:none;margin-left:auto;"></span>
     </div>
 
-    <!-- 모바일 전용: 현재 호기·슬롯 진행 미니 배너 -->
-    <div id="sessionMiniProgress" class="session-mini-progress" style="display:none;">
-      <span id="smpRobot" class="smp-robot"></span>
-      <span id="smpSlot"  class="smp-slot"></span>
-      <div  id="smpChips" class="smp-chips"></div>
+    <!-- 보정 후 장력 (compact) -->
+    <div class="tension-compact">
+      <div class="tension-compact-head">
+        <div class="tension-compact-readout">
+          <span id="resTensionN">--</span><span class="hero-unit">N</span>
+          <span class="hero-kgf"><span id="resTensionKgf">--</span> kgf</span>
+        </div>
+        <span id="resJudgeWrap"><span id="resJudge">--</span></span>
+      </div>
+      <div class="gauge" id="gaugeWrap">
+        <div class="gauge-scale">
+          <span id="gaugeLow">–</span>
+          <span class="mid">목표 범위</span>
+          <span id="gaugeHigh">–</span>
+        </div>
+        <div class="gauge-track">
+          <div id="gaugeZone" class="gauge-zone"></div>
+          <div id="gaugeMarker" class="gauge-marker"></div>
+        </div>
+        <div class="gauge-cap">목표 <b id="resTarget">--</b></div>
+      </div>
     </div>
+
+    <div class="merged-sep"></div>
 
     <div class="live-row">
       <div class="stat">
@@ -174,6 +168,9 @@
         <div class="stat-k">현재 주파수</div>
         <div class="stat-v accent"><span id="liveFreq">--</span><i>Hz</i></div>
       </div>
+    </div>
+
+    <div class="conf-signal-row">
       <div class="conf-ring">
         <svg class="ring-svg" viewBox="0 0 64 64">
           <circle class="ring-bg" cx="32" cy="32" r="26"/>
@@ -181,12 +178,10 @@
         </svg>
         <div class="conf-center"><span id="resConf">--</span><i>%</i></div>
       </div>
-      <div class="conf-label">Confidence</div>
-    </div>
-
-    <div class="signal">
-      <div class="signal-head"><span>신호 강도</span><span id="meterVal">0%</span></div>
-      <div class="meter-track"><div id="meterFill" class="meter-fill"></div></div>
+      <div class="signal">
+        <div class="signal-head"><span class="conf-label">CONFIDENCE</span><span>신호 강도 <b id="meterVal">0%</b></span></div>
+        <div class="meter-track"><div id="meterFill" class="meter-fill"></div></div>
+      </div>
     </div>
 
     <div class="live-foot">
@@ -246,6 +241,16 @@
       </div>
       <div class="toggle-ctrl">
         <button id="swSpectrum" class="switch" type="button" aria-pressed="false" aria-label="스펙트럼 표시"><span class="knob"></span></button>
+      </div>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name">적응형 충격 감지</div>
+        <div class="toggle-desc">ON: 주변 소음에 맞춰 임계값 자동 조정 (권장) · OFF: 고정 임계값 0.08 — v1 방식</div>
+      </div>
+      <div class="toggle-ctrl">
+        <button id="swAdaptiveTrigger" class="switch" type="button" aria-pressed="false" aria-label="적응형 충격 감지"><span class="knob"></span></button>
       </div>
     </div>
 

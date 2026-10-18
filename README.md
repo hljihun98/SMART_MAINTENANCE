@@ -10,6 +10,7 @@
 | 벨트 장력계 | `apps/belt-tension/` | 마이크 음파 분석으로 컨베이어 벨트 장력(N) 측정 | 사용 가능 |
 | ROBOSTOCK | `apps/test/` | 로봇 부품 재고·BOM·공수산정·작업인원 일정 통합 관리 | 사용 가능 |
 | 벨트 장력계 2.0 | `apps/belt-tension-2.0/` | 음파 FFT 분석으로 벨트 장력(N) 측정 · 노이즈 저감 · CSV/PDF 보고서 | 사용 가능 |
+| Torque Tak! | `apps/torque-tak/` | 볼트 권장 체결토크 계산 · 체결부 성립 검토(VDI 2230) | 사용 가능 |
 
 ## 기술 스택
 

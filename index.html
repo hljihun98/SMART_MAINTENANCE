@@ -281,7 +281,7 @@
         <img src="./logo.png" alt="HL Robotics" class="logo-mark">
       </a>
       <span class="sep"></span>
-      <span class="ctx">SMART Maintenance Platform <span class="vpill" id="ver-pill">v2.0.0 · 26.10.18</span></span>
+      <span class="ctx">SMART Maintenance Platform <span class="vpill" id="ver-pill">v26.10.18</span></span>
       <span class="when" id="when"></span>
     </div>
   </div>
@@ -312,6 +312,7 @@
 
 <script>
   /* ── 플랫폼 버전 ── 배포(main Merge) 때 이 한 곳만 고치면 상단 배지·푸터가 함께 바뀐다.
+     화면에는 날짜 버전만 표시한다. num은 git 번호 태그와 맞추기 위한 기록용.
      num: 번호 버전(v주.부.수), date: 배포일(YY.MM.DD) — git 태그 v2.0.0 / v26.10.18 과 맞춘다 */
   var VERSION = { num:'v2.0.0', date:'26.10.18' };
 
@@ -368,8 +369,8 @@
 
     /* 앱 개수 뱃지와 푸터 버전 텍스트 갱신 */
     document.getElementById('app-count').textContent = '앱 '+APPS.length+'개';
-    document.getElementById('ver-pill').textContent = VERSION.num+' · '+VERSION.date;
-    document.getElementById('foot-ver').textContent = VERSION.num+' ('+VERSION.date+') · '+APPS.length+' apps';
+    document.getElementById('ver-pill').textContent = 'v'+VERSION.date;
+    document.getElementById('foot-ver').textContent = 'v'+VERSION.date+' · '+APPS.length+' apps';
 
     /* 우측 상단 날짜·시간 실시간 표시 (30초마다 갱신) */
     var el = document.getElementById('when');

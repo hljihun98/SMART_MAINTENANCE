@@ -45,4 +45,4 @@
 
 - 버전별 상세 변경 내역은 [`CHANGELOG.md`](CHANGELOG.md)를 참고하세요.
 - 이전 버전은 GitHub **Tags** 메뉴 또는 `git checkout <태그>`로 열어볼 수 있습니다.
-- 포털 화면의 버전 표시(상단 배지·푸터)는 루트 `index.html`의 `VERSION` 상수 한 곳만 수정합니다. 배포일(`date`)은 Merge하는 날로 맞춥니다.
+- 포털 화면에는 날짜 버전만 표시됩니다(예: `v26.10.18`). 루트 `index.html`의 `VERSION` 상수 한 곳만 수정하며, 배포일(`date`)은 Merge하는 날로 맞춥니다.

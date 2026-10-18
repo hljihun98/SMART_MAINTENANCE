@@ -378,8 +378,9 @@
   /* ── 데이터 관리 ── */
   var APP_KEYS = [
     { key:'parkie_sensor_v3',   label:'센서 보고서',     desc:'센서 기록·첨부 사진' },
-    { key:'beltTension_v1',     label:'벨트 장력계',     desc:'벨트 측정 기록·로봇 데이터' },
-    { key:'robostock_state_v1', label:'ROBOSTOCK',       desc:'재고·입출고·일정·계정 변경분' }
+    { key:'beltTension_v1',     label:'벨트 장력계 · 2.0', desc:'벨트 측정 기록·로봇 데이터 (1.0·2.0 공용)' },
+    { key:'robostock_state_v1', label:'ROBOSTOCK',       desc:'재고·입출고·일정·계정 변경분' },
+    { key:'torque-tak/v2',      label:'Torque Tak!',     desc:'마지막 입력 설정 (볼트 사양·체결 조건)' }
   ];
   var LS_LIMIT = 5 * 1024 * 1024; /* localStorage 일반적 한도 5 MB */
 

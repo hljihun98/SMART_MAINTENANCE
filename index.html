@@ -180,6 +180,7 @@
   }
   .pill.ok{color:var(--green);background:var(--green-bg);}  /* 사용 가능 상태 */
   .pill.dev{color:var(--muted);background:#F1F3F5;}          /* 개발 중 상태 */
+  .pill.test{color:#B45309;background:#FEF3C7;}              /* 테스트 중 상태 (열 수는 있음) */
   .pill svg{width:13px;height:13px;stroke:currentColor;stroke-width:2.2;fill:none;stroke-linecap:round;stroke-linejoin:round;}
   /* "열기 →" 텍스트: 호버 시 화살표 간격이 넓어지는 애니메이션 */
   .open{
@@ -316,7 +317,7 @@
 
   /* ── 등록된 앱 목록 ──
      각 항목: href(경로), accent(강조색), icon(SVG 패스), tag(카테고리), name(앱 이름),
-              desc(설명), ready(사용 가능 여부) */
+              desc(설명), ready(사용 가능 여부), status('test'면 열 수 있지만 '테스트 중'으로 표시) */
   var APPS = [
     { href:'./apps/sensor-report/', accent:'#2563EB', accentBg:'#EAF1FE',
       icon:'<path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M5 8V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2"/><path d="M8 13l2.5 3 2-2.5L16 18"/>',
@@ -332,7 +333,7 @@
       tag:'체결토크 N·m', name:'Torque Tak!', desc:'볼트 사양과 체결 조건으로 권장 체결토크를 계산하고, 나사산 뽑힘·좌면 압괴 등 체결부 성립 여부를 검토합니다.', ready:true },
     { href:'./apps/test/', accent:'#7C3AED', accentBg:'#F1ECFE',
       icon:'<path d="M9 3h6"/><path d="M10 3v6l-4.5 8a2 2 0 0 0 1.8 3h9.4a2 2 0 0 0 1.8-3L14 9V3"/><path d="M7 14h10"/>',
-      tag:'재고 관리', name:'ROBOSTOCK', desc:'로봇 부품 재고·BOM·입출고·공수·작업 일정을 통합 관리합니다. \d (ID: R00000 PW: test12!@)', ready:true }
+      tag:'재고 관리', name:'ROBOSTOCK', desc:'로봇 부품 재고·BOM·입출고·공수·작업 일정을 통합 관리합니다. \d (ID: R00000 PW: test12!@)', ready:true, status:'test' }
   ];
 
   /* 즉시실행 함수(IIFE): 페이지 로드 시 앱 카드 그리드를 동적으로 렌더링 */
@@ -348,9 +349,9 @@
       /* 개발 중 앱의 "열기" 링크는 회색으로 처리 */
       var openS = a.ready ? '' : ' style="color:#64748B;"';
       /* 사용 가능 여부에 따라 배지 HTML 결정 */
-      var pill = a.ready
-        ? '<span class="pill ok">'+CHECK+'사용 가능</span>'
-        : '<span class="pill dev">개발 중</span>';
+      var pill = !a.ready            ? '<span class="pill dev">개발 중</span>'
+               : a.status === 'test' ? '<span class="pill test">테스트 중</span>'
+               :                       '<span class="pill ok">'+CHECK+'사용 가능</span>';
       /* CSS 커스텀 속성으로 각 카드의 강조색을 개별 설정 */
       return '<a class="card" href="'+a.href+'" style="--accent:'+a.accent+';--accent-bg:'+a.accentBg+';">'+
         '<div class="card-top">'+

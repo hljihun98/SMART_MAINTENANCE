@@ -141,6 +141,7 @@ body{
 }
 .pill.ok{color:var(--green);background:var(--green-bg);}
 .pill.dev{color:var(--muted);background:#F1F3F5;}
+.pill.test{color:#B45309;background:#FEF3C7;}
 .pill svg{width:13px;height:13px;stroke:currentColor;stroke-width:2.2;fill:none;stroke-linecap:round;stroke-linejoin:round;}
 .open{
   font-size:13px;font-weight:600;color:var(--blue);

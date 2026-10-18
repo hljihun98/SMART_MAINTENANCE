@@ -6,9 +6,9 @@
 
 | 앱 | 경로 | 설명 | 상태 |
 |---|---|---|---|
-| 센서 보고서 | `apps/sensor-report/` | PARKIE 로봇 진동·온도 센서 점검 및 PDF 보고서 생성 | 사용 가능 |
+| 센서 보고서 | `apps/sensor-report/` | PARKIE 로봇 라이다·카메라 센서 점검 및 PDF 보고서 생성 | 사용 가능 |
 | 벨트 장력계 | `apps/belt-tension/` | 마이크 음파 분석으로 컨베이어 벨트 장력(N) 측정 | 사용 가능 |
-| ROBOSTOCK | `apps/test/` | 로봇 부품 재고·BOM·공수산정·작업인원 일정 통합 관리 | 사용 가능 |
+| ROBOSTOCK | `apps/test/` | 로봇 부품 재고·BOM·공수산정·작업인원 일정 통합 관리 | 테스트 중 |
 | 벨트 장력계 2.0 | `apps/belt-tension-2.0/` | 음파 FFT 분석으로 벨트 장력(N) 측정 · 노이즈 저감 · CSV/PDF 보고서 | 사용 가능 |
 | Torque Tak! | `apps/torque-tak/` | 볼트 권장 체결토크 계산 · 체결부 성립 검토(VDI 2230) | 사용 가능 |
 
@@ -16,17 +16,32 @@
 
 - 순수 HTML / CSS / JavaScript (빌드 도구 없음)
 - Web Audio API — 마이크 입력 및 FFT 주파수 분석
-- jsPDF — 클라이언트 측 PDF 생성
-- Chart.js — 실시간 파형 차트
-- SheetJS — Excel 내보내기
-- localStorage — 데이터 영속성
+- jsPDF 2.5.1 — 클라이언트 측 PDF 생성 (`assets/vendor/`에 포함)
+- SheetJS 0.20.3 — Excel 가져오기·내보내기 (`assets/vendor/`에 포함)
+- localStorage — 앱 상태·설정 영속성
+- IndexedDB — 첨부 사진 저장 (센서 보고서, ROBOSTOCK)
 
 ## 공유 리소스
 
 | 파일 | 설명 |
 |---|---|
-| `index.html` | 앱 목록 포털 (APPS 배열 하나만 편집하면 카드·카운트·푸터 자동 갱신) |
+| `index.html` | 앱 목록 포털 (APPS 배열 하나만 편집하면 카드·카운트·푸터 자동 갱신) + 데이터 관리 |
 | `logo.png` | HL Robotics 공식 로고 (모든 앱이 `../../logo.png`로 참조) |
+| `assets/vendor/` | 외부 라이브러리 사본 — CDN이 막히거나 끊겨도 동작하도록 저장소에 포함. 버전을 올릴 때는 파일명의 버전도 함께 바꾼다 |
+| `assets/js/utils.js`, `assets/css/common.css` | 공통 유틸·스타일 (현재 벨트 장력계 2.0이 사용) |
+
+## 저장 데이터
+
+모든 앱이 같은 출처(origin)라 localStorage 한도(약 5 MB)를 나눠 씁니다. 그래서 큰 데이터(사진)는 IndexedDB에 따로 저장합니다.
+새 앱이 데이터를 저장하면 포털 `index.html`의 `APP_KEYS`에 키를 등록해야 **데이터 관리**에서 용량 확인·초기화가 됩니다.
+
+| 앱 | localStorage 키 | IndexedDB |
+|---|---|---|
+| 센서 보고서 | `parkie_sensor_v3` (손상 시 백업 `parkie_sensor_v3_corrupt_backup`) | `parkie_sensor_photos` |
+| 벨트 장력계 | `beltTension_classic_v1` | — |
+| 벨트 장력계 2.0 | `beltTension_v1` | — |
+| ROBOSTOCK | `robostock_state_v1` (손상 시 백업 `robostock_state_v1_corrupt_backup`) | `robostock_images` |
+| Torque Tak! | `torque-tak/v2` | — |
 
 ## 앱 추가 방법
 

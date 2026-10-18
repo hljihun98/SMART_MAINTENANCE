@@ -322,7 +322,7 @@
   var APPS = [
     { href:'./apps/sensor-report/', accent:'#2563EB', accentBg:'#EAF1FE',
       icon:'<path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M5 8V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2"/><path d="M8 13l2.5 3 2-2.5L16 18"/>',
-      tag:'라이다 · 카메라', name:'센서 보고서', desc:'PARKIE 로봇의 진동·온도 센서 점검 데이터를 수집해 PDF 보고서를 생성합니다.', ready:true },
+      tag:'라이다 · 카메라', name:'센서 보고서', desc:'PARKIE 로봇의 라이다·카메라 센서 점검 결과와 사진을 정리해 PDF 보고서를 생성합니다.', ready:true },
     { href:'./apps/belt-tension/', accent:'#0EA5A4', accentBg:'#E3F6F5',
       icon:'<circle cx="6" cy="12" r="3"/><circle cx="18" cy="12" r="3"/><path d="M6 9h12"/><path d="M6 15h12"/>',
       tag:'장력 N', name:'벨트 장력계', desc:'컨베이어 벨트의 장력을 측정하고 기준값과 비교합니다.', ready:true },
@@ -334,7 +334,7 @@
       tag:'체결토크 N·m', name:'Torque Tak!', desc:'볼트 사양과 체결 조건으로 권장 체결토크를 계산하고, 나사산 뽑힘·좌면 압괴 등 체결부 성립 여부를 검토합니다.', ready:true },
     { href:'./apps/test/', accent:'#7C3AED', accentBg:'#F1ECFE',
       icon:'<path d="M9 3h6"/><path d="M10 3v6l-4.5 8a2 2 0 0 0 1.8 3h9.4a2 2 0 0 0 1.8-3L14 9V3"/><path d="M7 14h10"/>',
-      tag:'재고 관리', name:'ROBOSTOCK', desc:'로봇 부품 재고·BOM·입출고·공수·작업 일정을 통합 관리합니다. \d (ID: R00000 PW: test12!@)', ready:true, status:'test' }
+      tag:'재고 관리', name:'ROBOSTOCK', desc:'로봇 부품 재고·BOM·입출고·공수·작업 일정을 통합 관리합니다.<br>(ID: R00000 PW: test12!@)', ready:true, status:'test' }
   ];
 
   /* 즉시실행 함수(IIFE): 페이지 로드 시 앱 카드 그리드를 동적으로 렌더링 */
@@ -382,14 +382,23 @@
     tick(); setInterval(tick, 30000);
   })();
 
-  /* ── 데이터 관리 ── */
+  /* ── 데이터 관리 ──
+     key:   앱 상태를 담는 localStorage 키
+     extra: 같은 앱이 함께 쓰는 보조 localStorage 키(백업·옛 버전 등) — 크기 합산·초기화에 포함
+     idb:   사진 등 큰 데이터를 담는 IndexedDB 데이터베이스 이름 — 초기화 시 통째로 삭제 */
   var APP_KEYS = [
-    { key:'parkie_sensor_v3',   label:'센서 보고서',     desc:'센서 기록·첨부 사진' },
-    { key:'beltTension_v1',     label:'벨트 장력계 · 2.0', desc:'벨트 측정 기록·로봇 데이터 (1.0·2.0 공용)' },
-    { key:'robostock_state_v1', label:'ROBOSTOCK',       desc:'재고·입출고·일정·계정 변경분' },
-    { key:'torque-tak/v2',      label:'Torque Tak!',     desc:'마지막 입력 설정 (볼트 사양·체결 조건)' }
+    { key:'parkie_sensor_v3', extra:['parkie_sensor_v3_corrupt_backup'], idb:'parkie_sensor_photos',
+      label:'센서 보고서', desc:'센서 기록·첨부 사진' },
+    { key:'beltTension_classic_v1', label:'벨트 장력계',     desc:'측정 기록' },
+    { key:'beltTension_v1',         label:'벨트 장력계 2.0', desc:'벨트 측정 기록·로봇 데이터·측정 설정' },
+    { key:'robostock_state_v1', extra:['robostock_state_v1_corrupt_backup'], idb:'robostock_images',
+      label:'ROBOSTOCK', desc:'재고·입출고·일정·계정 변경분·첨부 사진' },
+    { key:'torque-tak/v2', extra:['torque-tak/v1'], label:'Torque Tak!', desc:'마지막 입력 설정 (볼트 사양·체결 조건)' }
   ];
-  var LS_LIMIT = 5 * 1024 * 1024; /* localStorage 일반적 한도 5 MB */
+  var LS_LIMIT = 5 * 1024 * 1024; /* localStorage 일반적 한도 5 MB (모든 앱이 나눠 씀) */
+  var idbBytes = {};              /* IndexedDB 이름 → 사진 저장 용량(byte). 비동기로 채운다 */
+
+  function lsKeys(a){ return [a.key].concat(a.extra || []); }
 
   function getBytes(key){
     try {
@@ -399,40 +408,99 @@
     } catch(e){ return 0; }
   }
 
+  function appLsBytes(a){
+    return lsKeys(a).reduce(function(s,k){ return s + getBytes(k); }, 0);
+  }
+
   function fmtBytes(b){
     if(b >= 1024 * 1024) return (b / 1024 / 1024).toFixed(2) + ' MB';
     if(b >= 1024)        return (b / 1024).toFixed(1) + ' KB';
     return b + ' B';
   }
 
+  /* IndexedDB 용량 측정 — 이미 있는 DB만 연다.
+     없는 이름으로 indexedDB.open()을 부르면 빈 DB(version 1)가 생겨서, 앱이 나중에 같은 version으로
+     열 때 onupgradeneeded가 불리지 않아 저장소가 만들어지지 않는다. 그래서 databases()로 존재를 먼저 확인하고,
+     이 API가 없는 브라우저에서는 용량 표시를 건너뛴다(초기화는 deleteDatabase라 그대로 동작). */
+  function measureIdb(){
+    if(!window.indexedDB || typeof indexedDB.databases !== 'function') return;
+    indexedDB.databases().then(function(list){
+      var names = list.map(function(d){ return d.name; });
+      APP_KEYS.forEach(function(a){
+        if(!a.idb) return;
+        if(names.indexOf(a.idb) < 0){ idbBytes[a.idb] = 0; return; }
+        sumIdb(a.idb, function(bytes){ idbBytes[a.idb] = bytes; renderMgmt(); });
+      });
+      renderMgmt();
+    }).catch(function(){});
+  }
+
+  function sumIdb(name, done){
+    var req = indexedDB.open(name);
+    req.onerror = function(){ done(0); };
+    req.onsuccess = function(){
+      var db = req.result, total = 0;
+      db.onversionchange = function(){ db.close(); };
+      var stores = Array.prototype.slice.call(db.objectStoreNames);
+      if(!stores.length){ db.close(); done(0); return; }
+      var tx = db.transaction(stores, 'readonly');
+      stores.forEach(function(s){
+        tx.objectStore(s).openCursor().onsuccess = function(e){
+          var cur = e.target.result;
+          if(!cur) return;
+          total += valueBytes(cur.value);
+          cur.continue();
+        };
+      });
+      tx.oncomplete = function(){ db.close(); done(total); };
+      tx.onerror = tx.onabort = function(){ db.close(); done(total); };
+    };
+  }
+
+  /* 저장값의 대략적 크기 — Blob/문자열을 직접 담든, 객체 안에 담든 합산한다 */
+  function valueBytes(v){
+    if(!v) return 0;
+    if(typeof Blob !== 'undefined' && v instanceof Blob) return v.size;
+    if(typeof v === 'string') return v.length;
+    if(v instanceof ArrayBuffer) return v.byteLength;
+    if(typeof v === 'object'){
+      var n = 0;
+      for(var k in v){ if(Object.prototype.hasOwnProperty.call(v,k)) n += valueBytes(v[k]); }
+      return n;
+    }
+    return 0;
+  }
+
   function renderMgmt(){
-    var active = APP_KEYS.map(function(a){
-      var bytes = getBytes(a.key);
-      return bytes > 0 ? { key:a.key, label:a.label, desc:a.desc, bytes:bytes } : null;
+    var active = APP_KEYS.map(function(a, i){
+      var ls  = appLsBytes(a);
+      var idb = a.idb ? (idbBytes[a.idb] || 0) : 0;
+      return (ls + idb) > 0 ? { idx:i, label:a.label, desc:a.desc, ls:ls, idb:idb } : null;
     }).filter(Boolean);
 
     var sec = document.getElementById('mgmt-section');
     if(!active.length){ sec.innerHTML = ''; return; }
 
-    var totalBytes = active.reduce(function(s,a){ return s + a.bytes; }, 0);
-    var labelList  = active.map(function(a){ return '· ' + a.label; }).join('\n');
+    var totalBytes = active.reduce(function(s,a){ return s + a.ls + a.idb; }, 0);
 
     var rows = active.map(function(a){
-      var pct  = Math.min(100, (a.bytes / LS_LIMIT) * 100);
+      /* 게이지는 5 MB 한도를 나눠 쓰는 localStorage 기준. 사진(IndexedDB)은 한도가 훨씬 커서 따로 표시 */
+      var pct  = Math.min(100, (a.ls / LS_LIMIT) * 100);
       var barClass = pct >= 80 ? 'danger' : pct >= 50 ? 'warn' : '';
+      var photo = a.idb > 0 ? ' · 사진 ' + fmtBytes(a.idb) + ' (별도 저장소)' : '';
       return '<div class="mgmt-row">'
         + '<div class="mgmt-left">'
           + '<div class="mgmt-title-row">'
             + '<span class="mgmt-name">' + a.label + '</span>'
-            + '<span class="mgmt-size">' + fmtBytes(a.bytes) + '</span>'
+            + '<span class="mgmt-size">' + fmtBytes(a.ls + a.idb) + '</span>'
           + '</div>'
           + '<div class="mgmt-bar-wrap">'
             + '<div class="mgmt-bar-bg"><div class="mgmt-bar-fill ' + barClass + '" style="width:' + pct.toFixed(1) + '%"></div></div>'
             + '<span class="mgmt-bar-pct">' + pct.toFixed(1) + '%</span>'
           + '</div>'
-          + '<div class="mgmt-desc">' + a.desc + '</div>'
+          + '<div class="mgmt-desc">' + a.desc + photo + '</div>'
         + '</div>'
-        + '<button class="reset-btn" onclick="resetAppData(\'' + a.key + '\',\'' + a.label + '\')">초기화</button>'
+        + '<button class="reset-btn" onclick="resetAppData(' + a.idx + ')">초기화</button>'
       + '</div>';
     }).join('');
 
@@ -450,34 +518,61 @@
       + '<div class="mgmt-wrap">' + allRow + rows + '</div>';
   }
 
-  function resetAppData(key, label){
-    if(!confirm('[' + label + '] 저장 데이터를 초기화하시겠습니까?\n현재 브라우저에 저장된 데이터가 삭제됩니다.\n이 작업은 되돌릴 수 없습니다.')) return;
+  /* 앱 하나의 저장 데이터 삭제. 사진 DB는 앱 탭이 열려 있으면 삭제가 보류(blocked)될 수 있어 결과를 콜백으로 알린다 */
+  function clearApp(a, done){
+    lsKeys(a).forEach(function(k){ localStorage.removeItem(k); });
+    if(!a.idb || !window.indexedDB){ done(true); return; }
+    var req = indexedDB.deleteDatabase(a.idb), settled = false;
+    function finish(ok){ if(settled) return; settled = true; idbBytes[a.idb] = 0; done(ok); }
+    req.onsuccess = function(){ finish(true); };
+    req.onerror   = function(){ finish(false); };
+    req.onblocked = function(){ finish(false); };
+  }
+
+  function resetAppData(idx){
+    var a = APP_KEYS[idx];
+    if(!a) return;
+    if(!confirm('[' + a.label + '] 저장 데이터를 초기화하시겠습니까?\n현재 브라우저에 저장된 데이터가 삭제됩니다.\n이 작업은 되돌릴 수 없습니다.')) return;
     try {
-      localStorage.removeItem(key);
-      showPortalToast(label + ' 데이터가 초기화되었습니다');
+      clearApp(a, function(ok){
+        showPortalToast(ok ? a.label + ' 데이터가 초기화되었습니다'
+                           : a.label + ' 사진 삭제가 보류되었습니다 — 앱 탭을 닫고 다시 시도하세요');
+        renderMgmt(); measureIdb();
+      });
     } catch(e){ alert('초기화 실패: ' + e.message); }
     renderMgmt();
   }
 
   function resetAllData(){
-    var active = APP_KEYS.filter(function(a){ return getBytes(a.key) > 0; });
+    var active = APP_KEYS.filter(function(a){ return appLsBytes(a) > 0 || (a.idb && idbBytes[a.idb] > 0); });
     var labelList = active.map(function(a){ return '· ' + a.label; }).join('\n');
     if(!confirm('다음 앱의 저장 데이터를 모두 삭제하시겠습니까?\n\n' + labelList + '\n\n이 작업은 되돌릴 수 없습니다.')) return;
     try {
-      active.forEach(function(a){ localStorage.removeItem(a.key); });
-      showPortalToast('전체 앱 데이터가 초기화되었습니다');
+      var left = active.length, allOk = true;
+      active.forEach(function(a){
+        clearApp(a, function(ok){
+          allOk = allOk && ok;
+          if(--left > 0) return;
+          showPortalToast(allOk ? '전체 앱 데이터가 초기화되었습니다'
+                                : '일부 사진 삭제가 보류되었습니다 — 앱 탭을 닫고 다시 시도하세요');
+          renderMgmt(); measureIdb();
+        });
+      });
     } catch(e){ alert('초기화 실패: ' + e.message); }
     renderMgmt();
   }
 
+  var portalToastTimer = null;
   function showPortalToast(msg){
     var t = document.getElementById('portal-toast');
     t.textContent = msg;
     t.classList.add('show');
-    setTimeout(function(){ t.classList.remove('show'); }, 3000);
+    clearTimeout(portalToastTimer);
+    portalToastTimer = setTimeout(function(){ t.classList.remove('show'); }, 3000);
   }
 
   renderMgmt();
+  measureIdb();
 </script>
 </body>
 </html>

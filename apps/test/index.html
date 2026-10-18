@@ -7,13 +7,14 @@
 ║  새로운 AI 세션에서 작업 시 반드시 이 블록을 먼저 확인하세요.               ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║  PROJECT   : ROBOSTOCK 로봇 제작 재고관리 시스템                             ║
-║  VERSION   : v0.8.20 (2026-06-11)                                            ║
+║  VERSION   : v0.10.0 (2026-10-18)                                            ║
 ║  VERSION FORMAT: Semantic Versioning (vMAJOR.MINOR.PATCH)                    ║
 ║    현재 운영: 아직 배포 전 개발 단계이므로 0.x.y 유지                        ║
 ║    PATCH  : 버그 수정·문서화·작은 UI/내부 개선                               ║
 ║    MINOR  : 호환성 유지 기능 추가 / MAJOR : 호환성 깨지는 변경               ║
 ║  STACK     : 분리된 HTML/CSS/JS 파일 구조 · localStorage 기반 저장            ║
-║              외부 의존성은 XLSX.js(CDN) 1개                                  ║
+║              사진 본문은 IndexedDB('robostock_images') — js/images.js        ║
+║              XLSX.js 0.20.3 은 저장소 ../../assets/vendor 에 포함(CDN 없음)  ║
 ║  LOGIN     : R00066 / wlgns12!@ → 관리자(김관리)                             ║
 ║              R00065 / xptmxm12!@ → 일반사용자(이사용)                        ║
 ║              R00000 / xptmxm12!@ → 일반사용자(김테스트)                      ║
@@ -26,8 +27,9 @@
 ║                    perUnit,spec,level(0~6),rev,parentPartNo}                 ║
 ║  ioLogs[]       : {ts,type(IN/OUT),robot,partNo,partName,qty,unit,memo,      ║
 ║                    status,issue,userId,userName,photos[]}                    ║
+║  imgs[]/photos[]: 이미지 참조 id('img_…') — 본문은 IndexedDB                 ║
 ║  laborModules{} : {PARKIE:[{name,tasks:[{name,note,hours,workers}]}],…}      ║
-║  laborSettings  : {hpd,wk,startDate}                                        ║
+║  laborSettings  : {hpd,wk,startDate,done{PARKIE,CARRIE,GOALIE}}             ║
 ║  robotGoals{}   : {PARKIE,CARRIE,GOALIE}  ← 목표 대수 (달력과 무관)         ║
 ║  asmEntries{}   : {PARKIE:{from,to},…}    ← 호기별 제작 범위 (공수산정달력) ║
 ║  technicians[]  : {id,name,userId,skill,color}                               ║
@@ -58,10 +60,13 @@
 ║  9. 버전은 changelogData 배열 최신 ver 값에서 자동 계산 (하드코딩 금지)     ║
 ║  10. 새 기능 추가/버그수정 시 changelogData에 항목 추가 필수                ║
 ║  11. 테크니션(technician) → UI 표시는 "작업 인원"으로 통일                  ║
+║  12. 사용자 입력을 innerHTML 에 넣을 때 escHtml, 인라인 핸들러 인자는 jsArg ║
+║  13. 날짜 문자열은 localDateStr/parseLocalDate (toISOString 금지: KST -1일) ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║  CHANGELOG                                                                   ║
 ║  ─────────────────────────────────────────────────────────────────────────  ║
 ║  전체 이력의 정본은 js/data.js 의 changelogData 배열을 따릅니다.             ║
+║  [2026-10-18] v0.10.0  감사 결과 반영: 저장/초기화·사진 IndexedDB·XSS 등     ║
 ║  [2026-06-11] v0.8.20  반폭 데스크톱에서는 메뉴 자동 순환 비활성화          ║
 ║  [2026-06-11] v0.8.19  반폭 데스크톱 개발 로그 카드/관리자 라벨 정리        ║
 ║  [2026-06-11] v0.8.18  SemVer 정비, README/AI 로그 블록 최신화              ║
@@ -521,9 +526,6 @@
             </div>
           </div>
           <div class="bg">
-            <input type="text" id="tech-book-task" class="fi" placeholder="예약 작업" style="width:150px;padding:5px 10px;font-size:12px">
-            <input type="text" id="tech-book-memo" class="fi" placeholder="작업 수행 메모" style="width:180px;padding:5px 10px;font-size:12px">
-            <button class="btn b-pr b-sm" onclick="submitDragBook()">드래그 예약 등록</button>
             <button class="btn b-wa b-sm" onclick="openMo('mo-delay')">특이사항 기록</button>
           </div>
         </div>
@@ -598,6 +600,7 @@
               <option value="LOGIN">🔑 로그인</option>
               <option value="IN">📥 입고</option>
               <option value="OUT">📤 출고</option>
+              <option value="IO">🔁 입출고(일괄)</option>
               <option value="BOM">📦 BOM</option>
               <option value="LABOR">🏭 공수산정</option>
               <option value="TECH">👤 작업인원</option>
@@ -1022,34 +1025,11 @@
     </div>
     <div class="f2">
       <div class="fl"><label>시작 시간</label>
-        <select class="fs" id="tb-start">
-          <option value="8">8:00</option>
-          <option value="9">9:00</option>
-          <option value="10">10:00</option>
-          <option value="11">11:00</option>
-          <option value="12">12:00</option>
-          <option value="13">13:00</option>
-          <option value="14">14:00</option>
-          <option value="15">15:00</option>
-          <option value="16">16:00</option>
-          <option value="17">17:00</option>
-          <option value="18">18:00</option>
-        </select>
+        <!-- 옵션은 열 때 fillSlotSelect() 가 30분 슬롯 값(0=07:00 … 22=18:00)으로 채움 -->
+        <select class="fs" id="tb-start"></select>
       </div>
       <div class="fl"><label>종료 시간</label>
-        <select class="fs" id="tb-end">
-          <option value="9">9:00</option>
-          <option value="10" selected>10:00</option>
-          <option value="11">11:00</option>
-          <option value="12">12:00</option>
-          <option value="13">13:00</option>
-          <option value="14">14:00</option>
-          <option value="15">15:00</option>
-          <option value="16">16:00</option>
-          <option value="17">17:00</option>
-          <option value="18">18:00</option>
-          <option value="19">19:00</option>
-        </select>
+        <select class="fs" id="tb-end"></select>
       </div>
     </div>
     <div class="fl"><label>작업 유형</label>
@@ -1133,6 +1113,8 @@
 <script defer src="js/auth.js"></script>
 <script defer src="js/navigation.js"></script>
 <script defer src="js/helpers.js"></script>
+<!-- 이미지 저장소(IndexedDB 'robostock_images')·리사이즈·렌더 헬퍼 -->
+<script defer src="js/images.js"></script>
 <script defer src="js/dashboard.js"></script>
 <script defer src="js/calendar.js"></script>
 <script defer src="js/bom.js"></script>
@@ -1151,7 +1133,8 @@
 <script defer src="js/excel.js"></script>
 <!-- 영속 저장: 모든 데이터 정의 이후 가장 마지막에 로드 -->
 <script defer src="js/persistence.js"></script>
-<!-- ===== 외부 라이브러리: XLSX (엑셀 입출력) — 앱 초기 구동을 막지 않도록 비동기 로드 ===== -->
-<script async src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- ===== XLSX 0.20.3 (엑셀 입출력) — 저장소 포함 파일. 앱 스크립트 뒤에 defer 로 실행되어 초기 구동을 막지 않음 ===== -->
+<!-- (CDN 의 0.18.5 는 프로토타입 오염·ReDoS 취약점이 있어 교체. 사용 시점에 xlsxReady() 로 로드 확인) -->
+<script defer src="../../assets/vendor/xlsx-0.20.3.full.min.js"></script>
 </body>
 </html>

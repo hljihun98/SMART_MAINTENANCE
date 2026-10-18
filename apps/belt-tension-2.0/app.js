@@ -14,6 +14,28 @@ const BUF_SIZE = 5;
 const OUTLIER_TOL = 0.12;
 const G = 9.80665;
 
+/* ---------- 기본주파수 판정 (배음 오검출 방지) 상수 ----------
+   튕긴 벨트는 f0, 2f0, 3f0 … 배음을 함께 낸다. 그런데
+   - 측정 대상 고정 대역(예상 주파수 ±30%)은 T∝f² 이므로 장력 0.49~1.69배만 담는다.
+     크게 느슨한 벨트는 f0가 대역 밖(아래)에 있고 2f0/3f0만 대역 안에 남는다.
+   - 스마트폰 마이크는 100 Hz 이하 감도가 낮아(저역 롤오프 -10~-15 dB) 느슨한 벨트의 f0가
+     배음보다 약하게 잡힐 수 있다.
+   → 대역 안에서 고른 피크 f에 대해 f/2, f/3 위치(분석 범위 10~5000 Hz 안)에
+     '진짜' 국소 피크가 있으면 그것을 기본주파수로 보고 장력을 계산한다. */
+const SUBHARM_DIVISORS = [2, 3];
+const SUBHARM_TOL = 0.035;       // f/n 허용 오차 ±3.5% (벨트 강성에 의한 배음 비정수성) — 보간 주파수 비율로 최종 확인
+const SUBHARM_MIN_TOL_BINS = 1;  // 저주파에서 탐색 창이 최소 ±1 bin은 되도록 (정현파 argmax 오차 ±0.5 bin).
+                                 // ±2 bin 이상이면 8192 FFT에서 60 Hz 험이 f/3 창(±12 Hz)에 걸려 오판했음(합성 신호 검증)
+const PEAK_MIN_PROM_DB = 12;     // 충격 수집 구간 프레임 피크의 최소 돌출도(주변 노이즈 바닥 대비).
+                                 // 대역 안이 노이즈뿐일 때(기본파가 대역 밖) 노이즈 최대값을 주파수로 채택하지 않도록
+const SUBHARM_MIN_REL_DB = -20;  // 선택 피크 대비 -20 dB(진폭 10%) 이상 — 폰 마이크 저역 롤오프 + 튕김 위치에 따른 배음비 허용
+const SUBHARM_MIN_PROM_DB = 12;  // 주변 노이즈 바닥(중앙값) 대비 +12 dB 이상 — 단일 프레임 노이즈(레일리 분포)가
+                                 // 중앙값+12 dB를 넘을 확률 ≈ 2e-5/bin 이므로 우연 일치를 배제
+const EDGE_BINS = 1;             // 피크가 잠금 대역 경계에서 이 bin 이내면 '경계 피크'(진짜 피크가 대역 밖일 수 있음)
+const EDGE_CONF_CAP = 30;        // 경계 피크의 신뢰도 상한 — 저장 불가 수준
+const LIVE_SAVE_MIN_CONF = 50;   // 연속 측정 모드 저장 최소 신뢰도 (버퍼 5프레임이 채워지고 안정적일 때 65)
+const REARM_QUIET_MS = 300;      // 연속 모드 저장 후, 신호가 이 시간 이상 사라져야 다음 측정 허용(같은 진동 재저장 방지)
+
 /* ---------- PDF 헬퍼 (센서점검 앱 동일 스타일) ---------- */
 const PDF_FONT = "'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',Arial,sans-serif";
 const MM_TO_PX = 96 / 25.4;
@@ -69,10 +91,14 @@ const BELT_IDS = [
 
 /* ---------- 전역 상태 ---------- */
 let audioCtx=null, analyser=null, srcNode=null, micStream=null;
-let floatBuf=null, byteBuf=null, waveformBuf=null, rafId=null;
-let measuring=false, held=false;
+let floatBuf=null, byteBuf=null, waveformBuf=null, timeBuf=null, rafId=null;
+let measuring=false;
+let starting=false, startToken=0;   // 측정 시작 진행 중(중복 시작 방지) / stop 시 증가 → 진행 중인 시작 취소
+let pausedByHide=false;             // 백그라운드 전환으로 측정을 멈춘 경우 복귀 시 안내
 let dispFreq=0;
 let peakBuffer=[];
+let peakFlagBuffer=[];              // peakBuffer와 같은 길이 — 프레임별 {edge, subN}
+let rearmPending=false, rearmQuietSince=0;  // 연속 모드: 저장 후 새 튕김 대기
 let currentResult=null;
 let activeBeltType=null;   // 현재 측정 중인 벨트 타입 ('lifting'|'drive')
 let selectedDriveIds=new Set();   // 선택된 구동모듈 ID (초기: 없음)
@@ -80,7 +106,13 @@ let selectedLiftingIds=new Set(); // 선택된 리프팅 ID (초기: 없음)
 let robots=[];             // [{id,unit,createdAt,completedAt,slots:[]}]
 let activeRobot=null;      // 현재 측정 중인 로봇
 let activeSlotIdx=0;       // 현재 slots[] 인덱스
-let measureStartTs=0;
+/* 벨트 타입별 형상 기억 — 새 호기 슬롯은 반드시 자기 타입의 형상만 사용 (다른 타입 값 혼입 금지)
+   초기값은 프리셋, 해당 타입 슬롯을 저장할 때 실제 사용한 형상으로 갱신 */
+let beltGeom={
+  drive:   {mass:BELT_PRESETS.drive.mass,   width:BELT_PRESETS.drive.width,   span:BELT_PRESETS.drive.span,   cf:BELT_PRESETS.drive.cf},
+  lifting: {mass:BELT_PRESETS.lifting.mass, width:BELT_PRESETS.lifting.width, span:BELT_PRESETS.lifting.span, cf:BELT_PRESETS.lifting.cf}
+};
+let storageWarned=false;   // localStorage 저장 실패 안내(연속 실패 시 1회)
 let collecting=false, strikeTs=0, collectStartTs=0, collectEndTs=0, collectedSnapshots=[];
 let lastStrikeAt=0;
 let guideActive=true, guideStartTs=Date.now(), guidePeriodMs=3000, guidePeakFired=false;  // 타이밍 가이드 기본 ON
@@ -112,6 +144,35 @@ const btnStart=$('btnStart'), btnStop=$('btnStop'),
 const inUnit=$('inUnit');
 const inDriveMeas=$('inDriveMeas'), inLiftingMeas=$('inLiftingMeas');
 
+/* ---------- 안전 헬퍼 (XSS·CSV·날짜) ---------- */
+/* innerHTML에 넣는 사용자 입력/저장값은 반드시 이스케이프 */
+function escapeHtml(v){
+  return String(v==null?'':v).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+/* 호기 번호: 숫자 1~6자리만 허용 */
+const UNIT_RE=/^[0-9]{1,6}$/;
+/* 날짜 복원: Date / ISO 문자열 / 숫자(ms) / 구형 {__type:'Date',iso} 모두 허용, 실패 시 null */
+function toDate(v){
+  if(v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  if(v && typeof v==='object' && v.__type==='Date') v=v.iso;
+  if(typeof v==='string' || typeof v==='number'){
+    const d=new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+/* CSV 셀: 따옴표 이스케이프 + 수식 주입 방어(=,+,-,@,탭,CR 시작 시 ' 접두). 숫자(음수 포함)는 그대로 */
+const CSV_NUM_RE=/^-?\d+(\.\d+)?$/;
+function csvCell(v){
+  if(v==null) return '';
+  if(typeof v==='number') return isFinite(v) ? String(v) : '';
+  let s=String(v);
+  if(!CSV_NUM_RE.test(s) && /^[=+\-@\t\r]/.test(s)) s="'"+s;
+  if(/[",\r\n]/.test(s) || /^\s|\s$/.test(s)) s='"'+s.replace(/"/g,'""')+'"';
+  return s;
+}
+function toCsv(lines){ return '﻿'+lines.map(l=>l.map(csvCell).join(',')).join('\r\n'); }
+
 /* ---------- 보고서 버튼 활성화 ---------- */
 function updateReportButtons(){
   const hasData = robots.length > 0;
@@ -120,10 +181,8 @@ function updateReportButtons(){
 }
 
 /* ---------- 측정 플로우 단계 ---------- */
-let currentStep=1;
 function setStep(n){
   document.body.dataset.step = String(n);
-  currentStep=n;
   if(!flowEnabled){
     const fs2=$('fs2'), fs3=$('fs3');
     if(fs2) fs2.className='flow-step s-active';
@@ -165,23 +224,23 @@ function refreshBeltBtns(type){
   const row = $(type==='drive'?'driveMeasRow':'liftingMeasRow');
   if(row) row.style.display = set.size>0 ? 'flex' : 'none';
 }
-function setBeltCount(type, n){ /* 하위호환 shim — 사용 안 함 */ }
 
 /* ---------- 활성 슬롯 목록 생성 ---------- */
+/* 형상(mass/width/span/cf)은 입력칸이 아니라 '해당 타입'의 기억값(beltGeom)에서 가져온다.
+   (입력칸은 직전 슬롯의 값이 남아 있어 구동/리프팅 형상이 섞이는 원인이었음) */
 function buildActiveSlots(){
-  const dm=parseInt(inDriveMeas&&inDriveMeas.value)||1;
-  const lm=parseInt(inLiftingMeas&&inLiftingMeas.value)||1;
+  const clampCount=v=>Math.min(10, Math.max(1, parseInt(v,10)||1));
+  const dm=clampCount(inDriveMeas&&inDriveMeas.value);
+  const lm=clampCount(inLiftingMeas&&inLiftingMeas.value);
   return BELT_IDS
     .filter(def => (def.type==='drive' ? selectedDriveIds : selectedLiftingIds).has(def.key))
     .map(def => {
       const p = BELT_PRESETS[def.type];
+      const g = beltGeom[def.type];
       return {
         key: def.key, type: def.type, label: def.label,
         targetN: p.targetN, tolPct: p.tolPct,
-        mass: parseFloat(inMass.value)||p.mass,
-        width: parseFloat(inWidth.value)||p.width,
-        span: parseFloat(inSpan.value)||p.span,
-        cf: parseFloat(inCF.value)||p.cf,
+        mass: g.mass, width: g.width, span: g.span, cf: g.cf,
         measCount: def.type==='drive' ? dm : lm,
         values: [], average: null, avgJudge: null, completedAt: null
       };
@@ -251,10 +310,9 @@ function updateSlotProgress(){
     const done=!!s.completedAt, cur=(i===activeSlotIdx);
     const cls = done?'smp-chip-done':cur?'smp-chip-cur':'smp-chip-todo';
     const judge = done&&s.avgJudge?' · '+s.avgJudge:'';
-    return `<span class="smp-chip ${cls}">${s.label}${judge}</span>`;
+    return `<span class="smp-chip ${cls}">${escapeHtml(s.label+judge)}</span>`;
   }).join('');
 }
-function updateProgressChip(){ updateSlotProgress(); }  // 하위호환
 
 /* ---------- 호기 대기열 미리보기 카드 (Step 1) ---------- */
 function renderRobotQueuePreview(){
@@ -269,10 +327,10 @@ function renderRobotQueuePreview(){
     const parts=[driveSlots?'구동 '+driveSlots:'', liftSlots?'리프팅 '+liftSlots:''].filter(Boolean);
     const measCount=r.slots[0]?.measCount||1;
     return `<div class="rq-card">
-      <div class="rq-unit">${r.unit}호기</div>
-      <div class="rq-info">${parts.join(' · ')} · ${measCount}회</div>
+      <div class="rq-unit">${escapeHtml(r.unit)}호기</div>
+      <div class="rq-info">${escapeHtml(parts.join(' · '))} · ${Number(measCount)}회</div>
       ${canDelete
-        ?`<button class="rq-del" onclick="deleteRobot(${r.id})" type="button">삭제</button>`
+        ?`<button class="rq-del" onclick="deleteRobot(${Number(r.id)})" type="button">삭제</button>`
         :`<span class="rq-started">측정중</span>`}
     </div>`;
   }).join('');
@@ -282,6 +340,7 @@ function renderRobotQueuePreview(){
 function addRobotToQueue(){
   const unit = inUnit ? inUnit.value.trim() : '';
   if(!unit){ toast('호기 번호를 입력해주세요.','err'); inUnit&&inUnit.focus(); return; }
+  if(!UNIT_RE.test(unit)){ toast('호기 번호는 숫자(1~6자리)만 입력할 수 있습니다.','err'); inUnit&&inUnit.focus(); return; }
   if(selectedDriveIds.size+selectedLiftingIds.size===0){ toast('벨트를 1개 이상 선택해주세요.','err'); return; }
   if(robots.some(r=>r.unit===unit&&!r.completedAt)){
     toast(unit+'호기가 이미 추가되어 있습니다.','err'); return;
@@ -302,8 +361,6 @@ function addRobotToQueue(){
 }
 
 /* ---------- 로봇 시퀀스 시작 ---------- */
-function saveResult(){ saveCurrentSlot(); }  // btnSave 이벤트 호환
-
 function initRobotIfNeeded(){
   if(activeRobot) return true;  // 이미 진행 중
 
@@ -337,6 +394,7 @@ function initRobotIfNeeded(){
   // 3순위(폴백): Step 1 현재 입력으로 즉시 생성
   const unit = inUnit ? inUnit.value.trim() : '';
   if(!unit){ toast('호기를 추가하거나 호기 번호를 입력해주세요.','err'); return false; }
+  if(!UNIT_RE.test(unit)){ toast('호기 번호는 숫자(1~6자리)만 입력할 수 있습니다.','err'); return false; }
   if(selectedDriveIds.size+selectedLiftingIds.size===0){ toast('벨트를 1개 이상 선택해주세요.','err'); return false; }
   const slots = buildActiveSlots();
   if(!slots.length){ toast('활성화된 벨트 슬롯이 없습니다.','err'); return false; }
@@ -356,6 +414,19 @@ function saveCurrentSlot(){
   if(!currentResult||!isFinite(currentResult.freq)){
     toast('유효한 주파수가 없습니다.','err'); return;
   }
+  // 최소 품질 검사: 경계 피크는 실제 피크가 대역 밖일 수 있어 값 자체를 믿을 수 없음
+  if(currentResult.edge){
+    toast('피크가 측정 대상 고정 대역 경계에 있어 저장할 수 없습니다. 측정 보조에서 고정 범위를 넓히거나 끄고 다시 측정하세요.','err',5000);
+    return;
+  }
+  // 연속 측정 모드: 5프레임 안정 + 최소 신뢰도 + 새 튕김(같은 진동 재저장 방지)
+  if(currentResult.source==='live'){
+    if(rearmPending){ toast('이미 저장한 진동입니다. 벨트를 다시 튕긴 뒤 저장하세요.','warn'); return; }
+    if(!currentResult.stable || (currentResult.confidence||0) < LIVE_SAVE_MIN_CONF){
+      toast('측정값이 아직 안정되지 않았습니다. 벨트를 다시 튕겨 신호 검출 상태에서 저장하세요.','warn'); return;
+    }
+  }
+  if(currentResult.source==='live') startRearm();  // 이 진동은 소비됨 → 신호가 사라졌다 다시 튕길 때까지 대기
   if(!flowEnabled){
     const {targetN,tolPct}=readTarget();
     let judge='--';
@@ -378,6 +449,8 @@ function saveCurrentSlot(){
   const slot = activeRobot.slots[activeSlotIdx];
   slot.mass = currentResult.mass; slot.width = currentResult.width;
   slot.span = currentResult.span; slot.cf = currentResult.cf;
+  // 이 타입에서 실제 사용한 형상을 기억 → 이후 추가하는 호기의 같은 타입 슬롯에만 적용
+  if(beltGeom[slot.type]) beltGeom[slot.type]={mass:slot.mass, width:slot.width, span:slot.span, cf:slot.cf};
   const lower = slot.targetN*(1-slot.tolPct/100), upper = slot.targetN*(1+slot.tolPct/100);
   const judge = currentResult.corrN>=lower && currentResult.corrN<=upper ? 'OK' : 'NG';
   slot.values.push({freq:currentResult.freq, corrN:currentResult.corrN, kgf:currentResult.kgf,
@@ -483,10 +556,11 @@ function cancelSlotMeasurement(vi){
   toast((vi+1)+'회차 측정값을 삭제했습니다.','warn');
 }
 
-/* ---------- 다음 호기 프롬프트 (자동 진행으로 대체 — stub 유지) ---------- */
-function showNextRobotPrompt(){}
-function startNextRobot(){}
-function promptNextRobot(){}
+/* ---------- 연속 모드 재무장: 저장 후 같은 진동으로 다시 채우지 않도록 ---------- */
+function startRearm(){
+  rearmPending=true; rearmQuietSince=0;
+  peakBuffer=[]; peakFlagBuffer=[];
+}
 
 /* ---------- Step 1 세션 전환 행 ---------- */
 function updateSessionSwitchRow(){
@@ -511,18 +585,20 @@ function renderRobotProgress(){
     const isPending = !robot.startedAt;
     const isActive  = robot === activeRobot;
     const isDone    = !!robot.completedAt;
+    const rid  = Number(robot.id);
+    const unitH = escapeHtml(robot.unit);
 
     /* ── 대기 중 카드 ── */
     if(isPending){
       const driveKeys = robot.slots.filter(s=>s.type==='drive').map(s=>s.key).join(' · ') || '없음';
       const liftKeys  = robot.slots.filter(s=>s.type==='lifting').map(s=>s.key).join(' · ') || '없음';
-      return `<div class="robot-card robot-pending robot-clickable" onclick="startRobotFromProgress(${robot.id})">
+      return `<div class="robot-card robot-pending robot-clickable" onclick="startRobotFromProgress(${rid})">
         <div class="robot-card-head">
-          <span class="robot-unit">${robot.unit}호기</span>
+          <span class="robot-unit">${unitH}호기</span>
           <span class="robot-tag robot-tag-pending">▶ 클릭하여 시작</span>
-          <button class="robot-del" onclick="event.stopPropagation();deleteRobot(${robot.id})" title="삭제">✕</button>
+          <button class="robot-del" onclick="event.stopPropagation();deleteRobot(${rid})" title="삭제">✕</button>
         </div>
-        <div class="robot-card-config">구동 ${driveKeys} · 리프팅 ${liftKeys}</div>
+        <div class="robot-card-config">구동 ${escapeHtml(driveKeys)} · 리프팅 ${escapeHtml(liftKeys)}</div>
       </div>`;
     }
 
@@ -532,16 +608,16 @@ function renderRobotProgress(){
         if(!slot.values.length) return '';
         const cls = slot.avgJudge==='OK' ? 'prog-ok' : 'prog-ng';
         return `<div class="prog-chip ${cls}">
-          <span class="prog-num">${slot.label}</span>
+          <span class="prog-num">${escapeHtml(slot.label)}</span>
           <span class="prog-val">${slot.average!=null?slot.average.toFixed(1):'—'}</span>
           <span class="prog-unit">N</span>
         </div>`;
       }).join('');
       return `<div class="robot-card robot-done">
         <div class="robot-card-head">
-          <span class="robot-unit">${robot.unit}호기</span>
+          <span class="robot-unit">${unitH}호기</span>
           <span class="robot-tag robot-tag-done">✓ 완료</span>
-          <button class="robot-del" onclick="deleteRobot(${robot.id})" title="삭제">✕</button>
+          <button class="robot-del" onclick="deleteRobot(${rid})" title="삭제">✕</button>
         </div>
         <div class="prog-grid">${chips}</div>
       </div>`;
@@ -568,14 +644,14 @@ function renderRobotProgress(){
       const avgBlock = done && slot.average!=null ?
         `<div class="prog-avg ${slot.avgJudge==='OK'?'avg-ok':'avg-ng'}">
            <span class="avg-label">평균</span><span class="avg-val">${slot.average.toFixed(1)} N</span>
-           <span class="avg-judge">${slot.avgJudge}</span>
+           <span class="avg-judge">${escapeHtml(slot.avgJudge)}</span>
          </div>` : '';
       const statusTag = done ? '<span class="slot-tag-done">✓</span>' :
                         cur  ? '<span class="slot-tag-now">측정 중</span>' :
                                '<span class="slot-tag-goto">탭하여 이동</span>';
-      const clickAttr = done ? '' : `onclick="switchToSlot(${robot.id},${si})"`;
+      const clickAttr = done ? '' : `onclick="switchToSlot(${rid},${si})"`;
       return `<div class="slot-section ${cur?'slot-cur':''}${done?' slot-done':' slot-goto'}" ${clickAttr}>
-        <div class="slot-head"><span class="slot-key">${slot.label}</span>${statusTag}</div>
+        <div class="slot-head"><span class="slot-key">${escapeHtml(slot.label)}</span>${statusTag}</div>
         <div class="prog-grid">${chips}${empties}</div>${avgBlock}
       </div>`;
     }).join('');
@@ -585,9 +661,9 @@ function renderRobotProgress(){
       : '<span class="robot-tag robot-tag-paused">일시중지</span>';
     return `<div class="robot-card robot-active${isActive?'':' robot-paused'}">
       <div class="robot-card-head">
-        <span class="robot-unit">${robot.unit}호기</span>
+        <span class="robot-unit">${unitH}호기</span>
         ${robotTag}
-        <button class="robot-del" onclick="deleteRobot(${robot.id})" title="삭제">✕</button>
+        <button class="robot-del" onclick="deleteRobot(${rid})" title="삭제">✕</button>
       </div>
       ${slotsHtml}
     </div>`;
@@ -757,7 +833,7 @@ function micUnavailableMessage(){
    측정 시작 — 마이크 권한 요청 & Web Audio API 초기화
    ================================================================ */
 async function startMeasure(){
-  if(measuring) return;
+  if(measuring || starting) return;   // 권한 팝업 대기 중 연타 → 스트림/AudioContext 중복 생성 방지
   if(flowEnabled && !activeRobot){ if(!initRobotIfNeeded()) return; }
   if(!validateInputs()) return;
   if(!canUseMicrophone()){
@@ -767,8 +843,19 @@ async function startMeasure(){
     return;
   }
 
+  starting=true; btnStart.disabled=true;
+  const myToken=++startToken;
   try{
-    micStream = await navigator.mediaDevices.getUserMedia({
+    await openAudio(myToken);
+  }finally{
+    starting=false;
+  }
+}
+
+async function openAudio(myToken){
+  let stream=null;
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
       audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false }
     });
   }catch(err){
@@ -783,13 +870,17 @@ async function startMeasure(){
       setStatus('bad','마이크 초기화 실패','ERROR');
       toast('마이크 초기화에 실패했습니다: '+(err.message || '알 수 없는 오류'), 'err');
     }
-    stopMeasure();
+    stopMeasure(true);
     return;
   }
+  // 권한 대기 중에 중지/화면 전환 등으로 시작이 취소됨 → 방금 얻은 마이크를 즉시 반납
+  if(myToken!==startToken){ stream.getTracks().forEach(t=>t.stop()); return; }
+  micStream = stream;
 
   try{
     audioCtx = new (window.AudioContext||window.webkitAudioContext)();
     if(audioCtx.state==='suspended') await audioCtx.resume();
+    if(myToken!==startToken){ stopMeasure(true); return; }
     srcNode = audioCtx.createMediaStreamSource(micStream);
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = parseInt(selFFT.value,10);
@@ -798,18 +889,20 @@ async function startMeasure(){
     floatBuf = new Float32Array(analyser.frequencyBinCount);
     byteBuf  = new Uint8Array(analyser.frequencyBinCount);
     waveformBuf = new Uint8Array(analyser.fftSize);
+    timeBuf = new Float32Array(analyser.fftSize);   // computeRMS 재사용 버퍼 (프레임마다 할당하지 않음)
   }catch(err){
     setStatus('bad','오디오 초기화 실패','ERROR');
     toast('오디오 초기화에 실패했습니다: '+err.message, 'err');
-    stopMeasure();
+    stopMeasure(true);
     return;
   }
 
-  measuring=true; held=false; peakBuffer=[];
+  measuring=true; peakBuffer=[]; peakFlagBuffer=[];
+  rearmPending=false; rearmQuietSince=0;
+  resetCollection();
   nrHintShown=false; unstableCount=0;
   ambientRms=0.02;    // 측정 시작 시 기준선 리셋 (filterStrength=2 기준 초기 임계값 ≈ 0.08)
-  measureStartTs=Date.now();
-  guideStartTs=measureStartTs; guidePeakFired=false;  // 사인파 위상을 측정 시작점부터 새로 시작
+  guideStartTs=Date.now(); guidePeakFired=false;  // 사인파 위상을 측정 시작점부터 새로 시작
   btnStart.disabled=true; btnStop.disabled=false; btnSave.disabled=true;
   setStep(2);
   selFFT.disabled=true;
@@ -821,25 +914,42 @@ async function startMeasure(){
 /* ================================================================
    측정 중지 — 리소스 정리
    ================================================================ */
-function stopMeasure(){
+/* keepStatus=true: 오류 상태 표시(권한 거부 등)를 '대기 중'으로 덮어쓰지 않음 */
+function stopMeasure(keepStatus){
   measuring=false;
+  startToken++;   // 진행 중인 startMeasure(권한 대기 등)가 있으면 취소
   if(rafId){ cancelAnimationFrame(rafId); rafId=null; }
   if(srcNode){ try{srcNode.disconnect();}catch(e){} srcNode=null; }
   if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
-  if(audioCtx){ try{audioCtx.close();}catch(e){} audioCtx=null; }
+  if(audioCtx){ try{ const p=audioCtx.close(); if(p&&p.catch) p.catch(()=>{}); }catch(e){} audioCtx=null; }
   analyser=null;
+  resetCollection();   // 수집 중 중지 → 재시작 시 이전 벨트 스냅샷으로 결과가 나오지 않도록
+  peakBuffer=[]; peakFlagBuffer=[];
   btnStart.disabled=false; btnStop.disabled=true; btnSave.disabled=true;
   selFFT.disabled=false;
-  held=false; dispFreq=0;
-  setStatus('ready','대기 중','READY');
+  dispFreq=0;
+  if(keepStatus!==true) setStatus('ready','대기 중','READY');
   meterFill.style.width='0%'; meterVal.textContent='0%';
   liveFreq.textContent='--'; livePeak.textContent='대기'; livePeak.style.color='var(--muted)';
   if(waveformBuf){ waveformBuf.fill(128); drawWaveform(); }
-  guideActive=true; guidePeakFired=false;  // 기본값(ON)으로 복귀
   learnLastTs=null;  // 측정 중지 시 학습 타이머 일시 정지 (재시작 시 시간 점프 방지)
+  // 가이드는 적응형 충격 감지 ON일 때만 기본값(ON)으로 복귀 — 연속 모드에서 숨은 가이드가 켜지지 않도록
+  setGuide(adaptiveTrigger);
+}
+
+/* 충격 수집 상태 초기화 */
+function resetCollection(){
+  collecting=false; collectStartTs=0; collectEndTs=0;
+  collectedSnapshots=[]; collectionMaxRms=0;
+}
+
+/* 타이밍 가이드 ON/OFF + 스위치·칩 동기화 */
+function setGuide(on){
+  guideActive=!!on; guidePeakFired=false;
+  if(guideActive) guideStartTs=Date.now();
   const swG=$('swGuide');
-  if(swG){ swG.setAttribute('aria-pressed','true'); swG.classList.add('on'); }
-  const chip=$('guideChip'); if(chip) chip.style.display='inline-flex';
+  if(swG){ swG.setAttribute('aria-pressed', guideActive?'true':'false'); swG.classList.toggle('on', guideActive); }
+  const chip=$('guideChip'); if(chip) chip.style.display=guideActive?'inline-flex':'none';
 }
 
 /* ================================================================
@@ -864,8 +974,11 @@ function analyzeLoop(){
   let byteDraw = byteBuf;
   if(noiseReduction.enabled){ byteDraw = applyNoiseReduction(floatBuf, byteBuf, binHz); }
 
-  let minBin = Math.max(1, Math.floor(MIN_FREQ/binHz));
-  let maxBin = Math.min(floatBuf.length-2, Math.ceil(MAX_FREQ/binHz));
+  // 분석 범위(10~5000 Hz) — 기본주파수(f/2, f/3) 탐색은 잠금 대역 밖이어도 이 범위 안이면 허용
+  const fullMinBin = Math.max(1, Math.floor(MIN_FREQ/binHz));
+  const fullMaxBin = Math.min(floatBuf.length-2, Math.ceil(MAX_FREQ/binHz));
+  let minBin = fullMinBin, maxBin = fullMaxBin;
+  let lockNarrowed = false;
 
   lockLoBin=-1; lockHiBin=-1; lockCenter=NaN;
   if(targetLock.enabled){
@@ -876,7 +989,7 @@ function analyzeLoop(){
       const lo=Math.max(MIN_FREQ, c*(1-w)), hi=Math.min(MAX_FREQ, c*(1+w));
       lockLoBin=Math.max(minBin, Math.floor(lo/binHz));
       lockHiBin=Math.min(maxBin, Math.ceil(hi/binHz));
-      if(lockHiBin>lockLoBin){ minBin=lockLoBin; maxBin=lockHiBin; }
+      if(lockHiBin>lockLoBin){ minBin=lockLoBin; maxBin=lockHiBin; lockNarrowed=true; }
     }
   }
 
@@ -905,8 +1018,8 @@ function analyzeLoop(){
     // 비수집 구간에서 ambient RMS EMA 추적 (충격음이 기준선을 오염시키지 않도록)
     ambientRms = 0.98 * ambientRms + 0.02 * rms;
 
-    if(guideActive){
-      // 가이드 모드: 사인파 피크에서 자동 트리거
+    if(guideActive && adaptiveTrigger){
+      // 가이드 모드(적응형 충격 감지 ON일 때만): 사인파 피크에서 자동 트리거
       const elapsed=(Date.now()-guideStartTs)%guidePeriodMs;
       const phase=(elapsed/guidePeriodMs)*2*Math.PI;
       const sineVal=Math.sin(phase);
@@ -939,14 +1052,15 @@ function analyzeLoop(){
       collecting = false;
       finalizeCollection();
     }else if(now >= collectStartTs){
-      const det = detectFundamentalBandpass(floatBuf, binHz, minBin, maxBin);
-      if(det) collectedSnapshots.push({t:now, f:det.freq, mag:det.mag});
+      const det = detectFundamentalBandpass(floatBuf, binHz, minBin, maxBin, fullMinBin, fullMaxBin, lockNarrowed);
+      if(det) collectedSnapshots.push({t:now, f:det.freq, mag:det.mag, edge:det.edge, subN:det.subN});
       if(det){ dispFreq = dispFreq ? dispFreq*0.65+det.freq*0.35 : det.freq; liveFreq.textContent=dispFreq.toFixed(1); }
       else { liveFreq.textContent='--'; }
     }
     rafId=requestAnimationFrame(analyzeLoop); return;
   }
 
+  let detected=false;
   if(meanDb > NOISE_LOUD_DB){
     setStatus('noise','주변 소음이 큽니다','NOISE');
     livePeak.textContent='소음'; livePeak.style.color='var(--orange)';
@@ -963,26 +1077,47 @@ function analyzeLoop(){
     liveFreq.textContent='--';
   }
   else{
-    const f = interpolatePeak(floatBuf, peakBin, binHz);
+    const det = analyzePeak(floatBuf, binHz, peakBin, minBin, maxBin, fullMinBin, fullMaxBin, lockNarrowed);
+    const f = det.freq;
     if(f<MIN_FREQ || f>MAX_FREQ){
       setStatus('listen','측정 범위를 벗어난 주파수','RANGE');
     }else{
-      pushPeak(f);
-      const stable = stableFreq();
-      const unstable = isUnstable();
+      detected=true;
       dispFreq = dispFreq ? dispFreq*0.65+f*0.35 : f;
       liveFreq.textContent = dispFreq.toFixed(1);
       livePeak.textContent='검출'; livePeak.style.color='var(--green)';
-      if(unstable){
-        setStatus('noise','측정 불안정 — 반복 측정해주세요','UNSTABLE');
+      if(!adaptiveTrigger && rearmPending){
+        // 연속 모드: 방금 저장한 진동이 아직 남아 있음 → 결과 갱신·저장 보류
+        setStatus('listen','저장 완료 — 다음 측정은 벨트를 다시 튕겨주세요','NEXT');
       }else{
-        setStatus('good','신호 검출','DETECTED');
-        if(!adaptiveTrigger){
-          updateResult(dispFreq);
-          if(btnSave) btnSave.disabled=false;
+        pushPeak(f, det);
+        const stable = stableFreq();
+        const unstable = isUnstable();
+        const flags = bufferFlags();
+        if(unstable){
+          setStatus('noise','측정 불안정 — 반복 측정해주세요','UNSTABLE');
+        }else if(flags.edge){
+          setStatus('weak','피크가 고정 대역 경계 — 목표에서 크게 벗어났을 수 있음 (고정 범위 확대/해제 후 재측정)','EDGE');
+        }else if(flags.subN>1){
+          setStatus('good',subharmText(flags.subN),'DETECTED');
+        }else{
+          setStatus('good','신호 검출','DETECTED');
+        }
+        if(!adaptiveTrigger && !unstable){
+          // 결과는 EMA 표시값이 아니라 이상치를 제거한 안정화 주파수로 계산
+          const full = peakBuffer.length>=BUF_SIZE;
+          updateResult(stable, undefined, {source:'live', edge:flags.edge, subN:flags.subN, stable:full});
+          if(btnSave) btnSave.disabled = !(full && !flags.edge && currentResult && currentResult.confidence>=LIVE_SAVE_MIN_CONF);
         }
       }
     }
+  }
+
+  // 연속 모드 재무장: 저장 후 신호가 REARM_QUIET_MS 이상 사라지면 다음 튕김을 받음
+  if(rearmPending){
+    if(detected) rearmQuietSince=0;
+    else if(!rearmQuietSince) rearmQuietSince=now;
+    else if(now-rearmQuietSince>=REARM_QUIET_MS){ rearmPending=false; rearmQuietSince=0; }
   }
 
   rafId=requestAnimationFrame(analyzeLoop);
@@ -997,12 +1132,76 @@ function interpolatePeak(buf, bin, binHz){
   return (bin+delta)*binHz;
 }
 
+/* ================================================================
+   기본주파수 판정 — 배음 오검출 방지 (상수·근거는 파일 상단 SUBHARM_* 참고)
+   ================================================================ */
+/* centerHz 부근(±SUBHARM_TOL, 최소 ±SUBHARM_MIN_TOL_BINS)에서 가장 큰 국소 극대점 */
+function localPeakNear(buf, centerHz, binHz, loLimit, hiLimit){
+  const c = centerHz/binHz;
+  const tol = Math.max(SUBHARM_MIN_TOL_BINS, c*SUBHARM_TOL);
+  const lo = Math.max(loLimit, Math.floor(c-tol)), hi = Math.min(hiLimit, Math.ceil(c+tol));
+  let best=-1, bestDb=-Infinity;
+  for(let i=lo;i<=hi;i++){
+    const v=buf[i];
+    if(isFinite(v) && v>bestDb && v>=buf[i-1] && v>=buf[i+1]){ bestDb=v; best=i; }
+  }
+  return best<0 ? null : {bin:best, db:bestDb};
+}
+/* bin 주변(±25%, 최소 ±12 bin)의 노이즈 바닥 = 피크 주엽(±4 bin)을 뺀 dB 중앙값 */
+function localFloorDb(buf, bin, loLimit, hiLimit){
+  const half=Math.max(12, Math.round(bin*0.25)), excl=4;
+  const vals=[];
+  for(let i=Math.max(loLimit,bin-half); i<=Math.min(hiLimit,bin+half); i++){
+    if(Math.abs(i-bin)<=excl) continue;
+    const v=buf[i]; if(isFinite(v)) vals.push(v);
+  }
+  return vals.length ? median(vals) : -Infinity;
+}
+/* 선택 피크(peakBin)에 대해 f/2, f/3 위치에 유의미한 국소 피크가 있으면 그쪽을 기본주파수로.
+   최대 2단계(→ 4·6·9배 배음까지) 반복. 반환 subN = 선택 피크가 기본파의 몇 배인지(1=그대로) */
+function resolveFundamental(buf, binHz, peakBin, anaLo, anaHi){
+  const refDb = buf[peakBin];
+  let bin=peakBin, subN=1, fCur=interpolatePeak(buf, peakBin, binHz);
+  for(let step=0; step<2; step++){
+    let pick=null;
+    for(const n of SUBHARM_DIVISORS){
+      const cand = localPeakNear(buf, fCur/n, binHz, anaLo, anaHi);
+      if(!cand || cand.bin>=bin) continue;
+      if(cand.db < ABS_MIN_DB) continue;                       // 절대 신호 약함
+      if(cand.db - refDb < SUBHARM_MIN_REL_DB) continue;        // 선택 피크 대비 너무 약함
+      if(cand.db - localFloorDb(buf, cand.bin, anaLo, anaHi) < SUBHARM_MIN_PROM_DB) continue; // 노이즈 바닥과 구분 안 됨
+      const fc = interpolatePeak(buf, cand.bin, binHz);
+      if(Math.abs(fc*n/fCur - 1) > SUBHARM_TOL) continue;       // 정수배 관계가 아님(예: 60 Hz 험)
+      if(!pick || n>pick.n) pick={bin:cand.bin, n, f:fc};       // 둘 다 맞으면 더 낮은 주파수(큰 n)
+    }
+    if(!pick) break;
+    bin=pick.bin; subN*=pick.n; fCur=pick.f;
+  }
+  return {bin, subN};
+}
+/* 대역 [bandLo,bandHi] 안의 최대 피크(peakBin)를 분석해 기본주파수·플래그 반환
+   - freq: subN>1이면 '선택 피크의 보간 주파수 / subN' (고주파 쪽 해상도가 상대적으로 더 정밀)
+   - edge: 잠금 대역(narrowed) 경계 피크이면서 기본파를 따로 찾지 못한 경우 */
+function analyzePeak(buf, binHz, peakBin, bandLo, bandHi, anaLo, anaHi, narrowed){
+  const atEdge = narrowed && (peakBin-bandLo<=EDGE_BINS || bandHi-peakBin<=EDGE_BINS);
+  const fPeak = atEdge ? peakBin*binHz : interpolatePeak(buf, peakBin, binHz);  // 경계에서는 바깥 bin이 더 클 수 있어 보간 생략
+  const r = resolveFundamental(buf, binHz, peakBin, anaLo, anaHi);
+  // 경계 배음은 위치가 부정확 → 이 경우만 기본파 자체를 보간
+  const freq = r.subN===1 ? fPeak : (atEdge ? interpolatePeak(buf, r.bin, binHz) : fPeak / r.subN);
+  return {
+    freq,
+    bin: r.bin, subN: r.subN,
+    db: buf[peakBin], mag: Math.pow(10, buf[peakBin]/20),
+    edge: atEdge && r.subN===1
+  };
+}
+
 function computeRMS(){
   if(!analyser) return 0;
-  const tbuf = new Float32Array(analyser.fftSize);
-  try{ analyser.getFloatTimeDomainData(tbuf); }catch(e){ return 0; }
-  let s=0; for(let i=0;i<tbuf.length;i++){ s += tbuf[i]*tbuf[i]; }
-  return Math.sqrt(s/tbuf.length);
+  if(!timeBuf || timeBuf.length!==analyser.fftSize) timeBuf=new Float32Array(analyser.fftSize);
+  try{ analyser.getFloatTimeDomainData(timeBuf); }catch(e){ return 0; }
+  let s=0; for(let i=0;i<timeBuf.length;i++){ s += timeBuf[i]*timeBuf[i]; }
+  return Math.sqrt(s/timeBuf.length);
 }
 
 function applyNoiseReduction(floatBuf, byteBuf, binHz){
@@ -1067,59 +1266,44 @@ function setNoiseChip(txt){
   el.textContent=txt||''; el.style.display=txt?'inline-flex':'none';
 }
 
-function detectFundamentalBandpass(floatBuf, binHz, globalMinBin, globalMaxBin){
-  const span = parseFloat(inSpan.value) || 0;
-  const k = parseFloat(kconst.value) || 1000;
-  let expected = parseFloat(estFreq.value);
-  if(!isFinite(expected) && span>0){ expected = k / span; }
-  let loBin = globalMinBin, hiBin = globalMaxBin;
-  if(isFinite(expected) && expected>0){
-    const lo = Math.max(MIN_FREQ, expected*0.7);
-    const hi = Math.min(MAX_FREQ, expected*1.3);
-    loBin = Math.max(globalMinBin, Math.floor(lo/binHz));
-    hiBin = Math.min(globalMaxBin, Math.ceil(hi/binHz));
+/* 배음 판정 안내 문구 — 잠금 대역이 좁혀진 상태면 기본주파수는 반드시 대역 밖 */
+function subharmText(subN){
+  const locked = lockLoBin>=0 && lockHiBin>lockLoBin;
+  return (locked ? '기본주파수가 고정 대역 밖' : '배음 감지')+' — '+subN+'차 배음을 기본주파수로 환산';
+}
+
+/* 충격 수집 구간의 프레임별 기본주파수 검출
+   - 탐색 대역: 측정 대상 고정 ON이면 잠금 대역, OFF면 분석 범위 전체 (예전의 숨은 '예상±30%' 대역 제거 —
+     고정 OFF인데도 대역이 좁혀져 경계 안내가 무의미해지는 문제)
+   - 대역 최대 피크 → analyzePeak()로 배음(f/2, f/3) 검사 + 경계 판정 */
+function detectFundamentalBandpass(floatBuf, binHz, bandLo, bandHi, anaLo, anaHi, narrowed){
+  let peakBin=-1, peakDb=-Infinity;
+  for(let i=bandLo;i<=bandHi;i++){
+    const v=floatBuf[i];
+    if(v>peakDb){ peakDb=v; peakBin=i; }
   }
-  if(targetLock.enabled && lockLoBin>=0 && lockHiBin>lockLoBin){
-    loBin=Math.max(globalMinBin, lockLoBin);
-    hiBin=Math.min(globalMaxBin, lockHiBin);
-  }
-  const cands = [];
-  for(let i=loBin;i<=hiBin;i++){
-    const db = floatBuf[i];
-    const mag = Math.pow(10, db/20);
-    cands.push({bin:i,mag});
-  }
-  cands.sort((a,b)=>b.mag-a.mag);
-  if(!cands.length) return null;
-  const selected = [];
-  for(const c of cands.slice(0,12)){
-    const f = c.bin * binHz;
-    let isHarm=false;
-    for(const s of selected){
-      const ratio = f / s.freq;
-      for(let n=2;n<=4;n++){
-        if(Math.abs(ratio - n) < 0.035){ isHarm = true; break; }
-      }
-      if(isHarm) break;
-    }
-    if(!isHarm) selected.push({freq:f,mag:c.mag,bin:c.bin});
-    if(selected.length>=1) break;
-  }
-  if(!selected.length){
-    const top=cands[0];
-    return {freq: top.bin*binHz, mag: top.mag};
-  }
-  const best = selected[0];
-  const refined = interpolatePeak(floatBuf, best.bin, binHz);
-  return {freq: refined, mag: best.mag};
+  if(peakBin<0 || !isFinite(peakDb)) return null;
+  // 대역 안이 노이즈뿐이면(기본파가 대역 밖 등) 프레임을 버림 — 노이즈 최대값이 주파수로 채택되는 것 방지
+  if(peakDb - localFloorDb(floatBuf, peakBin, bandLo, bandHi) < PEAK_MIN_PROM_DB) return null;
+  return analyzePeak(floatBuf, binHz, peakBin, bandLo, bandHi, anaLo, anaHi, narrowed);
 }
 
 /* ----------------------------------------------------------------
    측정 안정화
    ---------------------------------------------------------------- */
-function pushPeak(f){
+function pushPeak(f, det){
   peakBuffer.push(f);
+  peakFlagBuffer.push({edge:!!(det&&det.edge), subN:(det&&det.subN)||1});
   if(peakBuffer.length>BUF_SIZE) peakBuffer.shift();
+  if(peakFlagBuffer.length>BUF_SIZE) peakFlagBuffer.shift();
+}
+/* 버퍼 과반 기준 플래그 — 한두 프레임의 흔들림으로 안내가 깜빡이지 않도록 */
+function bufferFlags(){
+  const n=peakFlagBuffer.length;
+  if(!n) return {edge:false, subN:1};
+  const edgeCnt=peakFlagBuffer.filter(x=>x.edge).length;
+  const subs=peakFlagBuffer.map(x=>x.subN).filter(v=>v>1);
+  return {edge: edgeCnt*2>n, subN: subs.length*2>n ? Math.round(median(subs)) : 1};
 }
 function median(arr){
   if(!arr.length) return NaN;
@@ -1149,8 +1333,10 @@ function isUnstable(){
 /* ----------------------------------------------------------------
    최종 결과 카드 갱신
    ---------------------------------------------------------------- */
-function updateResult(freq, extConf){
+/* meta: {source:'live'|'collect', edge, subN, stable} — 저장 품질 검사·안내에 사용 */
+function updateResult(freq, extConf, meta){
   if(!isFinite(freq)) return;
+  meta = meta || {};
   const {mass,width,span,cf}=readInputs();
   const {rawN,corrN,kgf}=calcTension(mass,width,span,freq,cf);
   const {targetN, tolPct}=readTarget();
@@ -1169,14 +1355,21 @@ function updateResult(freq, extConf){
     resJudge.textContent = '--';
     resJudgeWrap.className = '';
   }
-  const realtimeConf = extConf !== undefined ? extConf :
+  let realtimeConf = extConf !== undefined ? extConf :
     (peakBuffer.length < 2 ? 15 :
      peakBuffer.length < BUF_SIZE ? 25 + peakBuffer.length * 8 :
      isUnstable() ? 20 : 65);
+  if(meta.edge) realtimeConf = Math.min(realtimeConf, EDGE_CONF_CAP);  // 경계 피크 → 신뢰도 낮춤(저장 불가)
   currentResult={
     time:new Date(), mass,width,span,cf, freq, targetN, tolPct,
-    rawN, corrN, kgf, confidence: Math.round(realtimeConf)
+    rawN, corrN, kgf, confidence: Math.round(realtimeConf),
+    source: meta.source||'collect', edge: !!meta.edge, subN: meta.subN||1, stable: meta.stable!==false
   };
+  if(extConf === undefined){
+    // 연속 모드: 링/숫자도 실시간 신뢰도로 갱신 (예전엔 충격 수집 결과에서만 갱신)
+    $('resConf').textContent = currentResult.confidence;
+    try{ renderConfidenceRing(currentResult.confidence); }catch(e){}
+  }
   $('resTensionN').textContent=corrN.toFixed(1);
   $('resTensionKgf').textContent=kgf.toFixed(2);
   $('resFreq').textContent=freq.toFixed(1);
@@ -1225,14 +1418,29 @@ function finalizeCollection(){
   let confidence = Math.min(100, (Math.log10(snr+1)*30 + agreement*50 + Math.max(0,40 - rangePercent)));
   if(!isFinite(confidence)) confidence = 0; if(confidence<0) confidence=0;
 
-  updateResult(finalFreq, confidence);
+  // 채택된 스냅샷 과반이 경계 피크/배음 판정이면 결과 플래그로 반영
+  const base = filtered.length ? filtered : last;
+  const edge = base.filter(s=>s.edge).length*2 > base.length;
+  const subs = base.map(s=>s.subN||1).filter(v=>v>1);
+  const subN = subs.length*2 > base.length ? Math.round(median(subs)) : 1;
+  if(edge) confidence = Math.min(confidence, EDGE_CONF_CAP);
+
+  updateResult(finalFreq, confidence, {source:'collect', edge, subN, stable:true});
   if(currentResult){ currentResult.rangePercent = rangePercent; }
   $('resConf').textContent = Math.round(confidence);
   try{ renderConfidenceRing(Math.round(confidence)); }catch(e){}
   const hasResult = isFinite(finalFreq);
-  btnSave.disabled = !hasResult;
+  btnSave.disabled = !hasResult || edge;
 
-  if(rangePercent<=3 && agreement>=0.8){
+  if(edge){
+    setStatus('weak','피크가 고정 대역 경계 — 목표에서 크게 벗어났을 수 있음','EDGE');
+    beep(660, 80);
+    toast('피크가 측정 대상 고정 대역 경계에 있습니다. 고정 범위를 넓히거나 끄고 다시 측정하세요.','warn',5000);
+  }else if(subN>1 && rangePercent<=3 && agreement>=0.8){
+    setStatus('good',subharmText(subN),'STABLE');
+    beep(1100, 150);
+    toast(subharmText(subN)+' — 장력이 목표와 크게 다를 수 있으니 확인 후 저장하세요.','warn',5000);
+  }else if(rangePercent<=3 && agreement>=0.8){
     setStatus('good','결과 안정 — 저장하거나 재측정하세요','STABLE');
     beep(1100, 150);
     toast('결과가 안정적입니다. 저장 버튼을 눌러주세요.','ok');
@@ -1336,8 +1544,8 @@ function drawWaveform(){
   if(!waveCtx || !waveformBuf) return;
   const W=waveCanvas.clientWidth, H=72;
 
-  /* ── 가이드 모드: 스크롤 사인파 애니메이션 ── */
-  if(guideActive && !collecting){
+  /* ── 가이드 모드: 스크롤 사인파 애니메이션 (적응형 충격 감지 ON일 때만) ── */
+  if(guideActive && adaptiveTrigger && !collecting){
     const elapsed=(Date.now()-guideStartTs)%guidePeriodMs;
     const phase=(elapsed/guidePeriodMs)*2*Math.PI;
     const sineNow=Math.sin(phase);
@@ -1487,7 +1695,7 @@ function renderRobots(){
   // Collect all belt IDs that were used across all robots
   const allKeys = BELT_IDS.map(d=>d.key);
   // Build column headers per robot
-  const robotHeaders = robots.map(r=>`<th>${r.unit ? r.unit+'호기' : '(미설정)'}</th>`).join('');
+  const robotHeaders = robots.map(r=>`<th>${r.unit ? escapeHtml(r.unit)+'호기' : '(미설정)'}</th>`).join('');
   head.innerHTML = `<tr>
     <th>벨트 ID</th><th>종류 / Target</th>${robotHeaders}
   </tr>`;
@@ -1508,7 +1716,7 @@ function renderRobots(){
         slot.values.reduce((a,v)=>a+v.corrN,0)/slot.values.length;
       const judge = slot.avgJudge || (avg >= p.targetN*(1-p.tolPct/100) && avg <= p.targetN*(1+p.tolPct/100) ? 'OK' : 'NG');
       const cls = judge==='OK' ? 'val-ok' : 'val-ng';
-      return `<td class="val-cell ${cls}" style="text-align:center;font-weight:700;">${avg.toFixed(1)}<br><span style="font-size:9px;font-weight:800;">${judge}</span></td>`;
+      return `<td class="val-cell ${cls}" style="text-align:center;font-weight:700;">${avg.toFixed(1)}<br><span style="font-size:9px;font-weight:800;">${escapeHtml(judge)}</span></td>`;
     }).join('');
     return `<tr>
       <td style="font-weight:800;color:#111;">${key}</td>
@@ -1519,39 +1727,98 @@ function renderRobots(){
   updateSessionSwitchRow();
   updateReportButtons();
 }
-function renderSessions(){ renderRobots(); }  // 하위호환
 
 /* ================================================================
    localStorage 상태 저장 / 복원
+   - 키: beltTension_v1 (2.0 전용. 1.0은 별도 키 beltTension_classic_v1 사용)
+   - Date는 JSON.stringify가 toJSON()으로 먼저 바꾸므로 ISO 문자열로 저장된다.
+     복원 시 알려진 날짜 필드(createdAt·startedAt·completedAt·time)를 toDate()로 되돌린다.
    ================================================================ */
-function dateReplacer(key, val){
-  if(val instanceof Date) return {__type:'Date', iso:val.toISOString()};
-  return val;
-}
-function dateReviver(key, val){
-  if(val && val.__type==='Date') return new Date(val.iso);
-  return val;
-}
+const STORAGE_KEY='beltTension_v1';
 function saveState(){
   try{
-    const data={version:1, flowEnabled, robots, simpleHistory, filterStrength, adaptiveTrigger};
-    localStorage.setItem('beltTension_v1', JSON.stringify(data, dateReplacer));
-  }catch(e){}
+    const data={version:1, flowEnabled, robots, simpleHistory, filterStrength, adaptiveTrigger, beltGeom};
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    storageWarned=false;
+    return true;
+  }catch(e){
+    console.error('saveState 실패', e);
+    if(!storageWarned){
+      storageWarned=true;
+      // 호출부가 곧바로 띄우는 '저장되었습니다' 토스트에 덮이지 않도록 다음 틱에 표시
+      setTimeout(()=>toast('기록을 브라우저에 저장하지 못했습니다(저장 공간 부족/차단). 새로고침 전에 CSV·PDF로 내보내세요.','err',6000), 0);
+    }
+    return false;
+  }
+}
+/* 숫자 필드 정규화: 숫자가 아니면 NaN(또는 기본값) */
+function numOr(v, d){ return (typeof v==='number' && isFinite(v)) ? v : d; }
+function normGeom(g, type){
+  const p=BELT_PRESETS[type];
+  g = (g && typeof g==='object') ? g : {};
+  const pos=(v,d)=>{ const n=numOr(v,NaN); return n>0 ? n : d; };
+  return {mass:pos(g.mass,p.mass), width:pos(g.width,p.width), span:pos(g.span,p.span), cf:pos(g.cf,p.cf)};
+}
+function normValue(v){
+  if(!v || typeof v!=='object' || !isFinite(v.freq) || !isFinite(v.corrN)) return null;
+  return {freq:+v.freq, corrN:+v.corrN, kgf:numOr(v.kgf, v.corrN/G), rawN:numOr(v.rawN, NaN),
+          conf:numOr(v.conf,0), time:toDate(v.time), judge:(v.judge==='OK'||v.judge==='NG')?v.judge:'--'};
+}
+function normSlot(s){
+  if(!s || typeof s!=='object') return null;
+  const def=BELT_IDS.find(d=>d.key===s.key);
+  if(!def) return null;                       // 알 수 없는 벨트 ID는 버림
+  const p=BELT_PRESETS[def.type];
+  const values=Array.isArray(s.values) ? s.values.map(normValue).filter(Boolean) : [];
+  const g=normGeom(s, def.type);
+  const slot={
+    key:def.key, type:def.type, label:def.label,
+    targetN:numOr(s.targetN,p.targetN), tolPct:numOr(s.tolPct,p.tolPct),
+    mass:g.mass, width:g.width, span:g.span, cf:g.cf,
+    measCount:Math.min(10, Math.max(1, parseInt(s.measCount,10)||1)),
+    values, average:numOr(s.average,null), avgJudge:(s.avgJudge==='OK'||s.avgJudge==='NG')?s.avgJudge:null,
+    completedAt:toDate(s.completedAt)
+  };
+  // 아직 측정하지 않은 슬롯은 해당 타입 형상으로 재설정 (이전 버전에서 다른 타입 형상이 섞여 들어간 대기 슬롯 복구)
+  if(!values.length){ const t=beltGeom[def.type]; slot.mass=t.mass; slot.width=t.width; slot.span=t.span; slot.cf=t.cf; }
+  return slot;
+}
+function normRobot(r, i){
+  if(!r || typeof r!=='object' || !Array.isArray(r.slots)) return null;
+  const slots=r.slots.map(normSlot).filter(Boolean);
+  if(!slots.length) return null;
+  const id=numOr(r.id, NaN);
+  return {
+    id: isFinite(id) ? id : Date.now()+i,
+    unit: String(r.unit==null?'':r.unit).slice(0,20),
+    createdAt: toDate(r.createdAt) || new Date(),
+    startedAt: toDate(r.startedAt), completedAt: toDate(r.completedAt),
+    slots
+  };
+}
+function normSimple(v){
+  const n=normValue(v);
+  if(!n) return null;
+  return Object.assign(n, {
+    mass:numOr(v.mass,NaN), width:numOr(v.width,NaN), span:numOr(v.span,NaN), cf:numOr(v.cf,NaN),
+    targetN:numOr(v.targetN,NaN), tolPct:numOr(v.tolPct,NaN)
+  });
 }
 function loadState(){
+  let data=null;
   try{
-    const raw=localStorage.getItem('beltTension_v1');
+    const raw=localStorage.getItem(STORAGE_KEY);
     if(!raw) return;
-    const data=JSON.parse(raw, dateReviver);
-    if(data.version!==1) return;
-    robots=data.robots||[];
-    simpleHistory=data.simpleHistory||[];
-    flowEnabled=data.flowEnabled??true;
-    filterStrength=(data.filterStrength>=1&&data.filterStrength<=4)?data.filterStrength:2;
-    adaptiveTrigger=data.adaptiveTrigger===true;
-    setSwitch(swAdaptiveTrigger, adaptiveTrigger);
-    applyAdaptiveTriggerUI();
-  }catch(e){}
+    data=JSON.parse(raw);
+  }catch(e){ console.error('loadState: 저장 데이터 파싱 실패', e); return; }
+  if(!data || typeof data!=='object' || data.version!==1) return;
+  beltGeom={ drive:normGeom(data.beltGeom&&data.beltGeom.drive,'drive'),
+             lifting:normGeom(data.beltGeom&&data.beltGeom.lifting,'lifting') };
+  robots=(Array.isArray(data.robots)?data.robots:[]).map(normRobot).filter(Boolean);
+  simpleHistory=(Array.isArray(data.simpleHistory)?data.simpleHistory:[]).map(normSimple).filter(Boolean);
+  flowEnabled=data.flowEnabled!==false;
+  filterStrength=(data.filterStrength>=1&&data.filterStrength<=4)?Math.round(data.filterStrength):2;
+  adaptiveTrigger=data.adaptiveTrigger===true;
 }
 
 /* ================================================================
@@ -1575,27 +1842,27 @@ function renderSimpleHistory(){
       <td style="text-align:center;">${i+1}회</td>
       <td style="text-align:center;">${v.freq.toFixed(1)}</td>
       <td class="${cls}" style="text-align:center;font-weight:700;">${v.corrN.toFixed(1)} N</td>
-      <td class="${cls}" style="text-align:center;font-weight:700;">${v.judge}</td>
-      <td style="text-align:center;">${fmtTime(v.time)}</td>
+      <td class="${cls}" style="text-align:center;font-weight:700;">${escapeHtml(v.judge)}</td>
+      <td style="text-align:center;">${escapeHtml(fmtTime(v.time))}</td>
     </tr>`;
   }).join('');
+}
+
+/* CSV 파일 저장 (BOM + 셀 이스케이프는 toCsv, 다운로드는 공통 smDownload — URL 지연 해제) */
+function saveCsvFile(lines, prefix){
+  const blob=new Blob([toCsv(lines)],{type:'text/csv;charset=utf-8;'});
+  const stamp=fmtTime(new Date(),true).replace(/[: ]/g,'-');
+  smDownload(blob, prefix+stamp+'.csv');
+  toast('CSV 파일을 다운로드했습니다.','ok');
 }
 
 function downloadSimpleCSV(){
   if(!simpleHistory.length){ toast('다운로드할 측정이 없습니다.','err'); return; }
   const header=['회차','주파수(Hz)','장력(N)','kgf','판정','시각'];
   const rows=simpleHistory.map((v,i)=>[
-    i+1, v.freq.toFixed(2), v.corrN.toFixed(2), v.kgf.toFixed(3), v.judge, fmtTime(v.time,true)
+    i+1, v.freq.toFixed(2), v.corrN.toFixed(2), isFinite(v.kgf)?v.kgf.toFixed(3):'', v.judge, fmtTime(v.time,true)
   ]);
-  const csv='﻿'+[header,...rows].map(l=>l.join(',')).join('\r\n');
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  const stamp=fmtTime(new Date(),true).replace(/[: ]/g,'-');
-  a.href=url; a.download='belt_tension_simple_'+stamp+'.csv';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  toast('CSV 파일을 다운로드했습니다.','ok');
+  saveCsvFile([header,...rows], 'belt_tension_simple_');
 }
 
 function setFlowMode(enabled){
@@ -1677,15 +1944,7 @@ function downloadCSV(){
     });
     return [unit, date, ...slotCols];
   });
-  const csv='﻿'+[header,...rows].map(line=>line.join(',')).join('\r\n');
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  const stamp=fmtTime(new Date(),true).replace(/[: ]/g,'-');
-  a.href=url; a.download='belt_tension_'+stamp+'.csv';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  toast('CSV 파일을 다운로드했습니다.','ok');
+  saveCsvFile([header,...rows], 'belt_tension_');
 }
 
 /* ================================================================
@@ -1693,6 +1952,17 @@ function downloadCSV(){
    ================================================================ */
 async function downloadPDF(){
   if(!robots.length){ toast('다운로드할 측정이 없습니다.','err'); return; }
+  // jsPDF는 저장소에 포함한 로컬 파일(assets/vendor)에서 로드 — 실패 시 명확히 안내
+  if(!window.jspdf || !window.jspdf.jsPDF){
+    toast('PDF 라이브러리(jsPDF)를 불러오지 못했습니다. 페이지를 새로고침하거나 CSV로 내보내세요.','err',6000);
+    return;
+  }
+  // iOS Safari: 생성(비동기) 후 window.open을 부르면 사용자 제스처가 만료돼 팝업이 차단됨
+  // → 클릭 직후(첫 await 전) 빈 창을 먼저 열어 두고 생성이 끝나면 그 창으로 PDF를 보낸다
+  const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+              (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);   // iPadOS 13+는 Mac으로 보고됨
+  let iosWin=null;
+  if(isIOS){ try{ iosWin=window.open('', '_blank'); }catch(e){ iosWin=null; } }
   toast('PDF 생성 중...','ok');
   try{
     const {jsPDF} = window.jspdf;
@@ -1858,23 +2128,28 @@ async function downloadPDF(){
     const st=new Date();
     const pn=n=>String(n).padStart(2,'0');
     const fname='belt_tension_report_'+st.getFullYear()+pn(st.getMonth()+1)+pn(st.getDate())+'_'+pn(st.getHours())+pn(st.getMinutes())+'.pdf';
-    const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    if(isIOS){
+    if(isIOS && iosWin && !iosWin.closed){
       const blob=doc.output('blob');
       const url=URL.createObjectURL(blob);
-      window.open(url,'_blank');
+      iosWin.location.href=url;
+      setTimeout(()=>URL.revokeObjectURL(url), 60000);
       toast('PDF가 새 탭에서 열렸습니다. 공유(↑) 버튼으로 저장하세요.','ok',5000);
     }else{
+      // 데스크톱/안드로이드, 또는 iOS에서 새 창이 차단된 경우 → 직접 다운로드
       doc.save(fname);
-      toast('PDF 보고서를 다운로드했습니다.','ok');
+      toast(isIOS ? '새 탭이 차단되어 PDF를 바로 다운로드했습니다. 파일 앱에서 확인하세요.' : 'PDF 보고서를 다운로드했습니다.','ok',isIOS?5000:undefined);
     }
   }catch(e){
     console.error('PDF 생성 실패',e);
+    if(iosWin && !iosWin.closed){ try{ iosWin.close(); }catch(_){} }
     toast('PDF 생성에 실패했습니다.','err');
   }
 }
 
+/* 시각 포맷 — Date가 아니어도(복원된 ISO 문자열·숫자·null) 죽지 않도록 방어 */
 function fmtTime(d, withDate=false){
+  d = toDate(d);
+  if(!d) return '-';
   const p=n=>String(n).padStart(2,'0');
   const t=p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
   if(!withDate) return t;
@@ -1893,14 +2168,7 @@ btnClear.addEventListener('click', clearHistory);
 // 가이드 모드 스위치
 const swGuide=$('swGuide');
 if(swGuide){
-  swGuide.addEventListener('click',()=>{
-    guideActive=!guideActive;
-    swGuide.setAttribute('aria-pressed', guideActive);
-    swGuide.classList.toggle('on', guideActive);
-    const chip=$('guideChip');
-    if(chip) chip.style.display=guideActive?'inline-flex':'none';
-    if(guideActive){ guideStartTs=Date.now(); guidePeakFired=false; }
-  });
+  swGuide.addEventListener('click',()=>{ setGuide(!guideActive); });
 }
 document.querySelectorAll('.guide-period-btn').forEach(btn=>{
   btn.addEventListener('click',()=>{
@@ -1940,15 +2208,12 @@ const swNoise=$('swNoise'), swLock=$('swLock'),
       selFilterStrength=$('selFilterStrength'), filterStrengthRow=$('filterStrengthRow'),
       btnLearn=$('btnLearn'), learnRow=$('learnRow');
 function setSwitch(btn,on){ if(btn) btn.setAttribute('aria-pressed', on?'true':'false'); }
+/* 파형·가이드 섹션은 적응형 충격 감지 ON일 때만 표시. 가이드는 ON이면 기본 켜짐, OFF면 강제 꺼짐
+   (페이지 첫 로드에도 항상 호출 — 예전엔 저장 데이터가 있을 때만 호출돼 연속 모드에서 숨은 가이드가 동작) */
 function applyAdaptiveTriggerUI(){
   const waveSection=document.getElementById('waveformSection');
   if(waveSection) waveSection.style.display=adaptiveTrigger?'':'none';
-  if(!adaptiveTrigger && guideActive){
-    guideActive=false;
-    if(swGuide){ swGuide.setAttribute('aria-pressed','false'); swGuide.classList.remove('on'); }
-    const chip=document.getElementById('guideChip');
-    if(chip) chip.style.display='none';
-  }
+  setGuide(adaptiveTrigger);
 }
 swAdaptiveTrigger.addEventListener('click', ()=>{
   adaptiveTrigger=!adaptiveTrigger;
@@ -2032,9 +2297,15 @@ if(btnSimpleCSV) btnSimpleCSV.addEventListener('click', downloadSimpleCSV);
 window.addEventListener('resize', setupCanvas);
 window.addEventListener('beforeunload', ()=>{ if(measuring) stopMeasure(); });
 
+/* 백그라운드 전환 시 측정 중지 — 숨은 탭에서는 requestAnimationFrame이 멈춰 분석이 안 되는데
+   마이크만 계속 열려 배터리를 쓰므로(v1과 동일 정책). 복귀하면 안내 */
 document.addEventListener('visibilitychange', ()=>{
-  if(document.hidden && measuring)
-    toast('탭이 백그라운드로 전환됐습니다. 측정은 계속 실행됩니다.', 'warn', 2000);
+  if(document.hidden){
+    if(measuring || starting){ stopMeasure(); pausedByHide=true; }
+  }else if(pausedByHide){
+    pausedByHide=false;
+    toast('화면을 벗어나 측정을 중지했습니다. 측정 시작을 다시 눌러주세요.', 'warn', 4000);
+  }
 });
 
 /* ====================================================================
@@ -2085,7 +2356,9 @@ window.addEventListener('load', ()=>{
   setupWaveformCanvas();
   drawSpectrum(new Uint8Array(0),1,1,0,-1);
 
-  loadState();  // localStorage 복원
+  loadState();  // localStorage 복원 (구조 검증·날짜 복원 포함)
+  setSwitch(swAdaptiveTrigger, adaptiveTrigger);
+  applyAdaptiveTriggerUI();   // 저장 데이터 유무와 관계없이 항상 — 연속 모드면 파형·가이드 숨김/OFF
 
   // flowEnabled 상태에 따라 UI 초기화
   const swFlowEl=$('swFlow');

@@ -1,10 +1,6 @@
 /* ===== profile.js : 내 계정 모달 / 비밀번호 변경 / 본인 활동 로그 ===== */
 
-function escHtml(v){
-  return String(v ?? '').replace(/[&<>"']/g,m=>({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[m]));
-}
+/* escHtml 은 helpers.js 로 이동 (먼저 로드되는 파일에서 공용 정의) */
 
 function roleLabel(role){
   return role==='admin'?'관리자':'일반 사용자';

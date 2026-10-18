@@ -16,6 +16,7 @@ function rendCalendar(){
   // 확정 일정에서 납품 예정일만 추출해 달력에 표시
   const schedMap={};
   confirmedSchedules.forEach(sc=>{
+    if(!sc||!Array.isArray(sc.phases))return;
     const dl=sc.deadline;
     if(!schedMap[dl])schedMap[dl]=[];
     schedMap[dl].push(sc);
@@ -48,14 +49,14 @@ function rendCalendar(){
     const hasMilestone=scheds.length>0;
     let cls='cal-d'+(isToday?' today':'')+(hasMilestone?' milestone':'');
     let tags=scheds.slice(0,3).map(sc=>{
-      const r=sc.robot;
+      const rc=rclr[sc.robot]||{bg:'var(--s2)',tx:'var(--t2)',short:'?'};
       const type=sc._markerType;
       if(type==='parts'){
-        return`<span class="cal-tag" style="background:#F5F3FF;color:#6D28D9;border:1px solid #DDD6FE">📦${rclr[r].short} 발주</span>`;
+        return`<span class="cal-tag" style="background:#F5F3FF;color:#6D28D9;border:1px solid #DDD6FE">📦${rc.short} 발주</span>`;
       } else if(type==='start'){
-        return`<span class="cal-tag" style="background:${rclr[r].bg};color:${rclr[r].tx}">▶${rclr[r].short}${sc.unitFrom}조립</span>`;
+        return`<span class="cal-tag" style="background:${rc.bg};color:${rc.tx}">▶${rc.short}${escHtml(sc.unitFrom)}조립</span>`;
       } else {
-        return`<span class="cal-tag" style="background:#D1FAE5;color:var(--gn-dark);border:1px solid #A7F3D0">🚚${rclr[r].short}${sc.unitFrom}~${sc.unitTo}납품</span>`;
+        return`<span class="cal-tag" style="background:#D1FAE5;color:var(--gn-dark);border:1px solid #A7F3D0">🚚${rc.short}${escHtml(sc.unitFrom)}~${escHtml(sc.unitTo)}납품</span>`;
       }
     }).join('');
 
@@ -66,7 +67,7 @@ function rendCalendar(){
       return `${sc.robot} ${sc.unitFrom}~${sc.unitTo}호기 납품`;
     }).join('\n'):'';
 
-    html+=`<div class="${cls}" title="${tipTxt||'더블클릭: 공수산정 이동'}" ondblclick="go('labor')" style="cursor:pointer"><div class="cal-dn">${d}</div>${tags}</div>`;
+    html+=`<div class="${cls}" title="${escHtml(tipTxt||'더블클릭: 공수산정 이동')}" ondblclick="go('labor')" style="cursor:pointer"><div class="cal-dn">${d}</div>${tags}</div>`;
   }
 
   const rem=42-(first+last);
@@ -84,17 +85,18 @@ function setAlertTab(r,el){
 }
 
 function rendAlerts(){
-  const all=bom.filter(b=>b.stock<=b.minStock);
+  // 최소 재고가 설정된 부품만 알림 (minStock 0 인 조립품 등 제외)
+  const all=bom.filter(isLowStock);
   const al=alertTabFilter==='ALL'?all:all.filter(b=>b.robot===alertTabFilter);
   document.getElementById('tb-alert').innerHTML=al.length
-    ?al.map(b=>{const s=sts(b.stock,b.minStock);return`<tr><td><span class="rb ${rbc(b.robot)}">${b.robot}</span></td><td class="t-m t-sm">${b.partNo}</td><td>${b.name}</td><td><b style="color:${b.stock===0?'var(--re)':'var(--am)'}">${b.stock}</b></td><td>${b.minStock}</td><td><span class="sb2 ${s.c}">${s.t}</span></td></tr>`;}).join('')
+    ?al.map(b=>{const s=sts(b.stock,b.minStock);return`<tr><td><span class="rb ${rbc(b.robot)}">${escHtml(b.robot)}</span></td><td class="t-m t-sm">${escHtml(b.partNo)}</td><td>${escHtml(b.name)}</td><td><b style="color:${b.stock===0?'var(--re)':'var(--am)'}">${escHtml(b.stock)}</b></td><td>${escHtml(b.minStock)}</td><td><span class="sb2 ${s.c}">${s.t}</span></td></tr>`;}).join('')
     :'<tr><td colspan="6" style="text-align:center;color:var(--t2);padding:14px;font-size:12px">✅ 재고 부족 항목 없음</td></tr>';
 }
 
 function rendRecent(){
   const rec=[...ioLogs].sort((a,b)=>b.ts-a.ts).slice(0,8);
   document.getElementById('tb-recent').innerHTML=rec.length
-    ?rec.map(l=>`<tr><td class="t-m t-sm">${fd(l.ts)}</td><td><span class="lb ${l.type==='IN'?'lb-in':'lb-out'}">${l.type==='IN'?'입고':'출고'}</span></td><td><span class="rb ${rbc(l.robot)}">${l.robot}</span></td><td>${l.partName}</td><td class="t-m">${l.qty} ${l.unit}</td><td class="t-sm">${l.userName}<span class="t-m t-mu" style="font-size:10px;margin-left:3px">(${l.userId})</span></td><td class="t-mu t-sm">${l.memo||'-'}</td><td>${pminis(l.photos,2)}</td></tr>`).join('')
+    ?rec.map(l=>`<tr><td class="t-m t-sm">${fd(l.ts)}</td><td><span class="lb ${l.type==='IN'?'lb-in':'lb-out'}">${l.type==='IN'?'입고':'출고'}</span></td><td><span class="rb ${rbc(l.robot)}">${escHtml(l.robot)}</span></td><td>${escHtml(l.partName)}</td><td class="t-m">${escHtml(l.qty)} ${escHtml(l.unit)}</td><td class="t-sm">${escHtml(l.userName)}<span class="t-m t-mu" style="font-size:10px;margin-left:3px">(${escHtml(l.userId)})</span></td><td class="t-mu t-sm">${escHtml(l.memo||'-')}</td><td>${pminis(l.photos,2)}</td></tr>`).join('')
     :'<tr><td colspan="8" style="text-align:center;color:var(--t2);padding:14px;font-size:12px">입출고 내역 없음</td></tr>';
 }
 

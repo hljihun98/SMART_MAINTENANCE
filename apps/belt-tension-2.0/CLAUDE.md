@@ -34,9 +34,21 @@
 저장 버튼 → saveCurrentSlot() → saveState()
 ```
 
-### localStorage 키: `beltTension_v1`
-저장 항목: `version, flowEnabled, robots, simpleHistory, filterStrength, adaptiveTrigger`
+### localStorage 키: `beltTension_v1` (2.0 전용)
+저장 항목: `version, flowEnabled, robots, simpleHistory, filterStrength, adaptiveTrigger, beltGeom`
 저장 안 되는 항목: `selectedDriveIds, selectedLiftingIds, inUnit.value, activeRobot, activeSlotIdx`
+- 1.0(`apps/belt-tension/`)은 스키마가 달라 **별도 키 `beltTension_classic_v1`** 사용 — 두 앱이 서로의 키를 쓰지 않도록 유지
+- `loadState()`는 구조를 검증(`normRobot/normSlot/normValue/normSimple`)하고 알 수 없는 벨트 ID·비숫자 측정값은 버림
+- `saveState()` 실패(용량 초과·차단) 시 토스트 1회 안내 — 조용히 삼키지 말 것
+
+### 벨트 형상 (`beltGeom`)
+- 새 호기 슬롯의 mass/width/span/cf는 **입력칸이 아니라 `beltGeom[타입]`** 에서 가져온다 (`buildActiveSlots`)
+  - 과거 버그: 입력칸에 직전 슬롯(예: 리프팅) 형상이 남아 있어 구동 슬롯에 리프팅 형상이 복사됨 → 장력 7배 오차
+- `saveCurrentSlot()`에서 해당 타입 슬롯을 저장할 때 실제 사용한 형상으로 `beltGeom[타입]` 갱신
+- 복원 시 값이 없는(미측정) 슬롯은 해당 타입 형상으로 재설정
+
+### 호기 번호
+- 숫자 1~6자리만 허용(`UNIT_RE`), innerHTML 출력 시 반드시 `escapeHtml()` — 복원 데이터에 옛 값이 있을 수 있음
 
 ---
 
@@ -65,12 +77,33 @@
 - `applyAdaptiveTriggerUI()` 함수가 waveformSection 표시/숨김 처리
 
 ### 파형 타이밍 가이드 (guideActive)
-- **기본값: ON** (`let guideActive=true, guideStartTs=Date.now()`)
-- `index.html` 의 `#swGuide` 는 `aria-pressed="true" class="switch on"`, `#guideChip` 은 `display:inline-flex` 로 초기 상태를 맞춰야 함 (JS 초기값과 마크업이 어긋나면 스위치 표시가 실제 상태와 불일치)
-- `analyzeLoop()` 에서 `guideActive` 분기가 `adaptiveTrigger` 보다 **먼저** 평가되므로, adaptiveTrigger 가 OFF 여도 가이드의 사인파 피크 자동 트리거는 정상 동작함
+- **적응형 충격 감지 ON일 때만 동작** — 기본값은 "적응형 ON이면 가이드 ON, OFF면 가이드 OFF"
+  - 과거 버그: 연속 모드(기본)에서도 `guideActive=true`가 남아 숨겨진 가이드가 3초마다 880 Hz 비프 + 1.5초 수집 + "튕김이 감지되지 않았습니다" 토스트를 반복
+- ON/OFF와 스위치·칩 동기화는 반드시 `setGuide(on)` 으로 (직접 `guideActive=` 대입 금지)
+- `applyAdaptiveTriggerUI()` 는 **페이지 로드 시 항상** 호출 (저장 데이터 유무와 무관) → `setGuide(adaptiveTrigger)`
+- `analyzeLoop()` / `drawWaveform()` 의 가이드 분기 조건은 `guideActive && adaptiveTrigger`
 - `startMeasure()` 에서 `guideStartTs` 를 측정 시작 시각으로 리셋 — 안 하면 페이지 로드 후 경과된 위상 때문에 시작 직후 피크가 즉시 발화할 수 있음
-- `stopMeasure()` 는 가이드를 OFF 로 끄지 않고 **기본값 ON 으로 복귀**시킴
-- 단, adaptiveTrigger 를 OFF 로 토글하면 `applyAdaptiveTriggerUI()` 가 가이드를 강제 OFF (기존 의도된 동작)
+- `stopMeasure()` 는 `setGuide(adaptiveTrigger)` 로 기본값 복귀
+- `index.html` 의 `#swGuide`(`aria-pressed="true"`) 마크업 초기값은 적응형 ON 기준 — 로드 시 JS가 실제 상태로 맞춤
+
+### 기본주파수 판정 (배음 오검출 방지)
+- 대역 최대 피크 → `analyzePeak()` → `resolveFundamental()` 이 f/2, f/3(분석 범위 10~5000 Hz 안)에 유의미한 국소 피크가 있으면 기본파로 환산 (`subN`)
+- 임계값(`SUBHARM_*`, `PEAK_MIN_PROM_DB`, `EDGE_BINS`)은 파일 상단 주석에 근거 기록 — 바꾸면 합성 신호로 정상 벨트 오환산 0건·느슨한 벨트 NG 판정을 다시 확인할 것
+  - `SUBHARM_MIN_TOL_BINS`를 2 이상으로 넓히면 8192 FFT에서 60 Hz 험이 f/3 창에 걸려 정상 리프팅 벨트를 오판함(검증됨)
+- 잠금 대역 경계 피크(`edge`) → 신뢰도 ≤30, 저장 차단, "고정 범위를 넓히거나 끄고 재측정" 안내
+- 측정 대상 고정 OFF면 충격 수집 구간도 분석 범위 전체 탐색 (숨은 '예상 ±30%' 대역 없음)
+- 1.0(`apps/belt-tension/index.html` 인라인)에도 같은 함수·임계값이 복제되어 있음 — 한쪽을 바꾸면 다른 쪽도 맞출 것
+
+### 저장 품질 (연속 측정 모드)
+- 결과는 `stableFreq()`(이상치 제거 평균)로 계산 — EMA `dispFreq`는 화면 표시용
+- 저장 조건: 5프레임 버퍼 가득 + 불안정 아님 + 신뢰도 ≥ `LIVE_SAVE_MIN_CONF`(50) + 경계 아님
+- 저장 후 `startRearm()` → 신호가 `REARM_QUIET_MS`(300 ms) 이상 사라져야 다음 결과 갱신·저장 (한 번 튕겨 여러 회차 채우기 방지)
+
+### 오디오 수명주기
+- `startMeasure()` 는 `starting` 플래그 + `startToken` 으로 중복 시작 방지, 권한 대기 중 `stopMeasure()` 가 호출되면 얻은 스트림을 즉시 반납
+- `stopMeasure()` 는 `resetCollection()` 으로 수집 상태 초기화 — 안 하면 재시작 첫 프레임에 이전 벨트 스냅샷으로 결과가 나옴
+- `stopMeasure(true)` 는 오류 상태(권한 거부 등) 표시를 유지
+- 백그라운드 전환(`visibilitychange`) 시 측정 중지 + 복귀 시 토스트 (숨은 탭에서는 rAF가 멈춰 분석 불가, 마이크만 열려 있었음)
 
 ### 측정대상 고정 (targetLock)
 - **기본값: ON** (`let targetLock={enabled:true, widthPct:30}`)
@@ -98,6 +131,11 @@
 ---
 
 ## 주요 버그 수정 이력
+
+### 2026-10-18 감사 결과 반영 (요약 — 상세는 README 변경 이력)
+- Date 직렬화: replacer가 동작하지 않아 ISO 문자열로 저장되고 복원도 안 됨 → 새로고침 후 CSV/PDF 실패. `toDate()`로 알려진 날짜 필드 복원 + `fmtTime()` 방어
+- 슬롯 형상 혼입(`beltGeom` 도입), 배음 오검출·경계 피크, stale `collecting`, 숨은 가이드, 시작 연타 누수, XSS, CSV 이스케이프, iOS PDF 팝업 차단, jsPDF 로컬화
+- 제거한 데드코드: `setBeltCount`, `showNextRobotPrompt/startNextRobot/promptNextRobot`, `updateProgressChip`, `renderSessions`, `saveResult`(별칭), `held`, `measureStartTs`, `currentStep`, `dateReplacer/dateReviver`
 
 ### 세션 재개 버그 (initRobotIfNeeded)
 - **증상**: 측정 중 메인으로 나갔다 오면 "호기를 추가하거나 호기 번호를 입력해주세요" 오류
@@ -138,18 +176,30 @@
 ## 기술 메모
 
 ### 날짜 직렬화
-localStorage 저장 시 Date 객체를 `{__type:'Date', iso:...}` 형식으로 변환 (dateReplacer/dateReviver)
+`JSON.stringify`는 replacer보다 `Date.toJSON()`을 먼저 호출하므로 Date는 **ISO 문자열**로 저장된다.
+복원 시 `normRobot/normSlot/normValue`가 `createdAt·startedAt·completedAt·time` 을 `toDate()`로 되돌린다
+(`toDate`는 Date·ISO 문자열·숫자·구형 `{__type:'Date',iso}` 모두 허용). 새 날짜 필드를 추가하면 norm 함수에도 추가할 것.
 
 ### iOS PDF 저장
-`doc.save()` 대신 `window.open(blob URL)` 사용 (iOS Safari 다운로드 호환)
+클릭 직후(첫 `await` 전) `window.open('', '_blank')`로 빈 창을 먼저 열고, 생성이 끝나면 그 창에 blob URL을 넣는다
+(생성 후에 `window.open`하면 사용자 제스처 만료로 팝업 차단). 창이 막히면 `doc.save()`로 대체. iPadOS(Mac UA + 터치)도 iOS로 판정.
+
+### jsPDF
+CDN이 아니라 저장소의 `../../assets/vendor/jspdf-2.5.1.umd.min.js` 사용. `downloadPDF()` 시작 시 `window.jspdf` 확인 후 없으면 안내.
+
+### CSV
+`toCsv()/csvCell()` 사용 — UTF-8 BOM, 따옴표 이스케이프, `= + - @ 탭 CR` 시작 문자열은 `'` 접두(숫자·음수는 그대로). 다운로드는 `smDownload()`.
 
 ### 측정 루프 구조
 ```
 analyzeLoop() (rAF 루프)
-  ├─ adaptiveTrigger=true: RMS > 임계값 → 충격 감지 → collecting 구간 → finalizeCollection()
-  └─ adaptiveTrigger=false: 신호 있으면 즉시 updateResult() (연속 업데이트)
+  ├─ collecting: detectFundamentalBandpass() 스냅샷 → collectEndTs 경과 시 finalizeCollection()
+  ├─ adaptiveTrigger=true: (가이드 ON이면 사인파 피크) 또는 RMS > 임계값 → 충격 감지 → collecting 시작
+  └─ adaptiveTrigger=false: 유효 피크 → analyzePeak() → pushPeak() → stableFreq()로 updateResult(source:'live')
+                            (rearmPending 동안은 결과 갱신 보류)
 ```
 
 ### 프리셋 (BELT_PRESETS)
-- `drive`: 구동모듈 벨트 170N ±20%, 2.8g/m
-- `lifting`: 리프팅 벨트 500N ±10%, 4.2g/m
+- `drive`: 구동모듈 벨트 170N ±20%, 2.8 g/(m·mm), 폭 20 mm, 스팬 88 mm
+- `lifting`: 리프팅 벨트 500N ±10%, 4.2 g/(m·mm), 폭 35 mm, 스팬 147 mm
+- Mass는 **폭 1 mm당 단위 질량** g/(m·mm) — 공식이 Mass×Width를 곱하므로 벨트 전체 질량(g/m)을 넣으면 장력이 폭 배수만큼 과대

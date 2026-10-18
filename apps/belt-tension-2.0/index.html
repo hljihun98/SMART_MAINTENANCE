@@ -109,7 +109,7 @@
       <div class="session-label">호기 번호</div>
       <div class="unit-input-row">
         <span class="unit-prefix">PARKIE :</span>
-        <input id="inUnit" class="flow-unit-input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="예: 1" autocomplete="off">
+        <input id="inUnit" class="flow-unit-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="예: 1" autocomplete="off">
         <span class="unit-suffix">호기</span>
         <button id="btnAddRobot" class="btn-add-robot" type="button">
           <span class="ico">+</span> 호기 추가
@@ -311,16 +311,16 @@
       <div class="belt-preset-btns" style="margin-bottom:14px;">
         <button id="presetDrive" class="belt-preset-btn" type="button" onclick="applyBeltPreset('drive')">
           <span class="bpb-name">구동모듈</span>
-          <span class="bpb-spec">170 N ±20% · 2.8 g/m</span>
+          <span class="bpb-spec">170 N ±20% · 2.8 g/(m·mm)</span>
         </button>
         <button id="presetLifting" class="belt-preset-btn" type="button" onclick="applyBeltPreset('lifting')">
           <span class="bpb-name">리프팅</span>
-          <span class="bpb-spec">500 N ±10% · 4.2 g/m</span>
+          <span class="bpb-spec">500 N ±10% · 4.2 g/(m·mm)</span>
         </button>
       </div>
       <div class="form-grid">
         <div class="field">
-          <label>Mass <span class="unit">g/m</span></label>
+          <label>Mass <span class="unit">g/(m·mm)</span></label>
           <input id="inMass" type="number" inputmode="decimal" step="any" placeholder="2.5">
         </div>
         <div class="field">
@@ -398,7 +398,7 @@
         </div>
         <div class="help-item">
           <div class="title">저장 기준</div>
-          <div class="text">Confidence가 높고 상태가 GOOD/STABLE일 때 저장하세요. 자동 안정화가 완료되면 결과가 고정됩니다.</div>
+          <div class="text">연속 측정 모드는 신호가 안정(신뢰도 50% 이상)일 때만 저장되며, 저장 후에는 벨트를 다시 튕겨야 다음 값을 저장할 수 있습니다. 피크가 고정 대역 경계에 있으면 저장되지 않으니 고정 범위를 넓히거나 끄고 다시 측정하세요.</div>
         </div>
       </div>
       <div class="disclaimer"><b>안내</b> · 본 측정값은 마이크 입력과 알고리즘 추정에 기반한 참고값입니다. 정밀 측정이 필요하면 기준 장력계와 비교해 보정계수를 조정하세요.</div>
@@ -409,7 +409,7 @@
 
 <div id="toast"></div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="../../assets/vendor/jspdf-2.5.1.umd.min.js"></script>
 <script src="../../assets/js/utils.js"></script>
 <script src="./app.js"></script>
 </body>

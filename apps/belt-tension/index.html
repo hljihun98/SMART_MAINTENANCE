@@ -655,7 +655,7 @@ tbody tr:nth-child(even){background:#FAFBFC;}
     <div class="panel-body">
       <div class="form-grid">
         <div class="field">
-          <label>Mass <span class="unit">g/m</span></label>
+          <label>Mass <span class="unit">g/(m·mm)</span></label>
           <input id="inMass" type="number" inputmode="decimal" step="any" placeholder="2.5">
         </div>
         <div class="field">
@@ -783,11 +783,30 @@ const BUF_SIZE = 5;           // 안정화 버퍼 크기 — 최근 유효 피�
 const OUTLIER_TOL = 0.12;     // 중앙값 대비 ±12% 벗어난 피크는 이상치로 제외
 const G = 9.80665;            // 중력가속도 [m/s²] — kgf 환산에 사용
 
+/* ---------- 기본주파수 판정 (배음 오검출 방지) 상수 ----------
+   튕긴 벨트는 f0, 2f0, 3f0 … 배음을 함께 낸다. 탐색 대역(예상 주파수 ±30%)은 T∝f² 이므로
+   장력 0.49~1.69배만 담아, 크게 느슨한 벨트는 f0가 대역 밖이고 2f0/3f0만 대역 안에 남는다.
+   (스마트폰 마이크는 100 Hz 이하 감도가 낮아 느슨한 벨트의 f0가 배음보다 약하게 잡힐 수 있음)
+   → 대역 안 피크 f에 대해 f/2, f/3 위치(10~5000 Hz 안)에 '진짜' 국소 피크가 있으면 그것을 기본주파수로 본다.
+   ※ 2.0(belt-tension-2.0/app.js)과 같은 알고리즘·임계값 — 근거는 합성 신호로 검증 */
+const SUBHARM_DIVISORS = [2, 3];
+const SUBHARM_TOL = 0.035;       // f/n 허용 오차 ±3.5% (벨트 강성에 의한 배음 비정수성) — 보간 주파수 비율로 최종 확인
+const SUBHARM_MIN_TOL_BINS = 1;  // 탐색 창 최소 ±1 bin (정현파 argmax 오차 ±0.5 bin). 더 넓으면 60 Hz 험이 f/3 창에 걸림
+const SUBHARM_MIN_REL_DB = -20;  // 선택 피크 대비 -20 dB(진폭 10%) 이상 — 폰 마이크 저역 롤오프 + 튕김 위치에 따른 배음비 허용
+const SUBHARM_MIN_PROM_DB = 12;  // 주변 노이즈 바닥(중앙값) 대비 +12 dB 이상 — 단일 프레임 노이즈가 넘을 확률 ≈ 2e-5/bin
+const PEAK_MIN_PROM_DB = 12;     // 충격 수집 프레임 피크의 최소 돌출도 — 대역 안이 노이즈뿐이면 프레임을 버림
+const EDGE_BINS = 1;             // 피크가 탐색 대역 경계에서 이 bin 이내면 '경계 피크'(진짜 피크가 대역 밖일 수 있음)
+const EDGE_CONF_CAP = 30;        // 경계 피크 신뢰도 상한 (저장 기준 90% 미달 → 저장 불가)
+const STORAGE_KEY = 'beltTension_classic_v1';  // 1.0 전용 기록 저장 키 (2.0의 beltTension_v1과 스키마가 달라 분리)
+
 /* ---------- 전역 상태 ---------- */
 let audioCtx=null, analyser=null, srcNode=null, micStream=null;  // Web Audio API 객체
-let floatBuf=null, byteBuf=null, rafId=null;                     // FFT 버퍼·애니메이션 프레임 ID
+let floatBuf=null, byteBuf=null, timeBuf=null, rafId=null;       // FFT 버퍼·시간영역 버퍼(재사용)·애니메이션 프레임 ID
 let measuring=false, held=false;                                  // 측정 중 여부·값 고정 여부
+let starting=false, startToken=0;  // 측정 시작 진행 중(권한 대기 중 연타 방지) / stop 시 증가 → 진행 중 시작 취소
 let peakBuffer=[];                 // 최근 유효 피크 주파수 저장 (안정화용, 최대 BUF_SIZE개)
+let peakFlagBuffer=[];             // peakBuffer와 같은 길이 — 프레임별 {edge, subN} (경계/배음 안내용)
+let pausedByHide=false;            // 백그라운드 전환으로 측정을 멈춘 경우 복귀 시 안내
 let currentResult=null;            // 화면에 표시 중인 최종 결과 객체
 let records=[];                    // '저장' 버튼으로 누적된 측정 기록 배열
 let measureStartTs=0;              // 측정 시작 타임스탬프 (측정 시간 계산용)
@@ -941,7 +960,7 @@ function setPreset(preset){
    3~7. 측정 시작 — 마이크 권한 요청 & Web Audio API 초기화
    ================================================================ */
 async function startMeasure(){
-  if(measuring) return;
+  if(measuring || starting) return;           // 권한 팝업 대기 중 연타 → 스트림/AudioContext 중복 생성 방지
   if(!validateInputs()) return;               // 1~2. 입력 검증
   if(!canUseMicrophone()){
     setStatus('bad','마이크 사용 불가','UNAVAILABLE');
@@ -950,11 +969,23 @@ async function startMeasure(){
     return;
   }
 
-  // 마이크 권한 요청 (12.3 거부 처리)
+  starting=true; btnStart.disabled=true;
+  const myToken=++startToken;
   try{
-    // 마이크 제약: 노이즈 억제는 켜고, 에코 캔슬링 허용, AGC 비활성
-    micStream = await navigator.mediaDevices.getUserMedia({
-      audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:false }
+    await openAudio(myToken);
+  }finally{
+    starting=false;
+  }
+}
+
+async function openAudio(myToken){
+  // 마이크 권한 요청 (12.3 거부 처리)
+  let stream=null;
+  try{
+    // 마이크 제약: 에코 캔슬링·노이즈 억제·AGC 모두 끔 (2.0과 동일)
+    //  - 음성용 노이즈 억제는 지속되는 톤(벨트 울림)을 감쇠·왜곡시켜 피크 검출과 충격 감지를 방해함
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false }
     });
   }catch(err){
     const name = err && err.name ? err.name : '';
@@ -968,14 +999,18 @@ async function startMeasure(){
       setStatus('bad','마이크 초기화 실패','ERROR');
       toast('마이크 초기화에 실패했습니다: '+(err.message || '알 수 없는 오류'), 'err');
     }
-    stopMeasure();
+    stopMeasure(true);
     return;
   }
+  // 권한 대기 중에 중지/화면 전환으로 시작이 취소됨 → 방금 얻은 마이크를 즉시 반납
+  if(myToken!==startToken){ stream.getTracks().forEach(t=>t.stop()); return; }
+  micStream = stream;
 
   // ---- Web Audio API 초기화 ----
   try{
     audioCtx = new (window.AudioContext||window.webkitAudioContext)();
     if(audioCtx.state==='suspended') await audioCtx.resume();
+    if(myToken!==startToken){ stopMeasure(true); return; }
     srcNode = audioCtx.createMediaStreamSource(micStream);
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = parseInt(selFFT.value,10);   // 기본 16384
@@ -983,15 +1018,17 @@ async function startMeasure(){
     srcNode.connect(analyser);                      // (스피커로는 연결하지 않음 → 하울링 방지)
     floatBuf = new Float32Array(analyser.frequencyBinCount);
     byteBuf  = new Uint8Array(analyser.frequencyBinCount);
+    timeBuf  = new Float32Array(analyser.fftSize);  // computeRMS 재사용 버퍼 (프레임마다 할당하지 않음)
   }catch(err){
     setStatus('bad','오디오 초기화 실패','ERROR');
     toast('오디오 초기화에 실패했습니다: '+err.message, 'err');
-    stopMeasure();
+    stopMeasure(true);
     return;
   }
 
   // 상태 전환
-  measuring=true; held=false; peakBuffer=[];
+  measuring=true; held=false; peakBuffer=[]; peakFlagBuffer=[];
+  resetCollection();
   measureStartTs=Date.now();
   btnStart.disabled=true; btnStop.disabled=false; btnHold.disabled=false; btnSave.disabled=true;
   btnHold.classList.remove('active'); btnHold.innerHTML='<span class="ico">⏸</span> 측정값 고정';
@@ -1004,18 +1041,29 @@ async function startMeasure(){
 /* ================================================================
    측정 중지 — 리소스 정리
    ================================================================ */
-function stopMeasure(){
+/* keepStatus=true: 오류 상태 표시(권한 거부 등)를 '대기 중'으로 덮어쓰지 않음 */
+function stopMeasure(keepStatus){
   measuring=false;
+  startToken++;   // 진행 중인 startMeasure(권한 대기 등)가 있으면 취소
+  releaseAudio();
+  resetCollection();   // 수집 중 중지 → 재시작 시 이전 스냅샷으로 결과가 나오지 않도록
+  btnStart.disabled=false; btnStop.disabled=true; btnHold.disabled=true; btnSave.disabled=true;
+  selFFT.disabled=false;
+  if(keepStatus!==true) setStatus('ready','대기 중','READY');
+  meterFill.style.width='0%'; meterVal.textContent='0%';
+  liveFreq.textContent='--'; livePeak.textContent='대기'; livePeak.style.color='var(--muted)';
+}
+/* 오디오 자원 해제 (마이크 트랙 정지 + AudioContext 종료) */
+function releaseAudio(){
   if(rafId){ cancelAnimationFrame(rafId); rafId=null; }
   if(srcNode){ try{srcNode.disconnect();}catch(e){} srcNode=null; }
   if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
-  if(audioCtx){ try{audioCtx.close();}catch(e){} audioCtx=null; }
+  if(audioCtx){ try{ const p=audioCtx.close(); if(p&&p.catch) p.catch(()=>{}); }catch(e){} audioCtx=null; }
   analyser=null;
-  btnStart.disabled=false; btnStop.disabled=true; btnHold.disabled=true; btnSave.disabled=true;
-  selFFT.disabled=false;
-  setStatus('ready','대기 중','READY');
-  meterFill.style.width='0%'; meterVal.textContent='0%';
-  liveFreq.textContent='--'; livePeak.textContent='대기'; livePeak.style.color='var(--muted)';
+}
+/* 충격 수집 상태 초기화 */
+function resetCollection(){
+  collecting=false; collectStartTs=0; collectEndTs=0; collectedSnapshots=[];
 }
 
 /* ================================================================
@@ -1042,12 +1090,17 @@ function analyzeLoop(){
   // ★ 노이즈 저감(ON): 주변 소음 스펙트럼을 학습해 실시간 신호에서 bin 단위 차감
   //   - floatBuf(dB)를 제자리(in-place)로 정제 → 이후 피크/기본주파수 검출이 모두 정제본 사용
   //   - byteDraw : 그래프용 정제 스펙트럼(저감 효과를 눈으로 확인)
+  // RMS(시간영역)는 프레임당 한 번만 계산 (노이즈 저감 학습 판정과 충격 감지에 공용)
+  const rms = computeRMS();
   let byteDraw = byteBuf;
-  if(noiseReduction.enabled){ byteDraw = applyNoiseReduction(floatBuf, byteBuf, binHz); }
+  if(noiseReduction.enabled){ byteDraw = applyNoiseReduction(floatBuf, byteBuf, binHz, rms); }
 
   // ---- 10~5000 Hz 범위 필터링 ----
-  let minBin = Math.max(1, Math.floor(MIN_FREQ/binHz));
-  let maxBin = Math.min(floatBuf.length-2, Math.ceil(MAX_FREQ/binHz));
+  // 분석 범위 — 기본주파수(f/2, f/3) 탐색은 탐색 대역 밖이어도 이 범위 안이면 허용
+  const fullMinBin = Math.max(1, Math.floor(MIN_FREQ/binHz));
+  const fullMaxBin = Math.min(floatBuf.length-2, Math.ceil(MAX_FREQ/binHz));
+  let minBin = fullMinBin, maxBin = fullMaxBin;
+  let lockNarrowed = false;
 
   // ★ 측정 대상 고정(ON): 예상 주파수 주변의 좁은 밴드만 탐색해 엉뚱한 피크 제거
   lockLoBin=-1; lockHiBin=-1; lockCenter=NaN;
@@ -1059,7 +1112,7 @@ function analyzeLoop(){
       const lo=Math.max(MIN_FREQ, c*(1-w)), hi=Math.min(MAX_FREQ, c*(1+w));
       lockLoBin=Math.max(minBin, Math.floor(lo/binHz));
       lockHiBin=Math.min(maxBin, Math.ceil(hi/binHz));
-      if(lockHiBin>lockLoBin){ minBin=lockLoBin; maxBin=lockHiBin; } // 탐색밴드 축소
+      if(lockHiBin>lockLoBin){ minBin=lockLoBin; maxBin=lockHiBin; lockNarrowed=true; } // 탐색밴드 축소
     }
   }
 
@@ -1087,7 +1140,6 @@ function analyzeLoop(){
 
   // RMS (시간영역)으로 충격(스트라이크) 감지 및 0.5~2s 수집
   const now = Date.now();
-  const rms = computeRMS();
   if(!collecting){
     if(rms > 0.08 && (now - lastStrikeAt) > 3000){
       strikeTs = now; lastStrikeAt = now;
@@ -1100,8 +1152,9 @@ function analyzeLoop(){
       collecting = false;
       finalizeCollection();
     }else if(now >= collectStartTs){
-      const det = detectFundamentalBandpass(floatBuf, binHz, minBin, maxBin);
-      if(det) collectedSnapshots.push({t:now, f:det.freq, mag:det.mag});
+      const band = collectBand(binHz, minBin, maxBin, lockNarrowed);
+      const det = band ? detectFundamentalBandpass(floatBuf, binHz, band.lo, band.hi, fullMinBin, fullMaxBin, band.narrowed) : null;
+      if(det) collectedSnapshots.push({t:now, f:det.freq, mag:det.mag, edge:det.edge, subN:det.subN});
       liveFreq.textContent = det?det.freq.toFixed(1):'--';
     }
     rafId=requestAnimationFrame(analyzeLoop); return;
@@ -1130,19 +1183,25 @@ function analyzeLoop(){
     liveFreq.textContent='--';
   }
   else{
-    // 유효 피크 → 포물선 보간으로 정밀 주파수 추정
-    const f = interpolatePeak(floatBuf, peakBin, binHz);
+    // 유효 피크 → 배음 검사(f/2, f/3) + 경계 판정 + 포물선 보간으로 정밀 주파수 추정
+    const det = analyzePeak(floatBuf, binHz, peakBin, minBin, maxBin, fullMinBin, fullMaxBin, lockNarrowed);
+    const f = det.freq;
     // 12.7 측정 범위 초과 방어
     if(f<MIN_FREQ || f>MAX_FREQ){
       setStatus('listen','측정 범위를 벗어난 주파수','RANGE');
     }else{
-      pushPeak(f);                                      // 안정화 버퍼에 추가
+      pushPeak(f, det);                                 // 안정화 버퍼에 추가
       const stable = stableFreq();                      // 9. 안정화된 주파수
       const unstable = isUnstable();
+      const flags = bufferFlags();
       liveFreq.textContent = f.toFixed(1);
       livePeak.textContent='검출'; livePeak.style.color='var(--green)';
       if(unstable){
         setStatus('noise','측정 불안정 — 반복 측정해주세요','UNSTABLE');
+      }else if(flags.edge){
+        setStatus('weak','피크가 고정 대역 경계 — 목표에서 크게 벗어났을 수 있음 (고정 범위 확대/해제 후 재측정)','EDGE');
+      }else if(flags.subN>1){
+        setStatus('good',subharmText(flags.subN, lockNarrowed),'DETECTED');
       }else{
         setStatus('good','신호 검출','DETECTED');
       }
@@ -1170,10 +1229,10 @@ function interpolatePeak(buf, bin, binHz){
    ---------------------------------------------------------------- */
 function computeRMS(){
   if(!analyser) return 0;
-  const tbuf = new Float32Array(analyser.fftSize);
-  try{ analyser.getFloatTimeDomainData(tbuf); }catch(e){ return 0; }
-  let s=0; for(let i=0;i<tbuf.length;i++){ s += tbuf[i]*tbuf[i]; }
-  return Math.sqrt(s/tbuf.length);
+  if(!timeBuf || timeBuf.length!==analyser.fftSize) timeBuf=new Float32Array(analyser.fftSize);  // 버퍼 재사용
+  try{ analyser.getFloatTimeDomainData(timeBuf); }catch(e){ return 0; }
+  let s=0; for(let i=0;i<timeBuf.length;i++){ s += timeBuf[i]*timeBuf[i]; }
+  return Math.sqrt(s/timeBuf.length);
 }
 
 /* ----------------------------------------------------------------
@@ -1182,10 +1241,9 @@ function computeRMS(){
    - 매 프레임 floatBuf(dB)에서 소음 프로파일(선형)을 차감, 스펙트럴 플로어 적용
    - 반환: 그래프용 정제 byte 스펙트럼
    ---------------------------------------------------------------- */
-function applyNoiseReduction(floatBuf, byteBuf, binHz){
+function applyNoiseReduction(floatBuf, byteBuf, binHz, rms){
   const N=floatBuf.length;
   if(!noiseProfile || noiseProfile.length!==N){ noiseProfile=new Float32Array(N); noiseProfileReady=false; }
-  const rms=computeRMS();
   const quiet=(!collecting) && rms<0.05;              // 충격 아닌 조용한 순간만 학습
   const beta=noiseProfileReady?0.92:0.6;              // 초기엔 빠르게, 이후 천천히 적응
   const alpha=1.5, floorRatio=0.06;                   // 과차감 계수 / 스펙트럴 플로어
@@ -1228,68 +1286,121 @@ function setNoiseChip(txt){
 }
 
 /* ----------------------------------------------------------------
-   밴드패스 내 후보에서 기본주파수(고조파 제거) 탐색
-   floatBuf는 dB 스케일
+   충격 수집 구간 탐색 대역
+   - 측정 대상 고정 ON: 잠금 대역
+   - OFF: 예상 주파수(또는 k/Span) ±30% (1.0 기존 동작 유지) — 대역이 성립하지 않으면 분석 범위 전체
    ---------------------------------------------------------------- */
-function detectFundamentalBandpass(floatBuf, binHz, globalMinBin, globalMaxBin){
-  // estimate center from user input or fallback
+function collectBand(binHz, minBin, maxBin, lockNarrowed){
+  if(lockNarrowed) return {lo:minBin, hi:maxBin, narrowed:true};
   const span = parseFloat(inSpan.value) || 0;
   const k = parseFloat(kconst.value) || 1000;
   let expected = parseFloat(estFreq.value);
   if(!isFinite(expected) && span>0){ expected = k / span; }
-  let loBin = globalMinBin, hiBin = globalMaxBin;
   if(isFinite(expected) && expected>0){
-    const lo = Math.max(MIN_FREQ, expected*0.7);
-    const hi = Math.min(MAX_FREQ, expected*1.3);
-    loBin = Math.max(globalMinBin, Math.floor(lo/binHz));
-    hiBin = Math.min(globalMaxBin, Math.ceil(hi/binHz));
+    const lo = Math.max(minBin, Math.floor(Math.max(MIN_FREQ, expected*0.7)/binHz));
+    const hi = Math.min(maxBin, Math.ceil(Math.min(MAX_FREQ, expected*1.3)/binHz));
+    if(hi>lo) return {lo, hi, narrowed:true};
   }
-  // ★ 측정 대상 고정(ON): 락 밴드로 후보 범위를 강제 제한
-  if(targetLock.enabled && lockLoBin>=0 && lockHiBin>lockLoBin){
-    loBin=Math.max(globalMinBin, lockLoBin);
-    hiBin=Math.min(globalMaxBin, lockHiBin);
+  return {lo:minBin, hi:maxBin, narrowed:false};
+}
+
+/* ----------------------------------------------------------------
+   기본주파수 판정 — 배음 오검출 방지 (상수·근거는 상단 SUBHARM_* 참고)
+   예전 구현은 크기순 후보를 reverse()한 뒤 첫 원소에서 break 해서
+   '12번째로 강한 bin'(주 피크 옆 bin/노이즈)을 골랐고, 극대점이 아닌 bin에서 보간했음
+   ---------------------------------------------------------------- */
+/* centerHz 부근(±SUBHARM_TOL, 최소 ±SUBHARM_MIN_TOL_BINS)에서 가장 큰 국소 극대점 */
+function localPeakNear(buf, centerHz, binHz, loLimit, hiLimit){
+  const c = centerHz/binHz;
+  const tol = Math.max(SUBHARM_MIN_TOL_BINS, c*SUBHARM_TOL);
+  const lo = Math.max(loLimit, Math.floor(c-tol)), hi = Math.min(hiLimit, Math.ceil(c+tol));
+  let best=-1, bestDb=-Infinity;
+  for(let i=lo;i<=hi;i++){
+    const v=buf[i];
+    if(isFinite(v) && v>bestDb && v>=buf[i-1] && v>=buf[i+1]){ bestDb=v; best=i; }
   }
-  // gather candidates
-  const cands = [];
-  for(let i=loBin;i<=hiBin;i++){
-    const db = floatBuf[i];
-    const mag = Math.pow(10, db/20);
-    cands.push({bin:i,mag});
+  return best<0 ? null : {bin:best, db:bestDb};
+}
+/* bin 주변(±25%, 최소 ±12 bin)의 노이즈 바닥 = 피크 주엽(±4 bin)을 뺀 dB 중앙값 */
+function localFloorDb(buf, bin, loLimit, hiLimit){
+  const half=Math.max(12, Math.round(bin*0.25)), excl=4;
+  const vals=[];
+  for(let i=Math.max(loLimit,bin-half); i<=Math.min(hiLimit,bin+half); i++){
+    if(Math.abs(i-bin)<=excl) continue;
+    const v=buf[i]; if(isFinite(v)) vals.push(v);
   }
-  cands.sort((a,b)=>b.mag-a.mag);
-  if(!cands.length) return null;
-  // convert to frequency and pick fundamental by avoiding harmonics
-  const selected = [];
-  for(const c of cands.slice(0,12).reverse()){ // low->high frequency preference
-    const f = c.bin * binHz;
-    // skip if harmonic of already selected lower fundamental
-    let isHarm=false;
-    for(const s of selected){
-      const ratio = f / s.freq;
-      for(let n=2;n<=4;n++){
-        if(Math.abs(ratio - n) < 0.035){ isHarm = true; break; }
-      }
-      if(isHarm) break;
+  return vals.length ? median(vals) : -Infinity;
+}
+/* 선택 피크(peakBin)에 대해 f/2, f/3 위치에 유의미한 국소 피크가 있으면 그쪽을 기본주파수로.
+   최대 2단계(→ 4·6·9배 배음까지) 반복. 반환 subN = 선택 피크가 기본파의 몇 배인지(1=그대로) */
+function resolveFundamental(buf, binHz, peakBin, anaLo, anaHi){
+  const refDb = buf[peakBin];
+  let bin=peakBin, subN=1, fCur=interpolatePeak(buf, peakBin, binHz);
+  for(let step=0; step<2; step++){
+    let pick=null;
+    for(const n of SUBHARM_DIVISORS){
+      const cand = localPeakNear(buf, fCur/n, binHz, anaLo, anaHi);
+      if(!cand || cand.bin>=bin) continue;
+      if(cand.db < ABS_MIN_DB) continue;                       // 절대 신호 약함
+      if(cand.db - refDb < SUBHARM_MIN_REL_DB) continue;        // 선택 피크 대비 너무 약함
+      if(cand.db - localFloorDb(buf, cand.bin, anaLo, anaHi) < SUBHARM_MIN_PROM_DB) continue; // 노이즈 바닥과 구분 안 됨
+      const fc = interpolatePeak(buf, cand.bin, binHz);
+      if(Math.abs(fc*n/fCur - 1) > SUBHARM_TOL) continue;       // 정수배 관계가 아님(예: 60 Hz 험)
+      if(!pick || n>pick.n) pick={bin:cand.bin, n, f:fc};       // 둘 다 맞으면 더 낮은 주파수(큰 n)
     }
-    if(!isHarm) selected.push({freq:f,mag:c.mag,bin:c.bin});
-    if(selected.length>=1) break; // we only need the fundamental
+    if(!pick) break;
+    bin=pick.bin; subN*=pick.n; fCur=pick.f;
   }
-  if(!selected.length){ // fallback to highest mag
-    const top=cands[0];
-    return {freq: top.bin*binHz, mag: top.mag};
+  return {bin, subN};
+}
+/* 대역 [bandLo,bandHi] 안의 최대 피크(peakBin)를 분석해 기본주파수·플래그 반환
+   - freq: subN>1이면 '선택 피크의 보간 주파수 / subN'
+   - edge: 좁혀진 대역의 경계 피크이면서 기본파를 따로 찾지 못한 경우 */
+function analyzePeak(buf, binHz, peakBin, bandLo, bandHi, anaLo, anaHi, narrowed){
+  const atEdge = narrowed && (peakBin-bandLo<=EDGE_BINS || bandHi-peakBin<=EDGE_BINS);
+  const fPeak = atEdge ? peakBin*binHz : interpolatePeak(buf, peakBin, binHz);  // 경계에서는 바깥 bin이 더 클 수 있어 보간 생략
+  const r = resolveFundamental(buf, binHz, peakBin, anaLo, anaHi);
+  const freq = r.subN===1 ? fPeak : (atEdge ? interpolatePeak(buf, r.bin, binHz) : fPeak / r.subN);
+  return {
+    freq,
+    bin: r.bin, subN: r.subN,
+    db: buf[peakBin], mag: Math.pow(10, buf[peakBin]/20),
+    edge: atEdge && r.subN===1
+  };
+}
+/* 충격 수집 구간 프레임별 기본주파수: 대역 최대 피크(대역 내부면 자동으로 극대점) → 배음·경계 판정 */
+function detectFundamentalBandpass(floatBuf, binHz, bandLo, bandHi, anaLo, anaHi, narrowed){
+  let peakBin=-1, peakDb=-Infinity;
+  for(let i=bandLo;i<=bandHi;i++){
+    const v=floatBuf[i];
+    if(v>peakDb){ peakDb=v; peakBin=i; }
   }
-  const best = selected[0];
-  // refine
-  const refined = interpolatePeak(floatBuf, best.bin, binHz);
-  return {freq: refined, mag: best.mag};
+  if(peakBin<0 || !isFinite(peakDb)) return null;
+  // 대역 안이 노이즈뿐이면(기본파가 대역 밖 등) 프레임을 버림
+  if(peakDb - localFloorDb(floatBuf, peakBin, bandLo, bandHi) < PEAK_MIN_PROM_DB) return null;
+  return analyzePeak(floatBuf, binHz, peakBin, bandLo, bandHi, anaLo, anaHi, narrowed);
+}
+/* 배음 판정 안내 문구 */
+function subharmText(subN, narrowed){
+  return (narrowed ? '기본주파수가 탐색 대역 밖' : '배음 감지')+' — '+subN+'차 배음을 기본주파수로 환산';
 }
 
 /* ----------------------------------------------------------------
    9. 측정 안정화: 최근 유효 피크 버퍼링 + 이상치 제거 + 중앙값
    ---------------------------------------------------------------- */
-function pushPeak(f){
+function pushPeak(f, det){
   peakBuffer.push(f);
+  peakFlagBuffer.push({edge:!!(det&&det.edge), subN:(det&&det.subN)||1});
   if(peakBuffer.length>BUF_SIZE) peakBuffer.shift();
+  if(peakFlagBuffer.length>BUF_SIZE) peakFlagBuffer.shift();
+}
+/* 버퍼 과반 기준 플래그 — 한두 프레임의 흔들림으로 안내가 깜빡이지 않도록 */
+function bufferFlags(){
+  const n=peakFlagBuffer.length;
+  if(!n) return {edge:false, subN:1};
+  const edgeCnt=peakFlagBuffer.filter(x=>x.edge).length;
+  const subs=peakFlagBuffer.map(x=>x.subN).filter(v=>v>1);
+  return {edge: edgeCnt*2>n, subN: subs.length*2>n ? Math.round(median(subs)) : 1};
 }
 function median(arr){
   if(!arr.length) return NaN;
@@ -1393,30 +1504,38 @@ function finalizeCollection(){
   let confidence = Math.min(100, (Math.log10(snr+1)*30 + agreement*50 + Math.max(0,40 - rangePercent)));
   if(!isFinite(confidence)) confidence = 0; if(confidence<0) confidence=0;
 
+  // 채택된 스냅샷 과반이 경계 피크/배음 판정이면 결과 플래그로 반영
+  const base = filtered.length ? filtered : last;
+  const edge = base.filter(s=>s.edge).length*2 > base.length;
+  const subs = base.map(s=>s.subN||1).filter(v=>v>1);
+  const subN = subs.length*2 > base.length ? Math.round(median(subs)) : 1;
+  if(edge) confidence = Math.min(confidence, EDGE_CONF_CAP);   // 경계 피크 → 저장 기준(90%) 미달
+
   // 업데이트 및 UI
   updateResult(finalFreq);
   // attach meta
-  if(currentResult){ currentResult.confidence = Math.round(confidence); currentResult.rangePercent = rangePercent; }
+  if(currentResult){ currentResult.confidence = Math.round(confidence); currentResult.rangePercent = rangePercent; currentResult.edge = edge; currentResult.subN = subN; }
   $('resConf').textContent = Math.round(confidence);
   try{ renderConfidenceRing(Math.round(confidence)); }catch(e){}
   // 저장 조건: Confidence>=90 and variation <=3%
   const okToSave = (confidence>=90 && rangePercent<=3);
   btnSave.disabled = !okToSave;
 
+  if(edge){
+    setStatus('weak','피크가 탐색 대역 경계 — 목표에서 크게 벗어났을 수 있음','EDGE');
+    toast('피크가 탐색 대역 경계에 있습니다. 예상 주파수(목표 장력)를 확인하거나 측정 대상 고정 범위를 넓혀 다시 측정하세요.','warn');
+  }
   // 자동 종료: 안정적이면 자동으로 측정 종료 및 고정
-  if(rangePercent<=3 && agreement>=0.8){
+  else if(rangePercent<=3 && agreement>=0.8){
     // finalize and stop (clean audio but keep UI/result)
-    setStatus('good','안정적인 주파수 감지 — 자동 종료','STABLE');
+    setStatus('good', subN>1 ? subharmText(subN, false)+' — 자동 종료' : '안정적인 주파수 감지 — 자동 종료','STABLE');
     held=true; btnHold.classList.add('active'); btnHold.innerHTML='<span class="ico">▶</span> 고정 해제';
     // stop audio resources without clearing the result
     measuring=false;
-    if(rafId){ cancelAnimationFrame(rafId); rafId=null; }
-    if(srcNode){ try{srcNode.disconnect();}catch(e){} srcNode=null; }
-    if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
-    if(audioCtx){ try{audioCtx.close();}catch(e){} audioCtx=null; }
-    analyser=null;
+    releaseAudio();
     btnStart.disabled=false; btnStop.disabled=true; selFFT.disabled=false; btnHold.disabled=false;
-    toast('측정이 자동으로 종료되었습니다. 결과가 고정되었습니다.','ok');
+    toast(subN>1 ? '검출 피크가 배음으로 판정되어 기본주파수로 환산했습니다. 장력이 목표와 크게 다를 수 있습니다.'
+                 : '측정이 자동으로 종료되었습니다. 결과가 고정되었습니다.', subN>1?'warn':'ok');
   }else{
     setStatus('weak','결과 불안정 — 재측정 권장','UNSTABLE');
     toast('측정이 완료되었으나 안정성이 낮습니다 (Confidence '+Math.round(confidence)+'%).','warn');
@@ -1522,23 +1641,28 @@ function saveResult(){
     toast('유효한 주파수를 찾지 못했습니다. 다시 측정해주세요.', 'err');
     return;
   }
+  if(currentResult.saved){ toast('이미 저장한 결과입니다. 다시 측정한 뒤 저장하세요.','warn'); return; }
+  if(currentResult.edge){ toast('피크가 탐색 대역 경계에 있어 저장할 수 없습니다. 다시 측정하세요.','err'); return; }
   // enforce save conditions
   const conf = currentResult.confidence || 0;
-  const varp = currentResult.rangePercent || 999;
+  // 변동률 0%(모든 스냅샷 동일)도 유효 — `|| 999`는 0을 999로 바꿔 완벽히 안정된 결과를 거부했음
+  const varp = Number.isFinite(currentResult.rangePercent) ? currentResult.rangePercent : 999;
   if(conf < 90 || varp > 3){
     toast('저장 조건을 만족하지 않습니다. Confidence >=90% 및 주파수 변동률 ≤3%이어야 합니다.','err');
     return;
   }
   records.push({...currentResult, time:new Date()});
+  currentResult.saved=true; btnSave.disabled=true;   // 같은 결과 중복 저장 방지
   renderHistory();
+  saveRecords();
   toast('측정 결과를 저장했습니다. (총 '+records.length+'건)', 'ok');
 }
 function targetLabel(r){
-  if(!isFinite(r.targetN) || !isFinite(r.tolPct)) return '--';
+  if(!Number.isFinite(r.targetN) || !Number.isFinite(r.tolPct)) return '--';
   return r.targetN.toFixed(1)+' N ±'+r.tolPct.toFixed(0)+'%';
 }
 function judgeLabel(r){
-  if(!isFinite(r.targetN) || !isFinite(r.tolPct)) return '--';
+  if(!Number.isFinite(r.targetN) || !Number.isFinite(r.tolPct)) return '--';
   const lower = r.targetN * (1 - r.tolPct/100);
   const upper = r.targetN * (1 + r.tolPct/100);
   return (r.corrN >= lower && r.corrN <= upper) ? 'OK' : 'NG';
@@ -1549,26 +1673,90 @@ function renderHistory(){
     body.innerHTML='<tr class="empty-row"><td colspan="11">저장된 측정 기록이 없습니다.</td></tr>';
     return;
   }
+  const num=(v,d)=>Number.isFinite(v)?v.toFixed(d):'--';
   body.innerHTML=records.map((r,i)=>`
     <tr>
       <td>${i+1}</td>
-      <td>${fmtTime(r.time)}</td>
-      <td>${r.mass}</td>
-      <td>${r.width}</td>
-      <td>${r.span}</td>
-      <td>${r.freq.toFixed(1)}</td>
-      <td>${r.rawN.toFixed(1)}</td>
-      <td class="tens-cell">${r.corrN.toFixed(1)}</td>
-      <td>${r.kgf.toFixed(2)}</td>
-      <td>${targetLabel(r)}</td>
-      <td>${judgeLabel(r)}</td>
+      <td>${escapeHtml(fmtTime(r.time))}</td>
+      <td>${num(r.mass,2)}</td>
+      <td>${num(r.width,1)}</td>
+      <td>${num(r.span,1)}</td>
+      <td>${num(r.freq,1)}</td>
+      <td>${num(r.rawN,1)}</td>
+      <td class="tens-cell">${num(r.corrN,1)}</td>
+      <td>${num(r.kgf,2)}</td>
+      <td>${escapeHtml(targetLabel(r))}</td>
+      <td>${escapeHtml(judgeLabel(r))}</td>
     </tr>`).join('');
 }
 function clearHistory(){
   if(!records.length){ toast('초기화할 기록이 없습니다.'); return; }
   if(confirm('측정 기록을 모두 삭제할까요?')){
-    records=[]; renderHistory(); toast('측정 기록을 초기화했습니다.', 'warn');
+    records=[]; renderHistory(); saveRecords(); toast('측정 기록을 초기화했습니다.', 'warn');
   }
+}
+
+/* ================================================================
+   측정 기록 영속화 (localStorage)
+   - 키: beltTension_classic_v1 (2.0의 beltTension_v1과 스키마가 달라 별도 키)
+   - 형식: {version:1, records:[{time(ISO 문자열), mass, width, span, cf, freq, targetN, tolPct,
+            rawN, corrN, kgf, confidence, rangePercent, subN}]}
+   ================================================================ */
+let storageWarned=false;
+function saveRecords(){
+  try{
+    const data={version:1, records:records.map(r=>({
+      time:r.time, mass:r.mass, width:r.width, span:r.span, cf:r.cf, freq:r.freq,
+      targetN:r.targetN, tolPct:r.tolPct, rawN:r.rawN, corrN:r.corrN, kgf:r.kgf,
+      confidence:r.confidence, rangePercent:r.rangePercent, subN:r.subN||1
+    }))};
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));   // Date는 toJSON()으로 ISO 문자열이 됨
+    storageWarned=false;
+    return true;
+  }catch(e){
+    console.error('saveRecords 실패', e);
+    if(!storageWarned){
+      storageWarned=true;
+      // 호출부가 곧바로 띄우는 성공 토스트에 덮이지 않도록 다음 틱에 표시
+      setTimeout(()=>toast('기록을 브라우저에 저장하지 못했습니다(저장 공간 부족/차단). 새로고침 전에 CSV로 내보내세요.','err'), 0);
+    }
+    return false;
+  }
+}
+function loadRecords(){
+  let data=null;
+  try{
+    const raw=localStorage.getItem(STORAGE_KEY);
+    if(!raw) return;
+    data=JSON.parse(raw);
+  }catch(e){ console.error('loadRecords: 저장 데이터 파싱 실패', e); return; }
+  if(!data || data.version!==1 || !Array.isArray(data.records)) return;
+  const n=v=>(typeof v==='number' && isFinite(v)) ? v : NaN;   // JSON의 null(NaN 저장분) → NaN
+  records=data.records.filter(r=>r && typeof r==='object' && isFinite(r.freq) && isFinite(r.corrN)).map(r=>({
+    time:toDate(r.time), mass:n(r.mass), width:n(r.width), span:n(r.span), cf:n(r.cf), freq:+r.freq,
+    targetN:n(r.targetN), tolPct:n(r.tolPct), rawN:n(r.rawN), corrN:+r.corrN, kgf:n(r.kgf),
+    confidence:n(r.confidence), rangePercent:n(r.rangePercent), subN:n(r.subN)||1
+  }));
+}
+
+/* ---------- 안전 헬퍼 ---------- */
+function escapeHtml(v){
+  return String(v==null?'':v).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+/* 날짜 복원: Date / ISO 문자열 / 숫자(ms) 허용, 실패 시 null */
+function toDate(v){
+  if(v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  if(typeof v==='string' || typeof v==='number'){ const d=new Date(v); return isNaN(d.getTime()) ? null : d; }
+  return null;
+}
+/* CSV 셀: 따옴표 이스케이프 + 수식 주입 방어(=,+,-,@,탭,CR 시작 시 ' 접두). 숫자(음수 포함)는 그대로 */
+function csvCell(v){
+  if(v==null) return '';
+  if(typeof v==='number') return isFinite(v) ? String(v) : '';
+  let s=String(v);
+  if(!/^-?\d+(\.\d+)?$/.test(s) && /^[=+\-@\t\r]/.test(s)) s="'"+s;
+  if(/[",\r\n]/.test(s) || /^\s|\s$/.test(s)) s='"'+s.replace(/"/g,'""')+'"';
+  return s;
 }
 
 /* ================================================================
@@ -1576,24 +1764,27 @@ function clearHistory(){
    ================================================================ */
 function downloadCSV(){
   if(!records.length){ toast('다운로드할 기록이 없습니다.', 'err'); return; }
-  const header=['No','Time','Mass(g/m)','Width(mm/R)','Span(mm)','Frequency(Hz)','Tension(N)','Tension_Corrected(N)','Tension(kgf)','Target','Judge'];
+  const header=['No','Time','Mass(g/(m\u00B7mm))','Width(mm/R)','Span(mm)','Frequency(Hz)','Tension(N)','Tension_Corrected(N)','Tension(kgf)','Target','Judge'];
+  const fx=(v,d)=>Number.isFinite(v)?v.toFixed(d):'';
   const rows=records.map((r,i)=>[
     i+1, fmtTime(r.time,true), r.mass, r.width, r.span,
-    r.freq.toFixed(2), r.rawN.toFixed(2), r.corrN.toFixed(2), r.kgf.toFixed(3), targetLabel(r), judgeLabel(r)
+    fx(r.freq,2), fx(r.rawN,2), fx(r.corrN,2), fx(r.kgf,3), targetLabel(r), judgeLabel(r)
   ]);
-  const csv='\uFEFF'+[header, ...rows].map(line=>line.join(',')).join('\r\n');
+  const csv='\uFEFF'+[header, ...rows].map(line=>line.map(csvCell).join(',')).join('\r\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   const stamp=fmtTime(new Date(),true).replace(/[: ]/g,'-');
   a.href=url; a.download='belt_tension_'+stamp+'.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);   // 즉시 해제하면 일부 브라우저에서 다운로드 실패
   toast('CSV 파일을 다운로드했습니다.', 'ok');
 }
 
-/* ---------- 시간 포맷 ---------- */
+/* ---------- 시간 포맷 (복원된 ISO 문자열·null이 와도 죽지 않도록 방어) ---------- */
 function fmtTime(d, withDate=false){
+  d = toDate(d);
+  if(!d) return '-';
   const p=n=>String(n).padStart(2,'0');
   const t=p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
   if(!withDate) return t;
@@ -1694,13 +1885,21 @@ window.addEventListener('beforeunload', ()=>{ if(measuring) stopMeasure(); });
 
 // 페이지가 백그라운드로 가면 측정 자동 중지 (마이크 자원 보호)
 document.addEventListener('visibilitychange', ()=>{
-  if(document.hidden && measuring) stopMeasure();
+  if(document.hidden){
+    if(measuring || starting){ stopMeasure(); pausedByHide=true; }
+  }else if(pausedByHide){
+    pausedByHide=false;
+    toast('화면을 벗어나 측정을 중지했습니다. 측정 시작을 다시 눌러주세요.', 'warn');
+  }
 });
 
 // HTTPS / localhost 환경 체크 (마이크는 보안 컨텍스트에서만 동작)
 window.addEventListener('load', ()=>{
   setupCanvas();
   drawSpectrum(new Uint8Array(0),1,1,0,-1); // 빈 그래프
+  loadRecords();   // 저장된 측정 기록 복원 (beltTension_classic_v1)
+  renderHistory();
+  if(records.length) toast('이전 측정 기록 '+records.length+'건을 복원했습니다.', 'ok');
   if(!canUseMicrophone()){
     toast(micUnavailableMessage(), 'err');
     btnStart.disabled=true;

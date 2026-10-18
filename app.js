@@ -39,7 +39,7 @@ var APPS = [
   }).join('');
 
   document.getElementById('app-count').textContent = '앱 '+APPS.length+'개';
-  document.getElementById('foot-ver').textContent = 'v1.0.0 · '+APPS.length+' apps';
+  document.getElementById('foot-ver').textContent = 'v2.0.0 · '+APPS.length+' apps';
 
   smStartClock('when', 30000);
 })();

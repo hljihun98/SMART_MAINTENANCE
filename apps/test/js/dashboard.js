@@ -36,7 +36,7 @@ function rendDailyGoal(){
   let html=''; let anyTask=false;
 
   activeRobots.forEach(r=>{
-    const allTasks=laborModules[r].flatMap(m=>m.tasks).filter(t=>t.hours>0||t.tbd);
+    const allTasks=(laborModules[r]||[]).flatMap(m=>m.tasks||[]).filter(t=>t.hours>0||t.tbd);
     if(!allTasks.length)return;
     anyTask=true;
 
@@ -64,9 +64,9 @@ function rendDailyGoal(){
       const hLabel=t.tbd?'-':t.hours+'h';
       return`<label style="display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:6px;cursor:pointer;transition:background .1s" onmouseover="this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.background=''">
         <input type="checkbox" id="${ckId}" style="accent-color:#10B981;width:14px;height:14px;flex-shrink:0" onchange="updDailyProgress('${r}')">
-        <span style="background:${cc}33;color:${cc};border-radius:3px;padding:1px 5px;font-size:9px;font-family:var(--fm);font-weight:700;flex-shrink:0;min-width:26px;text-align:center">${cat}</span>
-        <span id="${ckId}-lbl" style="font-size:12px;flex:1;transition:opacity .2s">${t.name}${flags}</span>
-        <span style="font-family:var(--fm);font-size:11px;font-weight:600;opacity:.8;flex-shrink:0;min-width:28px;text-align:right">${hLabel}</span>
+        <span style="background:${cc}33;color:${cc};border-radius:3px;padding:1px 5px;font-size:9px;font-family:var(--fm);font-weight:700;flex-shrink:0;min-width:26px;text-align:center">${escHtml(cat)}</span>
+        <span id="${ckId}-lbl" style="font-size:12px;flex:1;transition:opacity .2s">${escHtml(t.name)}${flags}</span>
+        <span style="font-family:var(--fm);font-size:11px;font-weight:600;opacity:.8;flex-shrink:0;min-width:28px;text-align:right">${escHtml(hLabel)}</span>
       </label>`;
     }).join('');
 
@@ -141,7 +141,7 @@ function rendDailyGoal(){
 
 function updDailyProgress(r){
   // ── 공정 완료 체크박스 변경 시 진행률 업데이트 ───────
-  const allTasks=laborModules[r].flatMap(m=>m.tasks).filter(t=>t.hours>0||t.tbd);
+  const allTasks=(laborModules[r]||[]).flatMap(m=>m.tasks||[]).filter(t=>t.hours>0||t.tbd);
   let done=0;
   allTasks.forEach((t,i)=>{
     const ck=document.getElementById(`dg-ck-${r}-${i}`);
@@ -184,13 +184,13 @@ function rendRobotGoal(){
             <div><div class="sl">전체</div><div style="font-size:20px;font-weight:700;font-family:var(--fd)">${parts.length}</div></div>
           </div>
           <div class="rg-parts" style="max-height:none">
-            ${lacking.map(p=>{const need=p.perUnit*goal;return`<div class="rg-part"><span class="t-mu t-sm">${p.name}</span><span class="t-m t-sm rg-ng">재고 ${p.stock} / 필요 ${need} (부족 ${need-p.stock})</span></div>`;}).join('')||'<div class="t-sm t-mu" style="padding:4px 0">✅ 부족 품목 없음</div>'}
+            ${lacking.map(p=>{const need=p.perUnit*goal;return`<div class="rg-part"><span class="t-mu t-sm">${escHtml(p.name)}</span><span class="t-m t-sm rg-ng">재고 ${escHtml(p.stock)} / 필요 ${escHtml(need)} (부족 ${escHtml(need-p.stock)})</span></div>`;}).join('')||'<div class="t-sm t-mu" style="padding:4px 0">✅ 부족 품목 없음</div>'}
           </div>
         </div>
         <div class="rg-card" style="background:var(--s2)">
           <div style="font-size:11px;font-weight:600;color:var(--t2);margin-bottom:10px;letter-spacing:1px;text-transform:uppercase;font-family:var(--fm)">정상 품목</div>
           <div class="rg-parts" style="max-height:none">
-            ${ok.map(p=>{const need=p.perUnit*goal;return`<div class="rg-part"><span class="t-mu t-sm">${p.name}</span><span class="t-m t-sm rg-ok">✓ ${p.stock}/${need}</span></div>`;}).join('')||'<div class="t-sm t-mu" style="padding:4px 0">정상 품목 없음</div>'}
+            ${ok.map(p=>{const need=p.perUnit*goal;return`<div class="rg-part"><span class="t-mu t-sm">${escHtml(p.name)}</span><span class="t-m t-sm rg-ok">✓ ${escHtml(p.stock)}/${escHtml(need)}</span></div>`;}).join('')||'<div class="t-sm t-mu" style="padding:4px 0">정상 품목 없음</div>'}
           </div>
         </div>
       </div>`;
@@ -198,7 +198,7 @@ function rendRobotGoal(){
     document.getElementById('rg-grid').innerHTML=activeRobots.map(r=>{
       const parts=bom.filter(b=>b.robot===r);
       const goal=robotGoals[r];
-      const rows=parts.map(p=>{const need=p.perUnit*goal;const ok=p.stock>=need;return`<div class="rg-part"><span class="t-mu t-sm">${p.name}</span><span class="t-m t-sm ${ok?'rg-ok':'rg-ng'}">${p.stock}/${need}${ok?' ✓':` -${need-p.stock}`}</span></div>`;}).join('');
+      const rows=parts.map(p=>{const need=p.perUnit*goal;const ok=p.stock>=need;return`<div class="rg-part"><span class="t-mu t-sm">${escHtml(p.name)}</span><span class="t-m t-sm ${ok?'rg-ok':'rg-ng'}">${escHtml(p.stock)}/${escHtml(need)}${ok?' ✓':` -${escHtml(need-p.stock)}`}</span></div>`;}).join('');
       return`<div class="rg-card"><div class="rg-head"><span class="rg-name" style="color:${cmap[r]}">${r}</span><div class="rg-inp"><label>목표</label><input type="number" min="0" value="${goal}" oninput="setGoal('${r}',this.value)"><label>대</label></div></div><div class="rg-parts">${rows||'<div class="t-sm t-mu">부품 없음</div>'}</div></div>`;
     }).join('');
   }
@@ -217,7 +217,7 @@ function rendDashRobotSections(){
       <div class="sh"><div class="st" style="color:${cmap[r]}">${r} 현황</div><button class="btn b-se b-sm" onclick="go('r-${r.toLowerCase()}')">상세 보기 →</button></div>
       <div style="padding:12px 18px;display:flex;gap:20px;flex-wrap:wrap">
         <div><div class="sl">총 재고</div><div class="sv" style="font-size:20px;color:${cmap[r]}">${total}</div></div>
-        <div><div class="sl">부족 품목</div><div class="sv" style="font-size:20px;color:${parts.filter(p=>p.stock<=p.minStock).length>0?'var(--re)':'var(--gn)'}">${parts.filter(p=>p.stock<=p.minStock).length}</div></div>
+        <div><div class="sl">부족 품목</div><div class="sv" style="font-size:20px;color:${parts.filter(isLowStock).length>0?'var(--re)':'var(--gn)'}">${parts.filter(isLowStock).length}</div></div>
         <div><div class="sl">목표 대수</div><div class="sv" style="font-size:20px">${robotGoals[r]}</div></div>
       </div>
     </div>`;

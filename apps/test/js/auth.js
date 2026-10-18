@@ -34,6 +34,8 @@ document.getElementById('inp-pw').addEventListener('keydown',e=>{if(e.key==='Ent
 document.getElementById('inp-id').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('inp-pw').focus();});
 
 function doLogout(){
+  // 로그아웃 직전 변경분 저장 (로그아웃 후에는 자동 저장이 멈춤)
+  if(typeof saveState==='function')saveState();
   CU=null;
   document.getElementById('ls').style.opacity='1';
   document.getElementById('ls').style.display='flex';
@@ -71,14 +73,16 @@ function initApp(){
     document.getElementById('ni-changelog').style.display='none';
   }
 
-  laborSettings.startDate=new Date().toISOString().slice(0,10);
-  document.getElementById('l-sd').value=laborSettings.startDate;
+  // 저장된 작업 시작일이 없을 때만 오늘(로컬 날짜)로 채움 — 저장값을 덮어쓰지 않음
+  if(!laborSettings.startDate)laborSettings.startDate=localDateStr();
+  // 저장된 공수산정 설정(하루 작업시간·인원·시작일·완료 대수·호기 범위)을 입력칸에 복원
+  syncLaborInputsFromState();
+  // 재로그인 시 표가 계속 늘어나지 않도록 비우고 다시 생성
+  document.getElementById('it-tbody').innerHTML='';
+  const npTb=document.getElementById('newpart-tbody');if(npTb)npTb.innerHTML='';
   initITrows();
   initNProws();
   buildLaborRobotSel();
-  const now=new Date();
-  const dow=now.getDay();
-  const mon=new Date(now);mon.setDate(now.getDate()-(dow===0?6:dow-1));
   techCalWeekOffset=0;
   rendAll();
   go('dash');

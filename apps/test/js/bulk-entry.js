@@ -53,10 +53,10 @@ function updNewPartPreview(){
   preview.innerHTML=`<div style="display:flex;flex-direction:column;gap:8px">`+newPNs.map(({pn,nm,rb})=>`
     <div style="display:flex;align-items:center;gap:10px;background:var(--gnl);border:1px solid #A7F3D0;border-radius:8px;padding:10px 14px">
       <span style="font-size:10px;background:var(--gn);color:#fff;padding:2px 6px;border-radius:4px;font-family:var(--fm);font-weight:600">NEW</span>
-      <span class="t-m t-sm" style="font-weight:600">${pn}</span>
-      <span class="t-sm" style="flex:1">${nm||'부품명 미입력'}</span>
-      <span class="rb ${rbc(rb||'PARKIE')}">${rb||'미지정'}</span>
-      <button class="btn b-su b-sm" onclick="openNewPartDetail('${pn}','${nm||''}','${rb||'PARKIE'}')">상세 등록</button>
+      <span class="t-m t-sm" style="font-weight:600">${escHtml(pn)}</span>
+      <span class="t-sm" style="flex:1">${escHtml(nm||'부품명 미입력')}</span>
+      <span class="rb ${rbc(rb||'PARKIE')}">${escHtml(rb||'미지정')}</span>
+      <button class="btn b-su b-sm" onclick="openNewPartDetail(${jsArg(pn)},${jsArg(nm||'')},${jsArg(rb||'PARKIE')})">상세 등록</button>
     </div>`).join('')+'</div>';
 }
 
@@ -90,32 +90,45 @@ function handleITPaste(e,startRow){
 }
 function submitIT(){
   const tb=document.getElementById('it-tbody');
-  let ok=0,fail=0,skip=0,newParts=0;
+  let ok=0,fail=0,newParts=0;
+  const done=[];   // 반영된 행 → 표에서 제거 (재클릭 시 중복 반영 방지)
   Array.from(tb.querySelectorAll('tr')).forEach(tr=>{
     const tds=tr.querySelectorAll('td');
-    const type=tds[0].querySelector('select').value;
+    const type=parseIOType(tds[0].querySelector('select').value);
     const pn=tds[1].querySelector('input').value.trim();
     const nmVal=tds[2].querySelector('input').value.trim();
-    const rbVal=tds[3].querySelector('select').value;
-    const qty=parseInt(tds[4].querySelector('input').value);
+    const rbVal=normRobot(tds[3].querySelector('select').value);
+    const qtyRaw=tds[4].querySelector('input').value;
+    const qty=parsePosInt(qtyRaw);
     const statusVal=tds[5].querySelector('select')?.value||'정상';
     const memo=tds[6].querySelector('input').value.trim();
-    if(!pn||!qty||isNaN(qty)){skip++;return;}
+    const markFail=reason=>{fail++;tr.style.background='var(--rel)';tr.title=reason;};
+    if(!pn&&!String(qtyRaw).trim())return;   // 빈 행
+    tr.title='';
+    if(!pn){markFail('Part Number 없음');return;}
+    if(!type){markFail('구분 오류');return;}
+    if(!qty){markFail('수량은 1 이상의 정수만 가능');return;}
     let b2=findBomByPN(pn);
+    let created=false;
     if(!b2){
-      if(type==='OUT'){fail++;return;}
-      if(!nmVal||!rbVal){fail++;return;}
-      b2={partNo:pn,name:nmVal,robot:rbVal,unit:'EA',stock:0,minStock:0,price:0,imgs:[],perUnit:1,spec:'',level:0,rev:'A'};
-      bom.push(b2);newParts++;
+      if(type==='OUT'){markFail('존재하지 않는 Part Number (출고 불가)');return;}
+      if(!nmVal||!rbVal){markFail('신규 부품은 부품명·로봇 필요');return;}
+      b2={partNo:pn,name:nmVal,robot:rbVal,unit:'EA',stock:0,minStock:0,price:0,imgs:[],perUnit:1,spec:'',level:0,rev:'A',parentPartNo:''};
+      created=true;
     }
-    if(type==='OUT'&&b2.stock<qty){fail++;return;}
+    if(type==='OUT'&&!(b2.stock>=qty)){markFail(`재고 부족 (현재 ${b2.stock})`);return;}
+    if(created){bom.push(b2);newParts++;}
     b2.stock+=type==='IN'?qty:-qty;
     const mFull=[memo,statusVal!=='정상'?'['+statusVal+']':null].filter(Boolean).join(' ');
     ioLogs.push({ts:Date.now(),type,robot:b2.robot,partNo:b2.partNo,partName:b2.name,qty,unit:b2.unit,memo:mFull||'직접입력',status:statusVal,userId:CU.id,userName:CU.name,photos:[]});
-    ok++;
+    ok++;done.push(tr);
   });
-  rendAll();
-  toast('✅',`${ok}건 반영${newParts?` (신규 ${newParts}건)`:''}${fail?` / ${fail}건 실패`:''}`,'ok');
+  done.forEach(tr=>tr.remove());
+  while(tb.querySelectorAll('tr').length<5)addITrow();
+  if(ok)logActivity(CU.id,CU.name,'IO',`직접입력 입출고 ${ok}건 반영${newParts?` (신규 부품 ${newParts}건)`:''}${fail?` · 실패 ${fail}건`:''}`);
+  rendAll();updNewPartPreview();
+  if(!ok&&!fail){toast('⚠️','반영할 행이 없습니다','wa');return;}
+  toast(fail?'⚠️':'✅',`${ok}건 반영${newParts?` (신규 ${newParts}건)`:''}${fail?` / ${fail}건 실패 — 빨간 행에 마우스를 올려 사유 확인`:''}`,fail?'wa':'ok');
 }
 function clearIT(){document.getElementById('it-tbody').innerHTML='';for(let i=0;i<5;i++)addITrow();}
 
@@ -168,16 +181,17 @@ function submitNP(){
     const sels=tr.querySelectorAll('.it-sel');
     const pn=inps[0]?.value.trim();
     const nm=inps[1]?.value.trim();
-    const rb=sels[0]?.value||'PARKIE';
+    const rb=normRobot(sels[0]?.value)||'PARKIE';
     const unit=inps[2]?.value.trim()||'EA';
     const lv=parseInt(sels[1]?.value)||0;
-    const ms=parseInt(inps[3]?.value)||0;
-    const pr=parseInt(inps[4]?.value)||0;
+    const ms=Math.max(0,parseInt(inps[3]?.value)||0);
+    const pr=Math.max(0,parseInt(inps[4]?.value)||0);
     if(!pn||!nm){skip++;return;}
     if(bom.find(b=>b.partNo===pn)){dup++;return;}
-    bom.push({partNo:pn,name:nm,robot:rb,unit,stock:0,minStock:ms,price:pr,imgs:[],perUnit:1,spec:'',level:lv,rev:'A'});
+    bom.push({partNo:pn,name:nm,robot:rb,unit,stock:0,minStock:ms,price:pr,imgs:[],perUnit:1,spec:'',level:lv,rev:'A',parentPartNo:''});
     ok++;
   });
+  if(ok)logActivity(CU.id,CU.name,'BOM',`신규 부품 일괄 등록 ${ok}건`);
   rendBOM();rendDash();
   toast('✅',`${ok}건 BOM 등록${dup?' (중복 '+dup+'건)':''}${skip?' (빈칸 '+skip+'건)':''}`,'ok');
 }

@@ -6,15 +6,15 @@
 function openMo(id){
   document.getElementById(id)&&document.getElementById(id).classList.add('open');
   if(id==='mo-add-changelog'){
-    // 오늘 날짜 자동 입력, 버전은 최신+0.1 제안
-    const today=new Date().toISOString().slice(0,10);
+    // 오늘 날짜(로컬) 자동 입력, 버전은 최신+0.1 제안
+    const today=localDateStr();
     document.getElementById('cl-date').value=today;
     document.getElementById('cl-ver').value=nextChangelogVersion();
     document.getElementById('cl-body').value='';
     document.getElementById('cl-author').value=CU?.name||'사용자';
   }
   if(id==='mo-in'){
-    pendPh=[];rendPg();filtBOMSel('in');
+    discardPendPh();filtBOMSel('in');
     ['in-bc','in-qty','in-memo'].forEach(x=>document.getElementById(x).value='');
     document.getElementById('in-unit').value='';
     const okRad=document.getElementById('in-status-ok');if(okRad)okRad.checked=true;
@@ -28,17 +28,27 @@ function openMo(id){
     if(id==='mo-tech-book'){
       document.getElementById('techbook-edit-id').value='';
       document.getElementById('techbook-title').textContent='작업 예약 등록';
-      const today=new Date().toISOString().slice(0,10);
-      if(!document.getElementById('tb-date').value)document.getElementById('tb-date').value=today;
+      const tbDate=document.getElementById('tb-date');
+      if(!tbDate.value)tbDate.value=localDateStr();
+      // 드래그 없이 열린 경우(예비 경로): 시간 select 를 슬롯 값으로 기본 채움 (08:00~10:00)
+      if(!_pendingBooking){
+        tbDate.disabled=false;
+        fillSlotSelect(document.getElementById('tb-start'),2);
+        fillSlotSelect(document.getElementById('tb-end'),6);
+      }
     }
     if(id==='mo-delay'){
-      const today=new Date().toISOString().slice(0,10);
-      document.getElementById('dl-date').value=today;
+      document.getElementById('dl-date').value=localDateStr();
     }
   }
 }
 function closeMo(id){
   document.getElementById(id)&&document.getElementById(id).classList.remove('open');
   // 드래그 임시 예약 취소 (모달 닫을 때)
-  if(id==='mo-tech-book') _pendingBooking=null;
+  if(id==='mo-tech-book'){
+    _pendingBooking=null;
+    const tbDate=document.getElementById('tb-date');if(tbDate)tbDate.disabled=false;
+  }
+  // 입고 모달을 등록 없이 닫으면 첨부했던 사진 정리
+  if(id==='mo-in'&&typeof discardPendPh==='function') discardPendPh();
 }

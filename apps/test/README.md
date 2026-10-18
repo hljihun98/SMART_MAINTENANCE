@@ -1,6 +1,6 @@
 # ROBOSTOCK — 로봇 제작 재고관리 시스템
 
-> **최신 버전: v0.8.28** (2026-06-11)
+> **최신 버전: v0.10.0** (2026-10-18)
 
 PARKIE(주차로봇) · CARRIE(물류로봇) · GOALIE(순찰로봇) 제작을 위한
 부품 재고 · BOM · 입출고 · 공수 산정 · 작업 인원 일정 통합 관리 도구입니다.
@@ -26,16 +26,18 @@ PARKIE(주차로봇) · CARRIE(물류로봇) · GOALIE(순찰로봇) 제작을 �
 
 **가장 간단한 방법** — `index.html`을 더블클릭해서 브라우저로 엽니다.
 
-**권장 방법(로컬 서버)** — 바코드 카메라/일부 기능은 `file://`보다 `http://`에서 더 안정적입니다.
+**권장 방법(로컬 서버)** — 바코드 카메라/사진 저장(IndexedDB) 등은 `file://`보다 `http://`에서 더 안정적입니다.
+엑셀 라이브러리(`../../assets/vendor/xlsx-0.20.3.full.min.js`)를 저장소 루트에서 불러오므로
+**서버는 저장소 루트(SMART_MAINTENANCE)에서** 실행해야 합니다.
 
 ```bash
-# Python 3 이 있으면
+# 저장소 루트에서 — Python 3 이 있으면
 python3 -m http.server 5500
 # 또는 Node 가 있으면
 npx serve .
 ```
 
-브라우저에서 `http://localhost:5500` 접속.
+브라우저에서 `http://localhost:5500/apps/test/` 접속.
 
 ### 로그인 계정 (데모용)
 
@@ -53,15 +55,10 @@ npx serve .
 ## 폴더 구조
 
 ```
-.
+apps/test/
 ├── index.html              # 진입점. HTML 마크업 + CSS/JS 링크
 ├── README.md
 ├── VERSIONING.md           # 버전 정책(SemVer) 문서
-├── .gitignore
-├── assets/                 # 정적 리소스 보관소
-│   ├── images/             #   (현재 비어 있음 — 이미지는 런타임 base64)
-│   ├── icons/              #   (현재 비어 있음 — 아이콘은 이모지)
-│   └── fonts/              #   (현재 비어 있음 — 폰트는 Google Fonts CDN)
 ├── css/
 │   ├── reset.css           # 디자인 토큰(:root) + 전역 리셋 + body 기본
 │   ├── layout.css          # 로그인 화면 / 앱 셸 / 메인 레이아웃
@@ -75,7 +72,8 @@ npx serve .
     ├── data.js             # 전역 상태/데이터 (bom[]·changelogData 등)
     ├── auth.js             # 로그인/로그아웃/앱 초기화
     ├── navigation.js       # 페이지 전환·권한 차단 (go)
-    ├── helpers.js          # 공용 헬퍼 (toast·logActivity·날짜계산 등)
+    ├── helpers.js          # 공용 헬퍼 (escHtml·jsArg·로컬 날짜·입력 검증·toast·logActivity 등)
+    ├── images.js           # 사진 저장소(IndexedDB)·첨부 리사이즈·이미지 렌더 헬퍼
     ├── dashboard.js        # 대시보드 렌더
     ├── calendar.js         # 대시보드 월간 달력
     ├── bom.js              # BOM 관리 (트리·상세모달·상위부품)
@@ -92,8 +90,12 @@ npx serve .
     ├── profile.js          # 내 계정 모달·비밀번호 변경·본인 활동 로그
     ├── mobile-nav.js       # 모바일 상단 메뉴 자동 순환
     ├── excel.js            # 엑셀 다운로드/업로드 (XLSX)
-    └── persistence.js      # localStorage 영속 저장/복원 (가장 마지막 로드)
+    └── persistence.js      # localStorage 영속 저장/복원·탭 간 동기화 (앱 스크립트 중 마지막 로드)
+
+../../assets/vendor/xlsx-0.20.3.full.min.js   # 엑셀 라이브러리 (저장소 루트 공용 — 이 앱 폴더 밖)
 ```
+
+> 아이콘은 이모지, 폰트는 Google Fonts CDN 을 사용합니다. 이 앱 폴더에는 별도 `assets/` 가 없습니다.
 
 ---
 
@@ -102,15 +104,27 @@ npx serve .
 이 앱은 입력한 데이터를 **브라우저 localStorage 에 자동 저장**합니다.
 새로고침하거나 탭을 닫았다 다시 열어도 데이터가 유지됩니다. (서버 불필요)
 
-- 저장 시점: 페이지를 떠날 때 + 탭이 가려질 때 + 로그인 상태에서 2초마다.
+- 저장 시점: **로그인 상태에서 실제 변경이 있을 때만** — 2초마다 변경 여부를 확인하고,
+  페이지를 떠날 때·탭이 가려질 때·로그아웃 직전에도 확인합니다.
+  로그인하지 않은 탭이나 아무것도 바꾸지 않은 탭은 저장하지 않습니다.
+- **여러 탭 동기화**: 다른 탭이 저장하면 `storage` 이벤트로 최신 데이터를 다시 불러오고
+  화면을 갱신합니다(이 탭에서 저장 전이던 변경은 반영되지 않으며 안내 토스트가 뜹니다).
+  다른 탭이나 메인 포털에서 데이터를 초기화하면 저장을 멈추고 새로고침합니다.
 - 저장 대상: 부품/재고(`bom`), 입출고 기록(`ioLogs`), 활동로그, 작업인원·예약·지연,
-  확정일정, 목표대수, 호기범위, 공수 실적, 문의, 그리고 계정(`USERS`) 변경분.
-- **저장 범위의 한계**: localStorage 는 **"그 브라우저, 그 PC"** 에만 저장됩니다.
+  확정일정, 목표대수, 호기범위, 공수 설정·실적, 문의, 관리자가 화면에서 추가한 개발 로그,
+  그리고 계정(`USERS`) 변경분.
+- **사진**: 첨부 시 긴 변 1280px · JPEG(품질 0.75)로 줄인 뒤 **IndexedDB** 에 저장하고,
+  localStorage 상태에는 이미지 참조 id 만 남깁니다. 예전 버전의 base64 사진은 로드 시 자동 이전됩니다.
+  - DB 이름 `robostock_images` · object store `images` · 값은 data URL 문자열 · key 는 `img_…`
+- **저장 범위의 한계**: localStorage/IndexedDB 는 **"그 브라우저, 그 PC"** 에만 저장됩니다.
   다른 사람/다른 기기와 공유되지 않습니다. 공유가 필요하면 백엔드가 필요합니다.
-- **용량 한계**: localStorage 는 약 5MB 입니다. 입출고 인증사진(base64)을 많이
-  올리면 한도를 넘을 수 있고, 그 경우 저장이 조용히 실패합니다(앱은 계속 동작).
-- **저장 키**: `localStorage['robostock_state_v1']`
-- **데이터 초기화**: 메인 포털 → 데이터 관리에서 초기화하거나, 브라우저 콘솔에서 `resetRobostock()`을 실행합니다.
+- **용량 한계**: localStorage 는 약 5MB 입니다. 저장에 실패하면 **한 번** 경고 토스트를 띄우고
+  (앱은 계속 동작), 메인 포털 → 데이터 관리에서 용량을 확인할 수 있습니다.
+- **저장 키**: `localStorage['robostock_state_v1']` (스키마 버전 `_v: 2`)
+  - 저장 데이터가 손상되어 읽을 수 없으면 원본을 `robostock_state_v1_corrupt_backup` 에 백업하고
+    기본값으로 시작합니다. 백업할 공간도 없으면 원본 보호를 위해 자동 저장을 멈춥니다.
+- **데이터 초기화**: 메인 포털 → 데이터 관리에서 초기화하거나, 로그인 화면의 "초기화" 버튼 또는
+  브라우저 콘솔의 `resetRobostock()` 을 사용합니다(사진 IndexedDB 도 함께 삭제).
 
 ---
 
@@ -190,8 +204,13 @@ localStorage 에 저장됩니다.
   순서를 임의로 바꾸지 마세요. `defer` 덕분에 순서가 보장됩니다.
 - **CSS는 원본 순서를 그대로 4분할**한 것입니다. `<link>` 순서(reset → layout →
   components → pages → responsive)를 바꾸면 캐스케이드(우선순위)가 달라질 수 있습니다.
-- 외부 라이브러리는 **XLSX.js(CDN)** 하나뿐입니다. 현재는 비동기(`async`)로 로드되며,
-  실제 사용 시점(엑셀 업로드/다운로드 버튼 클릭 전)까지 준비되면 됩니다.
+- 외부 라이브러리는 **XLSX.js 0.20.3** 하나뿐이며, CDN 이 아니라 저장소의
+  `../../assets/vendor/xlsx-0.20.3.full.min.js` 를 앱 스크립트 뒤에 `defer` 로 불러옵니다.
+  (예전 CDN 0.18.5 는 프로토타입 오염·ReDoS 취약점이 있어 교체) 사용 시점에 `xlsxReady()` 로 로드 여부를 확인합니다.
+- **사용자 입력을 HTML 로 출력할 때는 반드시 `escHtml()`**, 인라인 `onclick="fn(...)"` 의 문자열 인자는
+  **`jsArg()`** 를 사용합니다(`escHtml` 만 쓰면 `&#39;` 가 HTML 파싱 때 `'` 로 복원되어 JS 문자열이 깨짐).
+- **날짜 문자열은 `localDateStr()` / `parseLocalDate()`** 를 사용합니다.
+  `toISOString().slice(0,10)` 은 UTC 기준이라 KST 00~09시에 하루 전 날짜가 됩니다.
 - 폰트는 Google Fonts CDN을 사용합니다(오프라인 필요 시 `assets/fonts/`로 교체).
 - **데이터는 브라우저 localStorage 에 자동 저장**됩니다(위 "데이터 저장" 항목 참고).
   새로고침해도 유지되지만, 저장 위치는 그 브라우저/PC 로컬입니다. 여러 사용자
@@ -204,10 +223,16 @@ localStorage 에 저장됩니다.
 
 ---
 
-## 최근 버그 수정 내역 (v0.8.25 ~ v0.8.28)
+## 최근 버그 수정 내역 (v0.8.25 ~ v0.10.0)
 
 | 버전 | 심각도 | 파일 | 내용 |
 |------|--------|------|------|
+| v0.10.0 | High | `js/persistence.js` | 앱 내 초기화가 `beforeunload` 저장으로 되살아나던 문제, 탭 간 덮어쓰기(dirty check + `storage` 동기화), 손상 데이터 백업, 스키마 v2 |
+| v0.10.0 | High | `js/images.js` 외 | 사진을 리사이즈해 IndexedDB 에 저장(상태에는 참조만) — localStorage 용량 초과로 전체 저장이 멈추던 문제 |
+| v0.10.0 | High | `js/technician.js` | 납기 역산 확정 일정이 KST 에서 하루 앞당겨지던 문제(기존 데이터 자동 보정) |
+| v0.10.0 | High | `js/excel.js`·`js/bulk-entry.js` | 엑셀/직접입력 검증(구분·수량·로봇·재고 부족), BOM 업로드가 재고를 덮어쓰던 문제 |
+| v0.10.0 | High | 렌더 전반 | 저장형 XSS — `escHtml`/`jsArg` 전면 적용 |
+| v0.10.0 | Medium | `js/bom.js`·`js/labor.js` 등 | P/N 변경 참조 갱신, 공수 설정 덮어쓰기, 완료 대수 계산, 예약 시간·중복, UTC 날짜 필터, 개발 로그 저장, XLSX 0.20.3 |
 | v0.8.25 | Critical | `css/reset.css` | CSS 변수 자기참조 순환으로 색상 뱃지·버튼 전체 소실 → 실제 hex 값으로 교체 |
 | v0.8.26 | Critical | `js/technician.js` | 단일 날짜 예약 시 `const` 변수 재대입(TypeError) → `dates.push()` 로 수정 |
 | v0.8.27 | High | `js/bom.js` | BOM 트리 순환 참조 시 무한재귀(스택오버플로) → `visited Set` 사이클 감지 추가; 인라인 핸들러 XSS → `escHtml()` 적용 |

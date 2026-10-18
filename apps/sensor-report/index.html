@@ -4,15 +4,17 @@
  * PARKIE 센서 점검 앱
  *
  * 주요 기능
- * - 호기별 센서 점검 결과 입력: 각 호기에 대해 LiDAR, 카메라 등 센서별로 작업 전/후 상태를 '정상/경미한 손상/심각한 손상'으로 입력할 수 있습니다.
- * - 사진 첨부: 각 센서별로 작업 전/후 사진을 최대 4장까지 첨부할 수 있습니다.
- * - PDF 보고서 생성: 입력된 데이터를 기반으로 PDF 보고서를 생성하여 저장하거나 인쇄할 수 있습니다.
- * - 데이터 저장: 입력된 점검 결과와 사진은 Supabase DB와 Storage에 저장되어 나중에 조회하거나 관리할 수 있습니다.
+ * - 호기별 센서 점검: FRONT/REAR LIDAR, FRONT/REAR CAMERA 4개 센서를 작업 단계(작업 전/이동 전/작업 후/이동 후)별로 '정상/이상'으로 기록하고, 이상이면 내용을 메모합니다.
+ * - 호기 전체 상태: 단계별로 '정상/경미한 손상/교체 필요/긴급 점검' 중 선택합니다. 센서 결과에 따라 자동으로 올라가며, 직접 고른 더 심각한 값은 덮어쓰지 않습니다.
+ * - 사진 첨부: 센서별 촬영 각도에 맞춰 단계마다 LIDAR 4장, 카메라 2장을 첨부합니다.
+ * - PDF 보고서 생성: 선택한 단계의 결과를 PDF로 저장합니다. (jsPDF, 저장소에 포함된 assets/vendor 파일 사용)
+ * - 데이터 저장: 점검 결과는 브라우저 localStorage('parkie_sensor_v3'), 사진은 IndexedDB('parkie_sensor_photos')에 이 기기에만 저장됩니다.
+ *   Supabase DB/Storage 서버 저장은 추후 연동 예정이며 현재는 비활성 상태입니다.
  * - 모바일 최적화: 현장에서 스마트폰으로 쉽게 사용할 수 있도록 반응형 웹 디자인이 적용되어 있습니다.
  -->
 
 <head>
-  
+
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PARKIE 센서 점검</title>
@@ -28,19 +30,26 @@ body{font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo','Segoe UI'
 .topbar{background:#fff;border-bottom:1px solid #E5E8ED;padding:0 20px;height:54px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:30;gap:12px}
 .tb-logo{height:22px;width:auto;display:block;object-fit:contain}
 .tb-sub{font-size:11px;color:#9CA3AF;border-left:1px solid #E5E8ED;padding-left:10px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
-.tb-version{font-size:11px;color:#6B7280;background:#F4F6F9;border:1px solid #E5E8ED;border-radius:999px;padding:2px 8px}
 .tb-clock{font-size:11px;color:#9CA3AF;font-variant-numeric:tabular-nums;white-space:nowrap}
 .home-btn{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#6B7280;text-decoration:none;background:#F4F6F9;border:1px solid #E5E8ED;border-radius:999px;padding:4px 10px;white-space:nowrap;transition:background .15s,color .15s}
 .home-btn:hover{background:#E5E8ED;color:#374151}
+/* 저장 실패 등 사용자가 반드시 알아야 하는 경고. 문제가 해결되거나 닫을 때까지 계속 표시됩니다. */
+.warn-area{display:flex;flex-direction:column;gap:6px;padding:10px 20px 0}
+.warn-area:empty{display:none}
+.warn-item{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:8px;color:#991B1B;font-size:12px;line-height:1.5}
+.warn-msg{flex:1;min-width:200px;white-space:pre-line}
+.warn-btn{padding:5px 10px;min-height:32px;border:1px solid #FCA5A5;border-radius:6px;background:#fff;color:#B91C1C;font-size:12px;cursor:pointer}
+.warn-btn:hover{background:#FEE2E2}
 .info-panel{background:#fff;border-bottom:1px solid #E5E8ED;padding:14px 20px}
 .panel-label{font-size:10px;font-weight:600;color:#9CA3AF;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px}
-.info-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.info-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 @media(max-width:860px){.info-grid{grid-template-columns:1fr 1fr}}
 .f-lbl{font-size:11px;color:#6B7280;margin-bottom:3px}
 .chip-fixed{display:flex;align-items:center;gap:5px;padding:7px 10px;background:#F0F9FF;border:1px solid #BAE6FD;border-radius:8px;font-size:13px;font-weight:500;color:#0369A1}
 .chip-time{display:flex;align-items:center;gap:5px;padding:7px 10px;background:#F4F6F9;border:1px solid #E5E8ED;border-radius:8px;font-size:12px;color:#6B7280;min-height:35px}
 input.fi,select.fi{width:100%;padding:7px 10px;border:1px solid #E5E8ED;border-radius:8px;font-size:13px;background:#fff;color:#111;outline:none;appearance:none;-webkit-appearance:none}
 input.fi:focus,select.fi:focus{border-color:#0099CC;box-shadow:0 0 0 2px rgba(0,153,204,.1)}
+select.fi:disabled{background:#F4F6F9;color:#9CA3AF}
 .stage-switch{display:flex;border:1px solid #E5E8ED;border-radius:8px;overflow:hidden}
 .stage-switch .tbtn{flex:1;min-width:0;padding:7px 4px;font-size:11px;cursor:pointer;border:none;background:#fff;color:#6B7280;text-align:center;-webkit-tap-highlight-color:transparent;transition:background .1s}
 .stage-switch .tbtn.active{background:#EAF4FF;color:#0369A1;font-weight:600}
@@ -60,8 +69,8 @@ input.n-inp:focus{border-color:#0099CC}
 .rstatus{width:auto;min-width:112px;padding:4px 8px;font-size:12px;line-height:1.2}
 .hd-r{display:flex;align-items:center;gap:8px}
 .prog-lbl{font-size:11px;color:#9CA3AF}
-.del-btn{background:none;border:none;cursor:pointer;color:#D1D5DB;padding:2px;display:flex;font-size:14px;line-height:1}
-.del-btn:hover{color:#DC2626}
+.del-btn{background:none;border:none;cursor:pointer;color:#D1D5DB;padding:8px;min-width:32px;min-height:32px;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;border-radius:6px}
+.del-btn:hover{color:#DC2626;background:#FEF2F2}
 .prog-track{height:2px;background:#F0F1F3}
 .prog-fill{height:2px;background:#0099CC;transition:width .3s}
 .stage-row{padding:10px 14px;border-bottom:1px solid #F5F6F8}
@@ -83,6 +92,8 @@ input.n-inp:focus{border-color:#0099CC}
 .s-cnt{font-size:10px;color:#9CA3AF}
 .toggle{display:flex;border:1px solid #E5E8ED;border-radius:6px;overflow:hidden}
 .tbtn{padding:3px 9px;font-size:11px;cursor:pointer;border:none;background:#FAFAFA;color:#9CA3AF;display:flex;align-items:center;justify-content:center;gap:3px;-webkit-tap-highlight-color:transparent}
+/* 센서 정상/이상 버튼은 현장(장갑 착용)에서 누르기 쉽도록 터치 영역을 키웁니다. */
+.toggle .tbtn{padding:6px 12px;min-height:32px;font-size:12px}
 .tbtn+.tbtn{border-left:1px solid #E5E8ED}
 .tbtn.ok{background:#ECFDF5;color:#059669;font-weight:500}
 .tbtn.ng{background:#FEF2F2;color:#DC2626;font-weight:500}
@@ -95,9 +106,13 @@ input.n-inp:focus{border-color:#0099CC}
 .pslot{position:relative;aspect-ratio:1;border:1px dashed #E5E8ED;border-radius:7px;cursor:pointer;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#FAFAFA;-webkit-tap-highlight-color:transparent}
 .pslot:active{opacity:.75}
 .pslot-disabled{cursor:not-allowed;opacity:.5;pointer-events:none}
+.pslot-loading{cursor:default;border-style:solid}
+.pslot-missing{cursor:default;border-style:solid;border-color:#FCA5A5;background:#FEF2F2}
+.pslot-missing .al{color:#B91C1C}
 .pslot img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0;border-radius:6px}
 .pslot .al{font-size:9px;color:#C4C9D4;margin-top:2px}
-.pslot .xb{position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,0,.5);color:#fff;border:none;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;z-index:3;padding:0;line-height:1}
+.pslot .xb{position:absolute;top:3px;right:3px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;border:none;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;z-index:3;padding:0;line-height:1}
+.pslot .xb::before{content:'';position:absolute;inset:-6px}
 .action-bar{padding:12px 20px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .add-btn{display:flex;align-items:center;gap:5px;padding:9px 14px;border:1px dashed #D1D5DB;border-radius:8px;background:none;cursor:pointer;font-size:13px;color:#6B7280;-webkit-tap-highlight-color:transparent}
 .add-btn:hover{background:#fff}
@@ -105,15 +120,20 @@ input.n-inp:focus{border-color:#0099CC}
 .report-actions .pdf-btn.danger{margin-right:auto}
 .pdf-btn{display:flex;align-items:center;gap:6px;padding:10px 16px;border-radius:10px;background:#111;border:none;cursor:pointer;font-size:13px;font-weight:600;color:#fff;-webkit-tap-highlight-color:transparent;min-height:40px;transition:background .16s}
 .pdf-btn:hover{background:#333}
+.pdf-btn:disabled{opacity:.6;cursor:progress}
 .pdf-btn.primary{background:#111;color:#fff}
 .pdf-btn.secondary{background:#0369A1;color:#fff}
 .pdf-btn.secondary:hover{background:#0284C7}
 .pdf-btn.danger{background:transparent;color:#B91C1C;border:1px solid #FCA5A5}
 .pdf-btn.danger:hover{background:rgba(220,28,36,.08)}
-@media(max-width:700px){.report-actions{flex-direction:row;align-items:center;justify-content:flex-start;gap:6px;overflow-x:auto;padding-bottom:4px}.report-actions .pdf-btn{flex:0 1 auto;min-width:0;padding:8px 10px;font-size:12px;min-height:36px}.report-actions .pdf-btn.danger{margin-right:0}} 
+@media(max-width:700px){.report-actions{flex-direction:row;align-items:center;justify-content:flex-start;gap:6px;overflow-x:auto;padding-bottom:4px}.report-actions .pdf-btn{flex:0 1 auto;min-width:0;padding:8px 10px;font-size:12px;min-height:36px}.report-actions .pdf-btn.danger{margin-right:0}}
+/* iOS Safari는 글자 크기 16px 미만 입력란에 포커스하면 화면을 확대하므로 모바일에서는 16px로 맞춥니다. */
+@media(max-width:700px){input.fi,select.fi,input.n-inp,.ng-memo textarea{font-size:16px}}
 .fname-bar{margin:0 20px 4px;display:flex;align-items:center;gap:6px;padding:7px 11px;background:#fff;border:1px solid #E5E8ED;border-radius:8px}
 .fname-txt{font-size:11px;color:#9CA3AF;flex:1;word-break:break-all}
 .toast{text-align:center;font-size:12px;color:#6B7280;padding:5px 20px;min-height:22px}
+/* 저장 데이터를 불러오고 변환하는 동안에는 입력을 막습니다. */
+.app.booting .info-panel,.app.booting .robot-grid,.app.booting .action-bar{pointer-events:none;opacity:.55}
 @keyframes rise{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
 .app>*{animation:rise .55s cubic-bezier(.2,.75,.25,1) both;}
 .app>*:nth-child(1){animation-delay:.02s}.app>*:nth-child(2){animation-delay:.07s}
@@ -124,9 +144,9 @@ input.n-inp:focus{border-color:#0099CC}
 </style>
 
 
-<!-- jsPDF: 브라우저에서 PDF 파일을 생성하기 위한 외부 라이브러리 -->
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-<!-- Supabase JS: DB 저장, Storage 사진 업로드를 위한 외부 라이브러리 -->
+<!-- jsPDF: 브라우저에서 PDF 파일을 생성하기 위한 외부 라이브러리 (오프라인에서도 동작하도록 저장소에 포함된 파일 사용) -->
+<script src="../../assets/vendor/jspdf-2.5.1.umd.min.js"></script>
+<!-- Supabase JS: DB 저장, Storage 사진 업로드를 위한 외부 라이브러리 (추후 연동 예정, 현재 비활성) -->
 <!-- <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
   /* ===============================
@@ -283,6 +303,8 @@ input.n-inp:focus{border-color:#0099CC}
           for(let ai=0; ai<angles.length; ai++){
             const angle = angles[ai];
             const key = stagePhotoKey(r.id, si, ai, activeStage);
+            // 참고(연동 시 수정 필요): 사진은 이제 IndexedDB(parkie_sensor_photos)에 Blob으로 저장되고,
+            // r.photos[key]에는 사진 id만 들어 있습니다. photoStore.get(id)로 Blob을 읽어 업로드하도록 바꿔야 합니다.
             const dataUrl = r.photos?.[key];
             if(!dataUrl) continue;
 
@@ -331,31 +353,31 @@ input.n-inp:focus{border-color:#0099CC}
 
 </script> -->
 <script>
+  // '서버 저장' 버튼 안내입니다. Supabase 연동은 추후 예정이며, 현재는 비활성 상태라 안내 알림만 표시합니다.
   function saveToServer() {
-    alert('추후에 기능 업데이트 예정입니다.');
+    alert('서버 저장(Supabase 연동)은 추후 업데이트 예정이며 현재는 비활성 상태입니다.\n\n입력한 내용은 이 기기의 브라우저에만 저장됩니다. 보고서는 [PDF 생성]으로 보관해주세요.');
   }
-
-
-
-
 </script>
 
 </head>
 
 <body>
-<!-- 전체 앱을 감싸는 컨테이너 -->
-<div class="app">
+<!-- 전체 앱을 감싸는 컨테이너. 저장 데이터를 불러오는 동안(booting)은 입력을 막습니다. -->
+<div class="app booting">
   <!-- 상단 바: 로고, 제목, 현재 시간을 표시합니다. -->
   <div class="topbar">
     <div style="display:flex;align-items:center;gap:10px;overflow:hidden">
       <img class="tb-logo" id="tb-logo" src="../../logo.png" alt="HL Robotics">
-      <div class="tb-sub">PARKIE 센서 점검 <span class="tb-version">v1.0.0</span></div>
+      <div class="tb-sub">PARKIE 센서 점검</div>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
       <a class="home-btn" href="../../index.html" title="메인 포털로 이동"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>메인으로</a>
       <div class="tb-clock" id="clock"></div>
     </div>
   </div>
+
+  <!-- 경고 영역: 저장 실패, 사진 저장소 문제 등 해결될 때까지 계속 보여야 하는 경고를 표시합니다. -->
+  <div class="warn-area" id="warn-area" role="alert" aria-live="assertive"></div>
 
   <!-- 점검 정보 입력 영역: 장비명, 촬영자, 작업 단계, 확인 시점을 표시합니다. -->
   <div class="info-panel">
@@ -367,7 +389,7 @@ input.n-inp:focus{border-color:#0099CC}
       </div>
       <div>
         <div class="f-lbl">촬영자</div>
-        <input class="fi" id="photo_by" placeholder="이름 입력" oninput="saveState()">
+        <input class="fi" id="photo_by" placeholder="이름 입력" oninput="scheduleSave()">
       </div>
       <div>
         <div class="f-lbl">촬영 단계</div>
@@ -394,17 +416,17 @@ input.n-inp:focus{border-color:#0099CC}
   <!-- JavaScript render() 함수가 호기 카드/센서 카드/사진 슬롯을 이 영역에 동적으로 그립니다. -->
   <div class="robot-grid" id="robots"></div>
 
-  <!-- 하단 작업 버튼 영역: 호기 추가, PDF 생성, Supabase 저장, 초기화 버튼이 있습니다. -->
+  <!-- 하단 작업 버튼 영역: 호기 추가, PDF 생성, 서버 저장(준비 중), 초기화 버튼이 있습니다. -->
   <div class="action-bar">
     <!-- 새 호기 카드를 추가합니다. -->
     <button class="add-btn" onclick="addRobot()">+ 호기 추가</button>
     <div class="report-actions">
-      <!-- 작성 중인 데이터를 모두 지우고 처음 상태로 되돌립니다. -->
+      <!-- 작성 중인 데이터와 사진을 모두 지우고 처음 상태로 되돌립니다. -->
       <button class="pdf-btn danger" onclick="resetAll()">초기화</button>
-      <!-- 보고서/센서결과/사진URL을 Supabase에 저장합니다. -->
-      <button class="pdf-btn secondary" onclick="saveToServer()">서버 저장</button>
+      <!-- 서버 저장(Supabase)은 추후 연동 예정입니다. 현재는 안내 알림만 표시합니다. -->
+      <button class="pdf-btn secondary" onclick="saveToServer()" title="추후 연동 예정 (현재 비활성)">서버 저장 (준비 중)</button>
       <!-- 현재 입력된 내용을 PDF로 저장합니다. -->
-      <button class="pdf-btn primary" onclick="generatePDF()">↓ PDF 생성</button>
+      <button class="pdf-btn primary" id="pdf-btn" onclick="generatePDF()">↓ PDF 생성</button>
     </div>
   </div>
 
@@ -420,6 +442,7 @@ input.n-inp:focus{border-color:#0099CC}
 /* ===============================
    앱 데이터/화면/PDF 생성 영역
    - 센서 목록, 단계 목록, 호기 데이터 관리
+   - 저장: 점검 상태는 localStorage, 사진은 IndexedDB (예전 형식 데이터 자동 변환)
    - 화면 렌더링, 사진 첨부, PDF 생성, 초기화
    =============================== */
 
@@ -432,65 +455,115 @@ const SENSORS = [
 ];
 // 기본 사진 촬영 각도입니다. 센서 종류에 따라 getAnglesForSensor()에서 일부 다르게 적용합니다.
 const ANGLES = ['정면','좌측','우측','후면'];
-// 센서 종류별로 필요한 사진 각도를 반환합니다. 카메라는 2장, 일부 LIDAR는 4장을 사용합니다.
+// 센서 종류별로 필요한 사진 각도를 반환합니다. 카메라는 2장, LIDAR는 4장을 사용합니다.
 function getAnglesForSensor(sensor){
   if(sensor && sensor.type === 'camera') return ['정면','측면'];
   if(sensor && String(sensor.name||'').toUpperCase() === 'FRONT LIDAR') return ['정면','좌측','우측','상면'];
   return ANGLES;
 }
-// 작업 단계 목록입니다. 사용자가 선택한 단계별로 정상/이상/사진이 따로 저장됩니다.
+// 작업 단계 목록입니다. 사용자가 선택한 단계별로 정상/이상/사진/전체 상태가 따로 저장됩니다.
 const STAGES = [
   {key:'before',      label:'작업 전'},
   {key:'move_before', label:'이동 전'},
   {key:'after',       label:'작업 후'},
   {key:'move_after',  label:'이동 후'}
 ];
-// 브라우저 localStorage에 임시 저장할 때 사용하는 키입니다.
+// 단계 key 목록입니다. 'move_before'처럼 '_'가 들어 있으므로 사진 key를 '_'로 단순 분리하면 안 됩니다.
+const STAGE_KEYS = STAGES.map(s=>s.key);
+// 브라우저 localStorage에 점검 상태(사진 제외)를 저장하는 키입니다. 포털 데이터 관리와 공유하므로 이름을 유지합니다.
 const STORAGE_KEY = 'parkie_sensor_v3';
-// 호기 전체 평가에서 선택 가능한 상태값입니다.
+// 저장 데이터 형식 버전입니다(키 이름의 v3과 별개). 형식이 바뀌면 올리고 applyStoredState()에서 변환합니다.
+//  - 없음: 사진(base64)을 localStorage에 직접 저장하던 형식, 전체 상태가 호기당 1개
+//  - 4: 사진은 IndexedDB, localStorage에는 사진 id만 저장. 전체 상태는 단계별
+const SCHEMA_VERSION = 4;
+// 저장 데이터가 손상되어 읽을 수 없을 때 원본을 보존하는 백업 키입니다.
+const BACKUP_KEY = 'parkie_sensor_v3_corrupt_backup';
+// 사진 원본(JPEG Blob)을 저장하는 IndexedDB 이름/저장소입니다. 포털 데이터 관리가 크기 합산·삭제에 사용합니다.
+const PHOTO_DB_NAME = 'parkie_sensor_photos';
+const PHOTO_DB_VERSION = 1;
+const PHOTO_STORE = 'photos';
+// 사진 id 형식입니다. p_: 새로 첨부한 사진, m_: 예전 localStorage(base64)에서 옮겨온 사진
+const PHOTO_ID_RE = /^[pm]_[a-z0-9_]{4,64}$/;
+// 화면/PDF에 그대로 넣어도 안전한 이미지 dataURL 형식입니다. (그 외 값은 사진으로 쓰지 않음)
+const SAFE_DATA_IMAGE_RE = /^data:image\/(?:jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/;
+// 호기 전체 평가에서 선택 가능한 상태값과 심각도(자동 설정은 심각도를 올리기만 합니다)입니다.
 const STATUS_OPTIONS = ['정상','경미한 손상','교체 필요','긴급 점검'];
+const STATUS_SEVERITY = {'':0,'정상':1,'경미한 손상':2,'교체 필요':3,'긴급 점검':4};
 // PDF와 상단바에 표시할 HL Robotics 로고 경로입니다.
 const LOGO_SRC = '../../logo.png';
 // PDF에 글자를 이미지로 그릴 때 사용할 폰트 후보입니다.
 const PDF_FONT = "'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',Arial,sans-serif";
 // PDF mm 단위를 브라우저 px 단위로 변환하기 위한 비율입니다.
 const MM_TO_PX = 96 / 25.4;
+// 사진 첨부 시 저장 해상도(긴 변 px)와 JPEG 품질입니다.
+const PHOTO_MAX_PX = 1600, PHOTO_QUALITY = 0.8;
+// PDF에 넣기 전 다운샘플할 해상도(긴 변 px)와 품질입니다. 사진 칸(약 29mm)에 충분한 해상도입니다.
+const PDF_PHOTO_MAX_PX = 800, PDF_PHOTO_QUALITY = 0.82;
+// 텍스트 입력(촬영자, 메모)은 이 시간(ms) 동안 입력이 멈추면 저장합니다.
+const SAVE_DEBOUNCE_MS = 400;
+// PDF 표 레이아웃(mm)입니다.
+const PDF_M = 14;
+const PDF_COL = {no:12, name:26, status:20, photo:31};
+const PDF_TABLE_W = PDF_COL.no + PDF_COL.name + PDF_COL.status + PDF_COL.photo*4;   // 182mm
+const PDF_TITLE_H = 6.5, PDF_HEAD_H = 5.5, PDF_ROW_H = 26;
+const PDF_SECTION_H = PDF_TITLE_H + PDF_HEAD_H + SENSORS.length * PDF_ROW_H;
+const PDF_BOTTOM = 280;   // 이 아래는 바닥글 영역입니다.
+// jsPDF 파일을 불러오지 못했을 때의 안내 문구입니다.
+const JSPDF_MISSING_MSG = 'PDF 라이브러리(jsPDF)를 불러오지 못해 PDF를 생성할 수 없습니다.\n\n확인할 점:\n- 포털 폴더 구조가 그대로인지 (assets/vendor/jspdf-2.5.1.umd.min.js 파일 필요)\n- 이 페이지를 포털의 apps/sensor-report/ 위치에서 열었는지\n\n입력한 내용은 이 기기에 저장되어 있으니, 문제를 해결한 뒤 다시 시도하세요.';
+
 // 현재 화면에서 편집 중인 호기 데이터, 마지막 호기 ID, 현재 작업 단계입니다.
 let robots = [], rid = 0, activeStage = '';
-// 토스트 메시지를 일정 시간 뒤 자동으로 지우기 위한 타이머입니다.
-let toastTimer = null;
+// 단계별 마지막 PDF 생성(확인) 시각입니다. 예: {before:'2026-10-18 14:30'}
+let confirmedAt = {};
+// 토스트 메시지 / 지연 저장 타이머입니다.
+let toastTimer = null, saveTimer = null;
 // 로고 이미지를 한 번만 불러오도록 Promise를 재사용합니다.
 let logoImagePromise = null;
-// 사진의 가로/세로 정보를 반복 계산하지 않도록 캐시합니다.
-const imageInfoCache = new Map();
+// 저장 데이터 불러오기/변환이 끝났는지 여부입니다.
+let appReady = false;
+// PDF 생성 중복 실행 방지 플래그입니다.
+let pdfBusy = false;
+// 자동 저장을 멈춰야 하는 사유(손상 원본 보호, 다른 창에서 데이터 삭제 등)입니다. 빈 문자열이면 저장 가능합니다.
+let saveBlockedReason = '';
 
-// base64 로고 이미지를 Image 객체로 불러옵니다. PDF 생성 시 사용합니다.
-function getLogoImage(){
-  if(!logoImagePromise){
-    logoImagePromise = new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = reject;
-      img.src = LOGO_SRC;
-    });
+/* ── 경고 표시 (사라지지 않는 경고) ── */
+// key별 경고 목록입니다. 토스트와 달리 해결되거나 사용자가 닫을 때까지 계속 표시됩니다.
+const warnings = new Map();
+function setWarning(key, msg, actions){ warnings.set(key, {msg, actions: actions || []}); renderWarnings(); }
+function clearWarning(key){ if(warnings.delete(key)) renderWarnings(); }
+function dismissAction(key){ return {label:'닫기', fn:()=>clearWarning(key)}; }
+function renderWarnings(){
+  const box = document.getElementById('warn-area');
+  if(!box) return;
+  box.textContent = '';
+  for(const w of warnings.values()){
+    const item = document.createElement('div');
+    item.className = 'warn-item';
+    const txt = document.createElement('span');
+    txt.className = 'warn-msg';
+    txt.textContent = '⚠ ' + w.msg;
+    item.appendChild(txt);
+    for(const a of w.actions){
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'warn-btn'; b.textContent = a.label;
+      b.addEventListener('click', a.fn);
+      item.appendChild(b);
+    }
+    box.appendChild(item);
   }
-  return logoImagePromise;
 }
-// 사진의 원본 가로/세로 크기를 읽어 PDF에 비율 유지로 넣기 위한 정보입니다.
-function getImageInfo(src){
-  if(!src) return Promise.resolve({w:1,h:1});
-  if(imageInfoCache.has(src)) return imageInfoCache.get(src);
-  const p = new Promise(resolve => {
-    const img = new Image();
-    // Allow cross-origin image loading so remote images can be read as data for PDF
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve({w:img.naturalWidth||img.width||1,h:img.naturalHeight||img.height||1});
-    img.onerror = () => resolve({w:1,h:1});
-    img.src = src;
-  });
-  imageInfoCache.set(src,p);
-  return p;
+// 자동 저장을 멈춥니다. 지운 데이터가 되살아나거나 손상 원본이 덮어써지는 것을 막기 위해 사용합니다.
+function blockSaving(reason, msg, actions){
+  saveBlockedReason = reason;
+  if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
+  setWarning('blocked', msg, actions || [{label:'새로고침', fn:()=>location.reload()}]);
 }
+function isQuotaError(e){
+  return !!e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014);
+}
+function errText(e){ return (e && (e.message || e.name)) || String(e); }
+
+/* ── 공통 유틸 ── */
 // 숫자를 두 자리 문자열로 맞춥니다. 예: 7 -> 07
 function pad(n){ return String(n).padStart(2,'0'); }
 // 현재 날짜와 시간을 'YYYY-MM-DD HH:mm' 형식으로 반환합니다.
@@ -504,104 +577,457 @@ function stageLabel(k){
   if(!k) return '단계 미선택';
   return (STAGES.find(s=>s.key===k)||{label:k}).label;
 }
+// 사용자 입력/저장 데이터를 HTML에 안전하게 넣기 위해 특수문자를 치환합니다. (작은따옴표 포함)
+function escHtml(v){ return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function isSafeDataImage(v){ return typeof v === 'string' && SAFE_DATA_IMAGE_RE.test(v); }
+// <img src>에 넣을 수 있는 값인지 검사합니다. data:image/ 또는 blob: 만 허용합니다.
+function isSafePhotoSrc(v){ return isSafeDataImage(v) || (typeof v === 'string' && /^blob:[^\s"'<>]+$/.test(v)); }
+// 이미지 파일/URL을 Image 객체로 불러옵니다.
+function loadImageElement(src){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('이미지 로드 실패'));
+    img.src = src;
+  });
+}
+// dataURL(base64)을 Blob으로 변환합니다. 예전 형식 사진을 IndexedDB로 옮길 때 사용합니다.
+function photoDataUrlToBlob(dataUrl){
+  const m = /^data:([^;,]+);base64,(.*)$/.exec(String(dataUrl||''));
+  if(!m) return null;
+  const bin = atob(m[2]);
+  const bytes = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], {type:m[1]});
+}
+function blobToDataUrl(blob){
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(blob);
+  });
+}
+// 문자열 해시입니다. 예전 사진을 옮길 때 같은 사진은 같은 id가 되도록(중복 저장·재시도 시 중복 방지) 사용합니다.
+function hashString(s){
+  let h1 = 0x811c9dc5, h2 = 5381;
+  for(let i=0;i<s.length;i++){
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 16777619);
+    h2 = (Math.imul(h2, 33) + c) | 0;
+  }
+  return (h1>>>0).toString(36) + (h2>>>0).toString(36);
+}
+function newPhotoId(){ return 'p_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,10).padEnd(4,'0'); }
+function migratedPhotoId(dataUrl){ return 'm_' + hashString(dataUrl) + '_' + dataUrl.length.toString(36); }
+// 텍스트를 파일로 내려받습니다. (손상된 저장 데이터 원본 보관용)
+function downloadText(text, filename){
+  const url = URL.createObjectURL(new Blob([text], {type:'application/json'}));
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.style.display = 'none';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
-// 사용자가 입력한 메모를 HTML에 안전하게 표시하기 위해 특수문자를 치환합니다.
-function escHtml(v){ return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-// 사진을 robots 데이터 안에 저장할 때 사용하는 고유 key를 만듭니다.
+/* ── 사진 저장소 (IndexedDB) ──
+   DB 'parkie_sensor_photos' / store 'photos' / key: 사진 id / 값: JPEG Blob (Blob 저장이 안 되는 브라우저는 dataURL 문자열)
+   IndexedDB를 쓸 수 없으면 사진을 메모리에만 보관하고 경고를 계속 표시합니다. */
+let photoDbPromise = null;
+let photoMemoryMode = false;
+const memoryPhotos = new Map();
+
+function openPhotoDb(){
+  if(photoDbPromise) return photoDbPromise;
+  const p = new Promise((resolve, reject) => {
+    if(!window.indexedDB){ reject(new Error('이 브라우저는 IndexedDB를 지원하지 않습니다.')); return; }
+    let req;
+    try{ req = indexedDB.open(PHOTO_DB_NAME, PHOTO_DB_VERSION); }catch(e){ reject(e); return; }
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if(!db.objectStoreNames.contains(PHOTO_STORE)) db.createObjectStore(PHOTO_STORE);
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      // 포털 데이터 관리 등 다른 창에서 DB를 삭제(또는 버전 변경)하려 하면 연결을 닫아 막지 않도록 합니다.
+      db.onversionchange = () => {
+        db.close();
+        photoDbPromise = null;
+        blockSaving('다른 창에서 사진 저장소가 삭제·변경됨',
+          '다른 창(포털 데이터 관리 등)에서 이 앱의 사진 저장소가 삭제되었거나 변경되었습니다. 지운 데이터가 되살아나지 않도록 자동 저장을 멈췄습니다. 페이지를 새로고침해주세요.');
+      };
+      resolve(db);
+    };
+    req.onerror = () => reject(req.error || new Error('IndexedDB 열기 실패'));
+  });
+  photoDbPromise = p;
+  p.catch(() => { if(photoDbPromise === p) photoDbPromise = null; });
+  return p;
+}
+// 사진 저장소 트랜잭션 공통 함수입니다. 트랜잭션이 완료(commit)된 뒤에 결과를 돌려줍니다.
+function photoTx(mode, work){
+  return openPhotoDb().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_STORE, mode);
+    const out = {};
+    tx.oncomplete = () => resolve(out.result);
+    tx.onerror = () => reject(tx.error || new Error('IndexedDB 오류'));
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB 작업 중단'));
+    work(tx.objectStore(PHOTO_STORE), out);
+  }));
+}
+const photoStore = {
+  async put(id, blob){
+    if(photoMemoryMode){ memoryPhotos.set(id, blob); return; }
+    try{
+      await photoTx('readwrite', st => { st.put(blob, id); });
+    }catch(e){
+      // 일부 브라우저는 Blob 저장을 지원하지 않으므로 dataURL 문자열로 다시 시도합니다.
+      if(e && e.name === 'DataCloneError'){
+        const dataUrl = await blobToDataUrl(blob);
+        await photoTx('readwrite', st => { st.put(dataUrl, id); });
+      } else throw e;
+    }
+  },
+  async getMany(ids){
+    const out = new Map();
+    if(photoMemoryMode){ for(const id of ids) if(memoryPhotos.has(id)) out.set(id, memoryPhotos.get(id)); return out; }
+    await photoTx('readonly', st => {
+      for(const id of ids){
+        const req = st.get(id);
+        req.onsuccess = () => { if(req.result != null) out.set(id, req.result); };
+      }
+    });
+    // dataURL 문자열로 저장된 값은 Blob으로 통일합니다.
+    for(const [id, v] of out){
+      if(v instanceof Blob) continue;
+      const b = isSafeDataImage(v) ? photoDataUrlToBlob(v) : null;
+      if(b) out.set(id, b); else out.delete(id);
+    }
+    return out;
+  },
+  async get(id){ return (await this.getMany([id])).get(id) || null; },
+  async del(ids){
+    if(!ids.length) return;
+    if(photoMemoryMode){ ids.forEach(id => memoryPhotos.delete(id)); return; }
+    await photoTx('readwrite', st => { ids.forEach(id => st.delete(id)); });
+  },
+  async keys(){
+    if(photoMemoryMode) return [...memoryPhotos.keys()];
+    return photoTx('readonly', (st, out) => { const req = st.getAllKeys(); req.onsuccess = () => { out.result = req.result; }; });
+  },
+  async clear(){
+    if(photoMemoryMode){ memoryPhotos.clear(); return; }
+    await photoTx('readwrite', st => { st.clear(); });
+  }
+};
+
+/* ── 사진 표시용 objectURL 캐시 ──
+   render()마다 수백 KB짜리 dataURL을 다시 만들지 않도록 사진 id별 blob: URL을 재사용합니다. */
+const photoUrlCache = new Map();     // 사진 id -> blob: URL
+const photoLoadFailed = new Set();   // 사진 저장소에서 찾지 못한 사진 id
+function cachePhotoBlob(id, blob){
+  revokePhotoUrl(id);
+  photoUrlCache.set(id, URL.createObjectURL(blob));
+  photoLoadFailed.delete(id);
+}
+function revokePhotoUrl(id){
+  const u = photoUrlCache.get(id);
+  if(u){ URL.revokeObjectURL(u); photoUrlCache.delete(id); }
+}
+// 사진 참조(id 또는 변환 실패로 남은 dataURL)를 <img src>에 넣을 값으로 바꿉니다. 안전하지 않은 값은 ''.
+function photoSrc(ref){
+  if(!ref) return '';
+  if(PHOTO_ID_RE.test(ref)){ const u = photoUrlCache.get(ref); return isSafePhotoSrc(u) ? u : ''; }
+  return isSafeDataImage(ref) ? ref : '';
+}
+function collectPhotoRefs(){
+  const refs = new Set();
+  for(const r of robots) for(const v of Object.values(r.photos || {})) if(v) refs.add(v);
+  return refs;
+}
+function isPhotoReferenced(ref){ return robots.some(r => Object.values(r.photos).includes(ref)); }
+// 더 이상 어떤 칸에서도 참조하지 않는 사진을 사진 저장소에서 지웁니다. (실패해도 다음 실행 때 정리됨)
+async function releasePhotos(refs){
+  const ids = [...new Set(refs)].filter(ref => typeof ref === 'string' && PHOTO_ID_RE.test(ref) && !isPhotoReferenced(ref));
+  ids.forEach(revokePhotoUrl);
+  if(!ids.length) return;
+  try{ await photoStore.del(ids); }catch(e){ console.warn('사진 삭제 실패(다음 실행 때 정리됩니다)', e); }
+}
+
+/* ── 데이터 구조 ── */
+// 사진을 robots 데이터 안에 저장할 때 사용하는 고유 key를 만듭니다. 형식: 호기id_센서번호_각도번호_단계key
 function stagePhotoKey(rid,si,ai,stage){ return rid+'_'+si+'_'+ai+'_'+stage; }
+// 사진 key를 해석합니다. 단계 key에 '_'가 들어 있으므로(move_before) 앞의 숫자 3개 뒤 나머지 전체를 단계 key로 봅니다.
+// 단계가 없는 예전 key(호기_센서_각도)는 stage:null로 돌려줍니다. 해석할 수 없으면 null.
+function parsePhotoKey(key){
+  const m = /^(\d+)_(\d+)_(\d+)(?:_(.+))?$/.exec(String(key));
+  if(!m) return null;
+  const stage = m[4] === undefined ? null : m[4];
+  if(stage !== null && !STAGE_KEYS.includes(stage)) return null;
+  return {rid:Number(m[1]), si:Number(m[2]), ai:Number(m[3]), stage};
+}
 // 모든 작업 단계에 대해 센서 수만큼 기본값 배열을 만듭니다. 정상/이상, 메모 초기화에 사용합니다.
 function emptyStageMap(val){ return STAGES.reduce((o,s)=>{ o[s.key]=SENSORS.map(()=>val); return o; },{}); }
-// 새 호기 객체를 생성합니다. 사진, 센서 상태, 메모가 비어 있는 기본 상태입니다.
-function makeRobot(num,id){ return {id,num,status:'',photos:{},ss:emptyStageMap(null),memo:emptyStageMap('')}; }
-// 기존 저장 데이터에 누락된 단계/센서 배열이 있으면 보정합니다. 버전 변경 호환용입니다.
+// 단계별 값 하나씩을 가진 객체를 만듭니다. 전체 상태(status) 등에 사용합니다.
+function stageValueMap(val){ return STAGES.reduce((o,s)=>{ o[s.key]=val; return o; },{}); }
+// 새 호기 객체를 생성합니다. status/statusAuto는 단계별 전체 상태와 '자동 설정 여부'입니다.
+function makeRobot(num,id){ return {id,num,status:stageValueMap(''),statusAuto:stageValueMap(false),photos:{},ss:emptyStageMap(null),memo:emptyStageMap('')}; }
+// 누락된 단계/센서 배열이 있으면 보정합니다.
 function ensureBuckets(r){
   if(!r.ss||typeof r.ss!=='object') r.ss=emptyStageMap(null);
   if(!r.memo||typeof r.memo!=='object') r.memo=emptyStageMap('');
+  if(!r.status||typeof r.status!=='object') r.status=stageValueMap('');
+  if(!r.statusAuto||typeof r.statusAuto!=='object') r.statusAuto=stageValueMap(false);
+  if(!r.photos||typeof r.photos!=='object') r.photos={};
   for(const s of STAGES){
     if(!Array.isArray(r.ss[s.key])) r.ss[s.key]=SENSORS.map(()=>null);
     if(!Array.isArray(r.memo[s.key])) r.memo[s.key]=SENSORS.map(()=>'');
     while(r.ss[s.key].length<SENSORS.length) r.ss[s.key].push(null);
     while(r.memo[s.key].length<SENSORS.length) r.memo[s.key].push('');
+    if(typeof r.status[s.key]!=='string') r.status[s.key]='';
+    if(typeof r.statusAuto[s.key]!=='boolean') r.statusAuto[s.key]=false;
   }
 }
-// localStorage에 저장된 과거 형식 데이터를 현재 데이터 구조에 맞게 변환합니다.
-function normalizeRobot(r){
-  if(!r||typeof r!=='object') return makeRobot(1,Date.now());
-  const out=makeRobot(Number(r.num)||1, Number(r.id)||Date.now());
-  out.status = STATUS_OPTIONS.includes(r.status) ? r.status : '정상';
-  if(r.photos && typeof r.photos==='object'){
-    for(const [key,val] of Object.entries(r.photos)){
-      if(!val) continue;
-      const parts = key.split('_');
-      if(parts.length===4) out.photos[key]=val;
-      else if(parts.length===3) for(const s of STAGES) out.photos[parts[0]+'_'+parts[1]+'_'+parts[2]+'_'+s.key]=val;
+// 저장된 사진 값이 쓸 수 있는 참조인지 검사합니다. 사진 id 또는 (아직 옮기지 못한) 이미지 dataURL만 허용합니다.
+function normalizePhotoRef(val){
+  if(typeof val !== 'string') return null;
+  if(PHOTO_ID_RE.test(val) || isSafeDataImage(val)) return val;
+  return null;
+}
+// localStorage에 저장된 과거/현재 형식의 호기 데이터를 현재 구조로 변환합니다.
+// id: 중복 없이 확정된 호기 id. 사진 key도 이 id로 다시 만듭니다.
+function normalizeRobot(r, id, legacyStatus, stats){
+  const out = makeRobot(Number(r.num)||1, id);
+  // 전체 상태: 예전에는 호기당 1개(문자열) → 모든 단계에 같은 값으로 옮깁니다. 미선택('')은 그대로 둡니다.
+  for(const s of STAGE_KEYS){
+    let v;
+    if(r.status && typeof r.status === 'object') v = r.status[s];
+    else v = ('status' in r) ? r.status : legacyStatus;
+    out.status[s] = STATUS_OPTIONS.includes(v) ? v : '';
+    out.statusAuto[s] = !!(r.statusAuto && typeof r.statusAuto === 'object' && r.statusAuto[s] === true && out.status[s]);
+  }
+  if(typeof r.status === 'string' || !('status' in r)) stats.changed = true;
+  // 사진: 단계가 있는 key를 먼저 반영하고, 단계가 없던 예전 key는 비어 있는 단계에만 같은 참조로 연결합니다(사진 복제 없음).
+  const legacy = [];
+  const entries = (r.photos && typeof r.photos === 'object') ? Object.entries(r.photos) : [];
+  for(const [key, val] of entries){
+    if(!val) continue;
+    const p = parsePhotoKey(key);
+    const ref = normalizePhotoRef(val);
+    if(!p || !ref){ stats.dropped++; stats.changed = true; continue; }
+    if(p.stage === null){ legacy.push([p, ref]); continue; }
+    const nk = stagePhotoKey(id, p.si, p.ai, p.stage);
+    if(nk !== key) stats.changed = true;
+    out.photos[nk] = ref;
+  }
+  for(const [p, ref] of legacy){
+    stats.changed = true;
+    for(const s of STAGE_KEYS){
+      const nk = stagePhotoKey(id, p.si, p.ai, s);
+      if(!out.photos[nk]) out.photos[nk] = ref;
     }
   }
+  const okNg = v => (v === 'ok' || v === 'ng') ? v : null;
+  const str = v => typeof v === 'string' ? v : '';
   if(r.ss){
     if(Array.isArray(r.ss)){
-      const base = SENSORS.map((_,i)=>r.ss[i]??null);
+      const base = SENSORS.map((_,i)=>okNg(r.ss[i]));
       for(const s of STAGES) out.ss[s.key]=[...base];
+      stats.changed = true;
     } else {
       for(const s of STAGES){
         const arr = Array.isArray(r.ss[s.key]) ? r.ss[s.key] : [];
-        out.ss[s.key] = SENSORS.map((_,i)=>arr[i]??null);
+        out.ss[s.key] = SENSORS.map((_,i)=>okNg(arr[i]));
       }
     }
   }
   if(r.memo){
     if(Array.isArray(r.memo)){
-      const base = SENSORS.map((_,i)=>r.memo[i]??'');
+      const base = SENSORS.map((_,i)=>str(r.memo[i]));
       for(const s of STAGES) out.memo[s.key]=[...base];
+      stats.changed = true;
     } else {
       for(const s of STAGES){
         const arr = Array.isArray(r.memo[s.key]) ? r.memo[s.key] : [];
-        out.memo[s.key]=SENSORS.map((_,i)=>arr[i]??'');
+        out.memo[s.key]=SENSORS.map((_,i)=>str(arr[i]));
       }
     }
   }
   ensureBuckets(out);
   return out;
 }
-// 현재 작성 중인 데이터를 브라우저 localStorage에 임시 저장합니다. 새로고침해도 유지됩니다.
+
+/* ── 저장 / 불러오기 ── */
+function serializeState(){
+  return {
+    schema: SCHEMA_VERSION,
+    robots: robots.map(r => ({id:r.id, num:r.num, status:r.status, statusAuto:r.statusAuto, photos:r.photos, ss:r.ss, memo:r.memo})),
+    rid, activeStage,
+    photo_by: document.getElementById('photo_by').value,
+    confirmedAt
+  };
+}
+// 현재 작성 중인 데이터(사진 제외, 사진은 id만)를 localStorage에 저장합니다. 실패하면 경고를 계속 표시합니다.
 function saveState(){
+  if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
+  if(saveBlockedReason) return false;
   try{
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      robots, rid, activeStage,
-      photo_by: document.getElementById('photo_by').value
-    }));
-  }catch(e){ showToast('저장 공간 부족. 사진 수를 줄여주세요.'); }
-}
-// localStorage에 임시 저장된 데이터를 불러와 화면 상태를 복원합니다.
-function loadState(){
-  try{
-    const raw=localStorage.getItem(STORAGE_KEY);
-    if(!raw) return false;
-    const d=JSON.parse(raw);
-    const legacyStatus = STATUS_OPTIONS.includes(d.category) ? d.category : '정상';
-    robots = Array.isArray(d.robots) ? d.robots.map(r => {
-      const nr = normalizeRobot(r);
-      if(!r || typeof r !== 'object' || !('status' in r)) nr.status = legacyStatus;
-      return nr;
-    }) : [];
-    rid = Number(d.rid) || robots.reduce((m,r)=>Math.max(m,Number(r.id)||0),0);
-    document.getElementById('photo_by').value = d.photo_by||'';
-    activeStage = STAGES.some(s=>s.key===d.activeStage) ? d.activeStage : '';
-    if(!robots.length) robots=[makeRobot(1,++rid)];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState()));
+    clearWarning('state');
     return true;
-  }catch(e){ return false; }
+  }catch(e){
+    console.error('저장 실패', e);
+    setWarning('state', isQuotaError(e)
+      ? '저장 공간이 부족해 입력 내용을 저장하지 못했습니다. 지금 새로고침하거나 창을 닫으면 마지막 저장 이후 내용이 사라집니다. PDF를 먼저 생성해 두고, 포털 → 데이터 관리에서 다른 앱 데이터를 정리해주세요.'
+      : '입력 내용을 저장하지 못했습니다 (' + errText(e) + '). 지금 새로고침하거나 창을 닫으면 마지막 저장 이후 내용이 사라집니다.');
+    return false;
+  }
 }
+// 텍스트 입력처럼 자주 바뀌는 값은 입력이 잠시 멈춘 뒤 저장합니다.
+function scheduleSave(){
+  if(saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveState, SAVE_DEBOUNCE_MS);
+}
+// 지연 중인 저장이 있으면 즉시 저장합니다. (화면 전환·창 닫기·PDF 생성 전)
+function flushSave(){ if(saveTimer) saveState(); }
+
+// localStorage에서 저장 데이터를 읽습니다. 결과: empty(없음) / ok / corrupt(파싱 불가) / unavailable(저장소 사용 불가)
+function readStoredState(){
+  let raw;
+  try{ raw = localStorage.getItem(STORAGE_KEY); }catch(e){ return {status:'unavailable', error:e}; }
+  if(!raw) return {status:'empty'};
+  try{
+    const d = JSON.parse(raw);
+    if(!d || typeof d !== 'object' || Array.isArray(d)) throw new Error('저장 데이터 형식 오류');
+    return {status:'ok', data:d, raw};
+  }catch(e){ return {status:'corrupt', raw, error:e}; }
+}
+// 읽은 저장 데이터를 현재 형식으로 변환해 화면 상태에 반영합니다. 변환이 일어났는지(stats.changed) 돌려줍니다.
+function applyStoredState(d){
+  const stats = {changed: d.schema !== SCHEMA_VERSION, dropped: 0};
+  const legacyStatus = STATUS_OPTIONS.includes(d.category) ? d.category : '';
+  const list = Array.isArray(d.robots) ? d.robots.filter(r => r && typeof r === 'object') : [];
+  // 호기 id가 없거나 중복이면 새 id를 부여합니다(사진 key가 섞이지 않도록).
+  let maxId = list.reduce((m,r)=>{ const n = Number(r.id); return (Number.isInteger(n) && n > 0) ? Math.max(m,n) : m; }, 0);
+  const used = new Set();
+  robots = list.map(r => {
+    let id = Number(r.id);
+    if(!Number.isInteger(id) || id <= 0 || used.has(id)){ id = ++maxId; stats.changed = true; }
+    used.add(id);
+    return normalizeRobot(r, id, legacyStatus, stats);
+  });
+  rid = Math.max(Number(d.rid) || 0, maxId);
+  document.getElementById('photo_by').value = typeof d.photo_by === 'string' ? d.photo_by : '';
+  activeStage = STAGE_KEYS.includes(d.activeStage) ? d.activeStage : '';
+  confirmedAt = {};
+  if(d.confirmedAt && typeof d.confirmedAt === 'object'){
+    for(const s of STAGE_KEYS) if(typeof d.confirmedAt[s] === 'string') confirmedAt[s] = d.confirmedAt[s];
+  }
+  if(!robots.length) robots = [makeRobot(1, ++rid)];
+  return stats;
+}
+// 처음 상태(호기 1개)로 메모리 상태를 되돌립니다.
+function resetMemoryState(){
+  robots = [makeRobot(1,1)];
+  rid = 1;
+  activeStage = '';
+  confirmedAt = {};
+  document.getElementById('photo_by').value = '';
+}
+// 파싱할 수 없는 저장 데이터: 원본을 백업 키에 보존하고 알립니다. 백업할 공간도 없으면 원본 보호를 위해 자동 저장을 멈춥니다.
+function handleCorruptState(raw, error){
+  console.error('저장 데이터 손상', error);
+  const fname = 'parkie_sensor_v3_손상데이터_' + getDate() + '.json';
+  const downloadAction = {label:'원본 내려받기', fn:()=>downloadText(raw, fname)};
+  let backedUp = false;
+  try{ localStorage.setItem(BACKUP_KEY, raw); backedUp = true; }catch(e){ console.error('손상 데이터 백업 실패', e); }
+  if(backedUp){
+    setWarning('corrupt', "저장 데이터가 손상되어 읽을 수 없어 새로 시작합니다. 원본은 localStorage '" + BACKUP_KEY + "'에 보존했습니다.", [downloadAction, dismissAction('corrupt')]);
+  } else {
+    blockSaving('손상된 저장 데이터 보호',
+      '저장 데이터가 손상되어 읽을 수 없고, 백업할 공간도 부족합니다. 원본을 지키기 위해 자동 저장을 멈췄습니다. [원본 내려받기] 후 [새로 시작]을 누르세요.',
+      [downloadAction, {label:'새로 시작', fn:()=>{
+        if(!confirm('손상된 원본 데이터를 덮어쓰고 새로 시작합니다. 계속하시겠습니까?')) return;
+        saveBlockedReason = '';
+        clearWarning('blocked');
+        saveState();
+      }}]);
+  }
+}
+// 예전 형식(localStorage에 base64로 저장된) 사진을 IndexedDB로 옮깁니다.
+// 같은 사진(예전 버전이 단계별로 복제해 둔 것 포함)은 한 번만 저장하고 같은 id를 공유합니다. 실패한 사진은 원본(base64)을 그대로 둡니다.
+async function migrateInlinePhotos(){
+  const done = new Map();   // dataURL -> 사진 id (실패 시 null)
+  let moved = 0, failed = 0;
+  for(const r of robots){
+    for(const [key, ref] of Object.entries(r.photos)){
+      if(!isSafeDataImage(ref)) continue;
+      let id = done.get(ref);
+      if(id === undefined){
+        id = migratedPhotoId(ref);
+        try{
+          const blob = photoDataUrlToBlob(ref);
+          if(!blob) throw new Error('사진 변환 실패');
+          await photoStore.put(id, blob);
+          cachePhotoBlob(id, blob);
+          moved++;
+        }catch(e){
+          console.warn('사진 이동 실패(원본 유지)', e);
+          id = null; failed++;
+        }
+        done.set(ref, id);
+      }
+      if(id) r.photos[key] = id;
+    }
+  }
+  return {moved, failed};
+}
+// 저장된 사진 id들의 표시용 URL을 미리 만듭니다.
+async function preloadPhotoUrls(){
+  const ids = [...collectPhotoRefs()].filter(ref => PHOTO_ID_RE.test(ref) && !photoUrlCache.has(ref));
+  if(!ids.length) return;
+  try{
+    const found = await photoStore.getMany(ids);
+    for(const id of ids){
+      const b = found.get(id);
+      if(b) cachePhotoBlob(id, b); else photoLoadFailed.add(id);
+    }
+  }catch(e){
+    console.error('사진 불러오기 실패', e);
+    ids.forEach(id => photoLoadFailed.add(id));
+  }
+  if(photoLoadFailed.size){
+    setWarning('photo-missing', '저장된 사진 ' + photoLoadFailed.size + '장을 사진 저장소에서 불러오지 못했습니다(브라우저 데이터 삭제 등). 해당 칸은 \'불러오기 실패\'로 표시되며, 삭제 후 다시 첨부할 수 있습니다.', [dismissAction('photo-missing')]);
+  }
+}
+// 어디에서도 참조하지 않는 사진(저장 실패 등으로 남은 것)을 사진 저장소에서 정리합니다. 저장 데이터를 정상적으로 읽었을 때만 실행합니다.
+async function collectGarbagePhotos(){
+  if(photoMemoryMode || saveBlockedReason) return;
+  try{
+    const refs = collectPhotoRefs();
+    const keys = await photoStore.keys();
+    const orphans = keys.filter(k => typeof k === 'string' && PHOTO_ID_RE.test(k) && !refs.has(k));
+    if(orphans.length) await photoStore.del(orphans);
+  }catch(e){ console.warn('사진 정리 실패', e); }
+}
+
+/* ── 화면 갱신 / 편집 ── */
 // PDF 다운로드 시 사용할 파일명을 현재 날짜/호기/작업단계 기준으로 생성합니다.
 function getFilename(){
   const nums = robots.map(r=>r.num).join('-');
   return getDate()+'_PARKIE_'+nums+' 호기_'+stageLabel(activeStage).replace(/\s+/g,'')+'_센서점검보고서';
 }
-// 파일명 미리보기, 작업 단계 표시, 단계 버튼 active 상태를 갱신합니다.
+// 파일명 미리보기, 작업 단계 표시, 단계 버튼 active 상태, 확인 시점을 갱신합니다.
 function updateMeta(){
   document.getElementById('fname-text').textContent = getFilename()+'.pdf';
   document.getElementById('stage-badge').textContent = stageLabel(activeStage)+' 기준으로 편집 중';
+  document.getElementById('confirmed_at').textContent = (activeStage && confirmedAt[activeStage]) || 'PDF 생성 시 자동 기록';
   document.querySelectorAll('#stage-switch .tbtn').forEach(btn=>{
     btn.classList.toggle('active', btn.dataset.stage===activeStage);
   });
+}
+function setBooting(on){
+  document.querySelector('.app').classList.toggle('booting', on);
+  if(on) showToast('저장 데이터를 불러오는 중...'); else showToast('');
 }
 // 사용자가 작업 전/이동 전/작업 후/이동 후 버튼을 눌렀을 때 현재 편집 단계를 변경합니다.
 function setStage(stage){
@@ -612,114 +1038,189 @@ function setStage(stage){
 // '+ 호기 추가' 버튼 기능입니다. 새 호기 카드를 추가하고 화면을 다시 그립니다.
 function addRobot(){
   rid++;
-  const next = robots.length>0 ? Math.max(...robots.map(r=>Number(r.num)))+1 : 1;
+  const next = robots.length>0 ? Math.max(...robots.map(r=>Number(r.num)||0))+1 : 1;
   robots.push(makeRobot(next,rid));
   render(); updateMeta(); saveState();
   setTimeout(()=>{ const el=document.querySelector('[data-rid="'+rid+'"]'); if(el) el.scrollIntoView({behavior:'smooth',block:'nearest'}); },80);
 }
-// 호기 삭제 기능입니다. 최소 1개 호기는 남도록 제한합니다.
+// 호기 삭제 기능입니다. 최소 1개 호기는 남도록 제한하고, 되돌릴 수 없으므로 확인을 받습니다.
 function removeRobot(id){
+  const r = robots.find(x=>x.id===id);
+  if(!r) return;
   if(robots.length<=1){ showToast('최소 1개 호기가 필요합니다.'); return; }
-  robots = robots.filter(r=>r.id!==id);
+  const photoCount = Object.keys(r.photos).length;
+  if(!confirm(r.num+'호기를 삭제합니다.\n\n모든 단계의 점검 결과·메모와 사진 '+photoCount+'장이 함께 삭제되며 되돌릴 수 없습니다.\n계속하시겠습니까?')) return;
+  const refs = Object.values(r.photos);
+  robots = robots.filter(x=>x.id!==id);
   render(); updateMeta(); saveState();
+  releasePhotos(refs);
 }
-// 센서별 정상/이상 버튼을 토글합니다. 하나라도 이상이면 호기 전체 평가를 경미한 손상으로 자동 변경합니다.
+// 호기 번호 입력 변경을 반영합니다.
+function setRobotNum(id, el){
+  const r = robots.find(x=>x.id===id); if(!r) return;
+  r.num = Math.max(1, Math.floor(Number(el.value)) || 1);
+  el.value = r.num;
+  updateMeta(); saveState();
+}
+// 사용자가 현재 단계의 전체 상태를 직접 고르면 '자동 설정' 표시를 해제합니다(이후 자동 설정이 더 낮은 값으로 덮어쓰지 않음).
+function setRobotStatus(id, val){
+  const r = robots.find(x=>x.id===id); if(!r) return;
+  if(!activeStage){ showToast('작업 단계를 선택해주세요'); render(); return; }
+  r.status[activeStage] = STATUS_OPTIONS.includes(val) ? val : '';
+  r.statusAuto[activeStage] = false;
+  saveState();
+}
+// 센서 결과에 따라 현재 단계의 전체 상태를 자동으로 맞춥니다.
+// - 이상이 하나라도 있으면 '경미한 손상', 모두 정상이면 '정상'
+// - 자동으로 정해진 값은 다시 자동으로 바뀔 수 있지만, 사용자가 고른 값은 더 심각한 쪽으로만 올립니다.
+function applyAutoStatus(r, stage){
+  const arr = r.ss[stage];
+  const hasNg = arr.some(v=>v==='ng');
+  const allOk = arr.every(v=>v==='ok');
+  const target = hasNg ? '경미한 손상' : (allOk ? '정상' : '');
+  const cur = r.status[stage] || '';
+  if(cur === '' || r.statusAuto[stage]){
+    r.status[stage] = target;
+    r.statusAuto[stage] = target !== '';
+  } else if(target && STATUS_SEVERITY[target] > (STATUS_SEVERITY[cur] || 0)){
+    r.status[stage] = target;
+    r.statusAuto[stage] = true;
+  }
+}
+// 센서별 정상/이상 버튼을 토글합니다. 메모가 있는 '이상'을 해제하면 메모가 지워지므로 확인을 받습니다.
 function toggleStatus(robId,si,val){
   const r=robots.find(x=>x.id===robId); if(!r) return;
   if(!activeStage){ showToast('작업 단계를 선택해주세요'); return; }
-  r.ss[activeStage][si] = (r.ss[activeStage][si]===val) ? null : val;
-  if(r.ss[activeStage][si]!=='ng') r.memo[activeStage][si]='';
-  // 자동 반영: 현재 단계에서 모든 센서가 'ok'이면 전체 상태를 '정상'으로 설정합니다.
-  try{
-    const hasNg = Array.isArray(r.ss?.[activeStage]) && r.ss[activeStage].some(v=>v==='ng');
-    const allOk = Array.isArray(r.ss?.[activeStage]) && r.ss[activeStage].every(v=>v==='ok');
-    if(hasNg){
-      r.status = '경미한 손상';
-    } else if(allOk){
-      r.status = '정상';
-    }
-  }catch(e){}
+  const cur = r.ss[activeStage][si];
+  const next = (cur===val) ? null : val;
+  const memo = String(r.memo[activeStage][si]||'');
+  if(cur==='ng' && next!=='ng' && memo.trim()){
+    const preview = memo.length > 60 ? memo.slice(0,60)+'…' : memo;
+    if(!confirm('입력한 이상 내용이 삭제됩니다.\n\n"'+preview+'"\n\n계속하시겠습니까?')) return;
+  }
+  r.ss[activeStage][si] = next;
+  if(next!=='ng') r.memo[activeStage][si]='';
+  applyAutoStatus(r, activeStage);
   render(); saveState();
 }
-// 이상 상태일 때 입력한 메모를 해당 호기/센서/작업단계에 저장합니다.
+// 이상 상태일 때 입력한 메모를 해당 호기/센서/작업단계에 반영하고, 입력이 멈추면 저장합니다.
 function updateMemo(robId,si,val){
   const r=robots.find(x=>x.id===robId);
   if(!r) return;
   if(!activeStage){ showToast('작업 단계를 선택해주세요'); return; }
-  if(r.memo && r.memo[activeStage]){ r.memo[activeStage][si]=val; saveState(); }
+  r.memo[activeStage][si]=val;
+  scheduleSave();
+}
+const CAMERA_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D1D5DB" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>';
+// 사진 칸 하나의 HTML을 만듭니다.
+function photoSlotHTML(r, s, si, a, ai){
+  const key = stagePhotoKey(r.id,si,ai,activeStage);
+  const label = escHtml(s.name+' '+a);
+  if(!activeStage) return '<div class="pslot pslot-disabled" title="촬영 단계를 먼저 선택해주세요">'+CAMERA_ICON.replace('#D1D5DB','#E5E7EB')+'<span class="al" style="color:#D1D5DB">'+escHtml(a)+'</span></div>';
+  const ref = r.photos[key];
+  const delBtn = '<button type="button" class="xb" aria-label="'+label+' 사진 삭제" onclick="event.stopPropagation();delPhoto(\''+escHtml(key)+'\','+r.id+')">×</button>';
+  if(ref){
+    const src = photoSrc(ref);
+    if(src) return '<div class="pslot"><img src="'+escHtml(src)+'" alt="'+label+'">'+delBtn+'</div>';
+    if(!appReady) return '<div class="pslot pslot-loading"><span class="al">'+escHtml(a)+'</span><span class="al">불러오는 중</span></div>';
+    return '<div class="pslot pslot-missing" title="사진을 불러오지 못했습니다"><span class="al">'+escHtml(a)+'</span><span class="al">불러오기 실패</span>'+delBtn+'</div>';
+  }
+  return '<div class="pslot" onclick="upload(\''+escHtml(key)+'\','+r.id+')">'+CAMERA_ICON+'<span class="al">'+escHtml(a)+'</span></div>';
 }
 // robots 데이터를 기준으로 화면의 모든 호기 카드, 센서 카드, 사진 슬롯을 다시 그립니다.
 function render(){
   if(!robots.length) robots=[makeRobot(1,++rid)];
   const c=document.getElementById('robots');
   c.innerHTML='';
-  robots.forEach((r,ri)=>{
+  robots.forEach(r=>{
     ensureBuckets(r);
     const total = SENSORS.reduce((acc,s)=>acc+getAnglesForSensor(s).length,0);
-    const done = SENSORS.reduce((acc,s,si)=>acc+getAnglesForSensor(s).filter((_,ai)=>r.photos[stagePhotoKey(r.id,si,ai,activeStage)]).length,0);
+    const done = activeStage ? SENSORS.reduce((acc,s,si)=>acc+getAnglesForSensor(s).filter((_,ai)=>r.photos[stagePhotoKey(r.id,si,ai,activeStage)]).length,0) : 0;
     const pct = Math.round(done/total*100)||0;
     const sensorsHTML = SENSORS.map((s,si)=>{
-      const ssArr = Array.isArray(r.ss?.[activeStage]) ? r.ss[activeStage] : SENSORS.map(()=>null);
-      const memoArr = Array.isArray(r.memo?.[activeStage]) ? r.memo[activeStage] : SENSORS.map(()=>'');
-      const st = ssArr[si];
+      const st = activeStage ? r.ss[activeStage][si] : null;
       const angles = getAnglesForSensor(s);
-      const cnt = angles.filter((_,ai)=>r.photos[stagePhotoKey(r.id,si,ai,activeStage)]).length;
-      const memoVal = escHtml(memoArr[si]||'');
-      const slots = angles.map((a,ai)=>{
-        const key = stagePhotoKey(r.id,si,ai,activeStage);
-        const img = r.photos[key];
-        if(img) return '<div class="pslot"><img src="'+img+'" alt="'+s.name+' '+a+'"><button class="xb" onclick="event.stopPropagation();delPhoto(\''+key+'\','+r.id+')">×</button></div>';
-        if(!activeStage) return '<div class="pslot pslot-disabled" title="촬영 단계를 먼저 선택해주세요"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E5E7EB" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg><span class="al" style="color:#D1D5DB">'+a+'</span></div>';
-        return '<div class="pslot" onclick="upload(\''+key+'\','+r.id+')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D1D5DB" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg><span class="al">'+a+'</span></div>';
-      }).join('');
-      return '<div class="srow"><div class="stripe'+(st==='ok'?' ok':st==='ng'?' ng':'')+'"></div><div class="srow-top"><div class="s-name"><div class="dot '+s.type+'"></div>'+s.name+'</div><div class="s-r"><span class="s-cnt">'+cnt+'/'+angles.length+'</span><div class="toggle"><button class="tbtn'+(st==='ok'?' ok':'')+'" onclick="toggleStatus('+r.id+','+si+',\'ok\')">✓ 정상</button><button class="tbtn'+(st==='ng'?' ng':'')+'" onclick="toggleStatus('+r.id+','+si+',\'ng\')">⚠ 이상</button></div></div></div><div class="photo-grid">'+slots+'</div><div class="ng-memo'+(st==='ng'?' show':'')+'"><div class="ng-memo-lbl">⚠ 이상 내용 기록</div><textarea rows="2" placeholder="이상 내용을 입력하세요..." oninput="updateMemo('+r.id+','+si+',this.value)">'+memoVal+'</textarea></div></div>';
+      const cnt = activeStage ? angles.filter((_,ai)=>r.photos[stagePhotoKey(r.id,si,ai,activeStage)]).length : 0;
+      const memoVal = escHtml(activeStage ? (r.memo[activeStage][si]||'') : '');
+      const slots = angles.map((a,ai)=>photoSlotHTML(r,s,si,a,ai)).join('');
+      return '<div class="srow"><div class="stripe'+(st==='ok'?' ok':st==='ng'?' ng':'')+'"></div><div class="srow-top"><div class="s-name"><div class="dot '+s.type+'"></div>'+escHtml(s.name)+'</div><div class="s-r"><span class="s-cnt">'+cnt+'/'+angles.length+'</span><div class="toggle"><button class="tbtn'+(st==='ok'?' ok':'')+'" onclick="toggleStatus('+r.id+','+si+',\'ok\')">✓ 정상</button><button class="tbtn'+(st==='ng'?' ng':'')+'" onclick="toggleStatus('+r.id+','+si+',\'ng\')">⚠ 이상</button></div></div></div><div class="photo-grid">'+slots+'</div><div class="ng-memo'+(st==='ng'?' show':'')+'"><div class="ng-memo-lbl">⚠ 이상 내용 기록</div><textarea rows="2" placeholder="이상 내용을 입력하세요..." oninput="updateMemo('+r.id+','+si+',this.value)">'+memoVal+'</textarea></div></div>';
     }).join('');
-
+    const statusOptions = '<option value="">'+(activeStage?'상태 선택':'단계 선택 필요')+'</option>'+STATUS_OPTIONS.map(o=>'<option value="'+escHtml(o)+'">'+escHtml(o)+'</option>').join('');
     const div=document.createElement('div');
     div.className='rcard'; div.dataset.rid=r.id;
-    div.innerHTML='<div class="rcard-hd"><div class="hd-l"><span class="hd-tag">호기</span><input class="n-inp" type="number" value="'+r.num+'" min="1" onchange="robots['+ri+'].num=Number(this.value)||1;updateMeta();saveState()"><select class="fi rstatus" onchange="robots['+ri+'].status=this.value;saveState();render()"><option value="">상태 선택</option><option value="정상">정상</option><option value="경미한 손상">경미한 손상</option><option value="교체 필요">교체 필요</option><option value="긴급 점검">긴급 점검</option></select></div><div class="hd-r"><span class="prog-lbl">'+done+'/'+total+' · '+pct+'%</span>'+(robots.length>1?'<button class="del-btn" onclick="removeRobot('+r.id+')" aria-label="삭제">✕</button>':'')+'</div></div><div class="prog-track"><div class="prog-fill" style="width:'+pct+'%"></div></div><div class="stage-row"><div class="stage-row-hd"><span class="stage-name">'+stageLabel(activeStage)+'</span><span class="stage-note">현재 단계 편집 중</span></div>'+sensorsHTML+'</div>';
+    div.innerHTML='<div class="rcard-hd"><div class="hd-l"><span class="hd-tag">호기</span><input class="n-inp" type="number" value="'+escHtml(r.num)+'" min="1" aria-label="호기 번호" onchange="setRobotNum('+r.id+',this)"><select class="fi rstatus" aria-label="'+escHtml(stageLabel(activeStage))+' 전체 상태"'+(activeStage?'':' disabled title="촬영 단계를 먼저 선택해주세요"')+' onchange="setRobotStatus('+r.id+',this.value)">'+statusOptions+'</select></div><div class="hd-r"><span class="prog-lbl">'+done+'/'+total+' · '+pct+'%</span>'+(robots.length>1?'<button class="del-btn" onclick="removeRobot('+r.id+')" aria-label="'+escHtml(r.num)+'호기 삭제">✕</button>':'')+'</div></div><div class="prog-track"><div class="prog-fill" style="width:'+pct+'%"></div></div><div class="stage-row"><div class="stage-row-hd"><span class="stage-name">'+escHtml(stageLabel(activeStage))+'</span><span class="stage-note">현재 단계 편집 중</span></div>'+sensorsHTML+'</div>';
     c.appendChild(div);
     const statusSelect = div.querySelector('.rstatus');
-    if(statusSelect) statusSelect.value = r.status || '';
+    if(statusSelect) statusSelect.value = activeStage ? (r.status[activeStage] || '') : '';
   });
 }
-// 사용자가 업로드한 사진을 브라우저에서 JPEG로 압축/리사이즈하여 저장 용량을 줄입니다.
-async function fileToJpeg(file){
-  return new Promise((resolve,reject)=>{
-    const img=new Image(), url=URL.createObjectURL(file);
-    img.onload=()=>{
-      URL.revokeObjectURL(url);
-      const max=1600, s=Math.min(1,max/Math.max(img.width,img.height));
-      const w=Math.round(img.width*s), h=Math.round(img.height*s);
-      const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
-      const ctx=cv.getContext('2d');
-      ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
-      ctx.drawImage(img,0,0,w,h);
-      resolve(cv.toDataURL('image/jpeg',0.80));
-    };
-    img.onerror=()=>{ URL.revokeObjectURL(url); reject(new Error('load fail')); };
-    img.src=url;
-  });
+
+/* ── 사진 첨부 ── */
+// 사용자가 고른 사진을 JPEG로 리사이즈/압축한 Blob으로 만듭니다.
+async function fileToJpegBlob(file){
+  const url = URL.createObjectURL(file);
+  try{
+    const img = await loadImageElement(url);
+    const s = Math.min(1, PHOTO_MAX_PX/Math.max(img.naturalWidth||img.width, img.naturalHeight||img.height));
+    const w = Math.max(1, Math.round((img.naturalWidth||img.width)*s)), h = Math.max(1, Math.round((img.naturalHeight||img.height)*s));
+    const cv = document.createElement('canvas'); cv.width=w; cv.height=h;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
+    ctx.drawImage(img,0,0,w,h);
+    const blob = await new Promise(resolve => cv.toBlob(resolve, 'image/jpeg', PHOTO_QUALITY));
+    if(!blob) throw new Error('JPEG 변환 실패');
+    return blob;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
-// 사진 슬롯 클릭 시 파일 선택/카메라 촬영을 열고, 선택된 사진을 해당 슬롯에 임시 저장합니다.
+// 사진 슬롯 클릭 시 파일 선택/카메라 촬영을 열고, 선택된 사진을 사진 저장소(IndexedDB)에 저장한 뒤 칸에 연결합니다.
+// 사진 저장에 실패하면 첨부하지 않고 알립니다(화면에만 보이고 저장되지 않는 상황 방지).
 function upload(key,robId){
   if(!activeStage){ showToast('촬영 단계를 먼저 선택해주세요'); return; }
+  if(saveBlockedReason){ alert('자동 저장이 중지된 상태라 사진을 첨부할 수 없습니다.\n\n사유: '+saveBlockedReason); return; }
   const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.capture='environment';
   inp.onchange=async e=>{
     const file=e.target.files[0]; if(!file) return;
+    showToast('사진 처리 중...');
+    let blob;
+    try{ blob = await fileToJpegBlob(file); }
+    catch(err){ console.error(err); showToast('사진 불러오기 실패 (지원하지 않는 형식일 수 있습니다)'); return; }
+    const id = newPhotoId();
     try{
-      const url=await fileToJpeg(file);
-      const r=robots.find(x=>x.id===robId);
-      if(r){ r.photos[key]=url; render(); saveState(); }
-    }catch(e){ showToast('사진 불러오기 실패'); }
+      await photoStore.put(id, blob);
+    }catch(err){
+      console.error('사진 저장 실패', err);
+      const msg = isQuotaError(err)
+        ? '사진 저장 공간이 부족해 사진을 저장하지 못했습니다. 이 사진은 첨부되지 않았습니다.'
+        : '사진을 저장하지 못해 첨부되지 않았습니다 ('+errText(err)+').';
+      setWarning('photo-save', msg, [dismissAction('photo-save')]);
+      alert(msg);
+      showToast('');
+      return;
+    }
+    clearWarning('photo-save');
+    const r = robots.find(x=>x.id===robId);
+    if(!r){ photoStore.del([id]).catch(()=>{}); showToast(''); return; }   // 처리 중 호기가 삭제된 경우
+    const old = r.photos[key];
+    cachePhotoBlob(id, blob);
+    r.photos[key] = id;
+    if(old && old !== id) releasePhotos([old]);
+    render(); saveState(); showToast('');
   };
   inp.click();
 }
-// 사진 슬롯의 X 버튼을 눌렀을 때 해당 사진을 삭제합니다.
+// 사진 슬롯의 X 버튼을 눌렀을 때 해당 사진을 삭제합니다. 다른 칸에서 같이 쓰는 사진이 아니면 사진 저장소에서도 지웁니다.
 function delPhoto(key,robId){
   const r=robots.find(x=>x.id===robId);
-  if(r){ delete r.photos[key]; render(); saveState(); }
+  if(!r || !(key in r.photos)) return;
+  const ref = r.photos[key];
+  delete r.photos[key];
+  render(); saveState();
+  releasePhotos([ref]);
 }
+
+/* ── PDF 생성 ── */
 // PDF에서 한글 깨짐을 방지하기 위해 텍스트를 PNG 이미지로 변환합니다.
 function textToPng(text,opt={}){
   const sz=opt.size||7, bold=opt.bold?'700':'400';
@@ -745,47 +1246,79 @@ function pdfText(doc,text,x,y,opt={}){
   if(opt.valign==='middle') yy=y-t.hmm/2;
   doc.addImage(t.data,'PNG',xx,yy,t.wmm,t.hmm,undefined,'FAST');
 }
-// 긴 메모 텍스트를 PDF 셀 너비에 맞게 여러 줄로 나누어 출력합니다.
+// 긴 텍스트를 지정 너비에 맞게 여러 줄로 나누어 출력하고, 사용한 높이(mm)를 돌려줍니다.
+// maxLines를 넘으면 마지막 줄 끝에 '…'를 붙여 잘렸음을 표시합니다. wordWrap이면 가능한 한 공백에서 줄을 바꿉니다.
 function pdfWrappedText(doc,text,x,y,maxWmm,opt={}){
   const sz=opt.size||6, bold=opt.bold?'700':'400', px=sz*96/72;
-  const maxPx=maxWmm*MM_TO_PX, lineH=opt.lineH||3.8, maxLines=opt.maxLines||5;
+  const pad=opt.pad??1.5;
+  const maxPx=maxWmm*MM_TO_PX - pad*2, lineH=opt.lineH||3.8, maxLines=opt.maxLines||5;
   const cv=document.createElement('canvas'), ctx=cv.getContext('2d');
   ctx.font=bold+' '+px+'px '+PDF_FONT;
+  const fits = s => ctx.measureText(s).width <= maxPx;
   const lines=[];
   String(text||'').split(/\r?\n/).forEach(par=>{
     let line='';
     for(const ch of Array.from(par)){
       const test=line+ch;
-      if(ctx.measureText(test).width>maxPx&&line){ lines.push(line); line=ch; }
-      else line=test;
+      if(!fits(test) && line){
+        const sp = opt.wordWrap ? line.lastIndexOf(' ') : -1;
+        if(sp > 0){ lines.push(line.slice(0,sp)); line = line.slice(sp+1)+ch; }
+        else { lines.push(line); line = ch; }
+      } else line=test;
     }
     if(line) lines.push(line);
   });
-  (lines.length?lines:['']).slice(0,maxLines).forEach((ln,i)=>pdfText(doc,ln,x,y+i*lineH,opt));
-  return Math.min(lines.length||1,maxLines)*lineH;
+  let out = lines.length ? lines : [''];
+  if(out.length > maxLines){
+    out = out.slice(0, maxLines);
+    let last = Array.from(out[maxLines-1]);
+    while(last.length && !fits(last.join('')+'…')) last.pop();
+    out[maxLines-1] = last.join('') + '…';
+  }
+  out.forEach((ln,i)=>pdfText(doc,ln,x,y+i*lineH,opt));
+  return out.length*lineH;
+}
+// 사진을 사진 저장소에서 읽어 PDF 칸 크기에 맞게 다운샘플한 JPEG dataURL로 만듭니다. 실패하면 null.
+async function loadPhotoForPdf(ref){
+  let blob = null;
+  if(isSafeDataImage(ref)) blob = photoDataUrlToBlob(ref);
+  else if(PHOTO_ID_RE.test(ref)) blob = await photoStore.get(ref);
+  if(!blob) return null;
+  const url = URL.createObjectURL(blob);
+  try{
+    const img = await loadImageElement(url);
+    const iw = img.naturalWidth||img.width||1, ih = img.naturalHeight||img.height||1;
+    const s = Math.min(1, PDF_PHOTO_MAX_PX/Math.max(iw, ih));
+    const w = Math.max(1, Math.round(iw*s)), h = Math.max(1, Math.round(ih*s));
+    const cv = document.createElement('canvas'); cv.width=w; cv.height=h;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
+    ctx.drawImage(img,0,0,w,h);
+    return {data: cv.toDataURL('image/jpeg', PDF_PHOTO_QUALITY), w, h};
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 // PDF 한 섹션을 생성합니다. 특정 호기의 센서 상태/사진을 표 형태로 그립니다.
+// 사진 칸마다 그 센서의 실제 촬영 각도(예: 카메라 '정면/측면', FRONT LIDAR '상면')를 표시합니다.
 async function pdfAddSection(doc,r,stage,startY){
-  const M=14;
-  const C={no:12,name:26,status:20,photo:31};
-  const totalW=C.no+C.name+C.status+C.photo*4;
+  const M=PDF_M, C=PDF_COL, totalW=PDF_TABLE_W, rowH=PDF_ROW_H;
   let y=startY;
   doc.setFillColor(30,60,114); doc.setDrawColor(30,60,114); doc.setLineWidth(0.3);
-  doc.rect(M,y,totalW,6.5,'FD');
-  pdfText(doc,stageLabel(stage)+' — '+r.num+' 호기', M+totalW/2, y+6.5/2, {align:'center',valign:'middle',size:8,bold:true,color:[255,255,255]});
-  y+=6.5;
-  const hCols=[{t:'No.',w:C.no},{t:'Sensor',w:C.name},{t:'Status',w:C.status},{t:'정면',w:C.photo},{t:'좌측',w:C.photo},{t:'우측',w:C.photo},{t:'후면',w:C.photo}];
+  doc.rect(M,y,totalW,PDF_TITLE_H,'FD');
+  pdfText(doc,stageLabel(stage)+' — '+r.num+' 호기', M+totalW/2, y+PDF_TITLE_H/2, {align:'center',valign:'middle',size:8,bold:true,color:[255,255,255]});
+  y+=PDF_TITLE_H;
+  const hCols=[{t:'No.',w:C.no},{t:'Sensor',w:C.name},{t:'Status',w:C.status},{t:'사진 (칸마다 촬영 각도 표시)',w:C.photo*4}];
   let hx=M;
   hCols.forEach(h=>{
     doc.setFillColor(100,120,150); doc.setDrawColor(100,120,150); doc.setLineWidth(0.25);
-    doc.rect(hx,y,h.w,5.5,'FD');
-    pdfText(doc,h.t,hx+h.w/2,y+5.5/2,{align:'center',valign:'middle',size:7,bold:true,color:[255,255,255]});
+    doc.rect(hx,y,h.w,PDF_HEAD_H,'FD');
+    pdfText(doc,h.t,hx+h.w/2,y+PDF_HEAD_H/2,{align:'center',valign:'middle',size:7,bold:true,color:[255,255,255]});
     hx+=h.w;
   });
-  y+=5.5;
+  y+=PDF_HEAD_H;
   for(let si=0;si<SENSORS.length;si++){
-    const rowH=26;
-    if(y+rowH>280){ doc.addPage(); y=M; }
+    if(y+rowH>PDF_BOTTOM){ doc.addPage(); y=M; }
     const st=r.ss[stage]?.[si];
     const memo=r.memo[stage]?.[si]||'';
     const angles = getAnglesForSensor(SENSORS[si]);
@@ -809,7 +1342,7 @@ async function pdfAddSection(doc,r,stage,startY){
       doc.setFillColor(255,230,230); doc.rect(rx,y,C.status,rowH,'F');
       doc.setDrawColor(220,80,80); doc.rect(rx,y,C.status,rowH);
       pdfText(doc,'⚠ 이상',rx+C.status/2,y+5.5,{align:'center',valign:'middle',size:7.5,bold:true,color:[180,30,30]});
-      if(memo) pdfWrappedText(doc,memo,rx+1.5,y+10,C.status-3,{size:5,color:[140,40,40],maxLines:3,lineH:3.5});
+      if(memo) pdfWrappedText(doc,memo,rx+0.5,y+9,C.status-1,{size:5,color:[140,40,40],maxLines:4,lineH:3.5,pad:1});
     } else {
       doc.setFillColor(240,241,242); doc.rect(rx,y,C.status,rowH,'F');
       doc.setDrawColor(150,155,160); doc.rect(rx,y,C.status,rowH);
@@ -818,48 +1351,48 @@ async function pdfAddSection(doc,r,stage,startY){
     rx+=C.status;
     for(let ai=0;ai<4;ai++){
       doc.setDrawColor(180,185,195); doc.setLineWidth(0.25);
-      doc.rect(rx,y,C.photo,rowH);
-      const imgSrc = ai<angles.length ? r.photos[stagePhotoKey(r.id,si,ai,stage)] : null;
-      if(imgSrc){
-        try{
-          // Ensure we have a data URL (convert remote URLs to data URLs to avoid CORS issues)
-          const dataUrl = await ensureDataUrl(imgSrc) || imgSrc;
-          const info = await getImageInfo(dataUrl);
-          const maxW=C.photo-2, maxH=rowH-2;
-          const ratio = (info.w||1)/(info.h||1);
-          let w = maxW, h = maxW/ratio;
-          if(h>maxH){ h=maxH; w=maxH*ratio; }
-          const ix = rx + (C.photo - w)/2, iy = y + (rowH - h)/2;
-          // Choose image format based on data URL MIME type
-          let imgFormat = 'JPEG';
-          try{
-            if(String(dataUrl).startsWith('data:image/png')) imgFormat = 'PNG';
-          }catch(e){}
-          doc.addImage(dataUrl, imgFormat, ix, iy, w, h, undefined, 'FAST');
-        }catch(e){
-          doc.setFillColor(235,238,242); doc.rect(rx,y,C.photo,rowH,'F');
-          pdfText(doc,'—',rx+C.photo/2,y+rowH/2,{align:'center',valign:'middle',size:6,color:[190,190,190]});
-        }
-      } else {
-        doc.setFillColor(235,238,242); doc.rect(rx,y,C.photo,rowH,'F');
-        pdfText(doc,'—',rx+C.photo/2,y+rowH/2,{align:'center',valign:'middle',size:6,color:[190,190,190]});
+      if(ai>=angles.length){
+        // 이 센서에는 해당 각도가 없음(카메라는 2장): 빈 칸으로 둡니다.
+        doc.setFillColor(250,250,251); doc.rect(rx,y,C.photo,rowH,'FD');
+        rx+=C.photo; continue;
       }
+      doc.rect(rx,y,C.photo,rowH);
+      const capH=4.2;
+      const areaX=rx+1, areaY=y+capH, areaW=C.photo-2, areaH=rowH-capH-1;
+      const ref = r.photos[stagePhotoKey(r.id,si,ai,stage)];
+      let drawn=false, failed=false;
+      if(ref){
+        try{
+          const pic = await loadPhotoForPdf(ref);
+          if(pic){
+            const ratio = pic.w/pic.h;
+            let w = areaW, h = areaW/ratio;
+            if(h>areaH){ h=areaH; w=areaH*ratio; }
+            doc.addImage(pic.data, 'JPEG', areaX+(areaW-w)/2, areaY+(areaH-h)/2, w, h, undefined, 'FAST');
+            drawn=true;
+          } else failed=true;
+        }catch(e){ console.warn('PDF 사진 삽입 실패', e); failed=true; }
+      }
+      if(!drawn){
+        doc.setFillColor(235,238,242); doc.rect(areaX,areaY,areaW,areaH,'F');
+        pdfText(doc,failed?'불러오기 실패':'미첨부',rx+C.photo/2,areaY+areaH/2,{align:'center',valign:'middle',size:5.5,color:failed?[180,60,60]:[170,170,170]});
+      }
+      pdfText(doc,angles[ai],rx+0.6,y+0.4,{size:5.5,bold:true,color:[90,100,120]});
       rx+=C.photo;
     }
     y+=rowH;
   }
   return y+4;
 }
+// PDF 생성 전 확인 메시지입니다. 이상 항목과 전체 상태 경고(미선택, 이상 센서가 있는데 '정상')를 함께 보여줍니다.
 function buildPdfConfirmationMessage(){
   const stageText = stageLabel(activeStage);
   const issues = robots.map(r => {
-    const badSensors = SENSORS.map((sensor, si) => {
-      const status = r.ss[activeStage]?.[si];
-      if(status === 'ng') return sensor.name;
-      return null;
-    }).filter(Boolean);
+    const badSensors = SENSORS.filter((_, si) => r.ss[activeStage]?.[si] === 'ng').map(s => s.name);
     return badSensors.length ? `${r.num}호기: ${badSensors.join(', ')}` : null;
   }).filter(Boolean);
+  const unselected = robots.filter(r => !r.status[activeStage]).map(r => r.num+'호기');
+  const mismatch = robots.filter(r => r.status[activeStage]==='정상' && r.ss[activeStage].some(v=>v==='ng')).map(r => r.num+'호기');
 
   let message = `다음 정보를 확인합니다.\n\n\n촬영 단계: ${stageText}\n`;
   if(issues.length){
@@ -867,12 +1400,21 @@ function buildPdfConfirmationMessage(){
   } else {
     message += '\n현재 모든 센서 이상 없습니다.';
   }
+  if(unselected.length) message += `\n\n⚠ 전체 상태 미선택: ${unselected.join(', ')}\n  (PDF에는 '미선택'으로 표시됩니다)`;
+  if(mismatch.length) message += `\n\n⚠ 이상 센서가 있지만 전체 상태가 '정상'인 호기: ${mismatch.join(', ')}`;
   message += '\n\n이대로 PDF를 생성하시겠습니까?';
   return message;
 }
 
-// 'PDF 생성' 버튼 기능입니다. 현재 화면 데이터를 PDF로 만들어 다운로드합니다.
+// 'PDF 생성' 버튼 기능입니다. 현재 단계의 데이터를 PDF로 만들어 다운로드합니다.
 async function generatePDF(){
+  if(pdfBusy) return;
+  if(!window.jspdf || typeof window.jspdf.jsPDF !== 'function'){
+    alert(JSPDF_MISSING_MSG);
+    showToast('PDF 라이브러리를 불러오지 못했습니다');
+    return;
+  }
+  flushSave();
   const photoBy = document.getElementById('photo_by').value.trim();
   if(!photoBy){
     alert('촬영자 이름을 입력해주세요.\n\nPDF 생성을 위해서는 촬영자 정보가 필수입니다.');
@@ -900,18 +1442,19 @@ async function generatePDF(){
     return;
   }
 
-  const confirmMessage = buildPdfConfirmationMessage();
-  if(!confirm(confirmMessage)){
+  if(!confirm(buildPdfConfirmationMessage())){
     showToast('PDF 생성이 취소되었습니다.');
     return;
   }
+  pdfBusy = true;
+  const btn = document.getElementById('pdf-btn');
+  if(btn) btn.disabled = true;
   try {
     const now=getNow();
-    document.getElementById('confirmed_at').textContent=now;
     showToast('PDF 생성 중...');
     const {jsPDF}=window.jspdf;
     const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
-    const W=210,M=14; let y=M;
+    const W=210,M=PDF_M; let y=M;
     doc.setFillColor(255,255,255); doc.rect(0,0,W,22,'F');
     doc.setDrawColor(229,232,237); doc.setLineWidth(0.3); doc.line(0,22,W,22);
     try{
@@ -929,13 +1472,14 @@ async function generatePDF(){
     doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(150,150,150);
     doc.text('SENSOR INSPECTION TRACKER (RMEO)',M+42,10);
     doc.text(now,W-M,10,{align:'right'});
-    y=27;
-    const pb=document.getElementById('photo_by').value||'-';
-    const statusText = robots.map(r => r.num + ' 호기 ' + (r.status || '정상')).join(' / ');
-    pdfText(doc,'Device: PARKIE   Inspector: '+pb+'   Date: '+now+'   Status: '+statusText,M,y-4,{size:7.5,color:[90,90,90]});
-    y+=6;
+    const pb=photoBy||'-';
+    const statusText = robots.map(r => r.num + ' 호기 ' + (r.status[activeStage] || '미선택')).join(' / ');
+    // 호기가 많아 한 줄을 넘으면 줄바꿈합니다(페이지 밖으로 잘리지 않도록).
+    const infoH = pdfWrappedText(doc,'Device: PARKIE   Inspector: '+pb+'   Date: '+now+'   Status: '+statusText,M,23,PDF_TABLE_W,{size:7.5,color:[90,90,90],lineH:3.8,maxLines:12,wordWrap:true});
+    y = 23 + infoH + 6.2;
     for(const r of robots){
-      if(y>252){ doc.addPage(); y=M; }
+      // 섹션(제목+머리글+센서 4행)이 페이지에 다 들어가지 않으면 다음 페이지에서 시작합니다.
+      if(y + PDF_SECTION_H > PDF_BOTTOM){ doc.addPage(); y=M; }
       y=await pdfAddSection(doc,r,activeStage,y);
       y+=4;
     }
@@ -947,448 +1491,122 @@ async function generatePDF(){
       doc.text('HL Robotics - PARKIE Sensor Inspection Report  |  '+now+'  |  '+i+' / '+pages, W/2,292,{align:'center'});
     }
     doc.save(getFilename()+'.pdf');
+    confirmedAt[activeStage] = now;
+    updateMeta(); saveState();
     showToast('✓ PDF 저장 완료');
   } catch (error) {
     console.error('PDF 생성 실패', error);
     showToast('PDF 생성 실패');
+    alert('PDF 생성 중 오류가 발생했습니다.\n\n' + errText(error));
+  } finally {
+    pdfBusy = false;
+    if(btn) btn.disabled = false;
   }
 }
-// 화면 하단에 짧은 상태 메시지를 보여줍니다. 예: 저장 중, PDF 완료, 오류 등
+// PDF 머리글에 넣을 로고 이미지를 한 번만 불러옵니다.
+function getLogoImage(){
+  if(!logoImagePromise){
+    logoImagePromise = loadImageElement(LOGO_SRC);
+    logoImagePromise.catch(() => { logoImagePromise = null; });
+  }
+  return logoImagePromise;
+}
+// 화면 하단에 짧은 상태 메시지를 보여줍니다. 예: 저장 중, PDF 완료 등 (저장 실패 같은 중요한 경고는 setWarning 사용)
 function showToast(msg){
   if(toastTimer) clearTimeout(toastTimer);
   document.getElementById('toast').textContent=msg;
   if(msg) toastTimer=setTimeout(()=>showToast(''),4000);
 }
 
-// '초기화' 버튼 기능입니다. 작성 중인 데이터와 localStorage 임시 데이터를 모두 비웁니다.
-function resetAll(){
+// '초기화' 버튼 기능입니다. 작성 중인 데이터, localStorage 저장 데이터, 사진 저장소의 사진을 모두 비웁니다.
+async function resetAll(){
+  if(!confirm('진행중인 내용을 모두 초기화합니다. 저장된 사진도 모두 삭제됩니다.\n계속 진행하시겠습니까?')) return;
   try{
-    if(!confirm('진행중인 내용을 모두 초기화합니다. 계속 진행하시겠습니까?')) return;
-    // Clear data structures
-    robots = [makeRobot(1,1)];
-    rid = 1;
-    activeStage = '';
-    document.getElementById('photo_by').value = '';
-    // Clear caches if present
-    try{ imageInfoCache && imageInfoCache.clear(); }catch(e){}
-    try{ imageElementCache && imageElementCache.clear(); }catch(e){}
-    // Clear local storage
+    if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
+    for(const id of [...photoUrlCache.keys()]) revokePhotoUrl(id);
+    photoLoadFailed.clear();
+    resetMemoryState();
+    saveBlockedReason = '';
+    // 사진 저장소를 쓸 수 없음 / jsPDF 로드 실패 경고는 초기화와 무관하므로 남깁니다.
+    for(const k of [...warnings.keys()]) if(k !== 'photo-db' && k !== 'jspdf') warnings.delete(k);
+    renderWarnings();
     try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
-    updateMeta(); render(); saveState();
+    try{ await photoStore.clear(); }catch(e){ console.warn('사진 저장소 비우기 실패', e); }
+    updateMeta(); render();
     showToast('초기화 완료');
   }catch(e){
     console.error('초기화 실패', e);
     showToast('초기화 실패');
   }
 }
-// 앱 시작 함수입니다. 로고, 저장 데이터, 버튼 이벤트, 시계, 화면 렌더링을 초기화합니다.
-function boot(){
+// 앱 시작 함수입니다. 저장 데이터 읽기 → 예전 형식 변환(사진은 IndexedDB로 이동) → 사진 불러오기 → 화면 렌더링 순서로 진행합니다.
+// 저장은 실제로 변환이 일어났을 때만 합니다(읽기만 했는데 저장 데이터를 덮어쓰지 않도록).
+async function boot(){
   document.getElementById('tb-logo').src=LOGO_SRC;
-  const loaded=loadState();
-  if(!loaded){ robots=[makeRobot(1,1)]; rid=1; activeStage = ''; }
-  if(activeStage && !STAGES.some(s=>s.key===activeStage)) activeStage = '';
   document.querySelectorAll('#stage-switch .tbtn').forEach(btn=>btn.addEventListener('click',()=>setStage(btn.dataset.stage)));
   setInterval(updateClock,1000);
-  updateClock(); updateMeta(); render(); saveState();
-}
-boot();
-</script>
-<script>
-const OFFLINE_PDF_SCALE = 5;
-const OFFLINE_FONT = "'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo','Segoe UI',system-ui,sans-serif";
-const PDF_A4_W_MM = 210;
-const PDF_A4_H_MM = 297;
-const imageElementCache = new Map();
-
-// Blob 데이터를 파일로 다운로드합니다. 오프라인 PDF 생성 방식에서 사용됩니다.
-function downloadBlob(blob, filename){
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.href = url;
-  a.download = filename;
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-// 이미지 src를 Image 객체로 불러오고 캐시합니다. 캔버스 PDF 생성에 사용합니다.
-function getImageElement(src){
-  if(!src) return Promise.resolve(null);
-  if(imageElementCache.has(src)) return imageElementCache.get(src);
-  const p = new Promise(resolve => {
-    const img = new Image();
-    // Allow cross-origin image loading so remote images can be drawn on canvas
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src = src;
+  updateClock();
+  // 화면을 벗어나거나 창을 닫을 때 지연 중인 입력을 바로 저장합니다.
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') flushSave(); });
+  window.addEventListener('pagehide', flushSave);
+  // 다른 창(포털 데이터 관리, 같은 앱의 다른 탭 초기화)에서 저장 데이터를 지우면 되살리지 않도록 저장을 멈춥니다.
+  window.addEventListener('storage', e => {
+    if((e.key === STORAGE_KEY && e.newValue === null) || e.key === null){
+      blockSaving('다른 창에서 저장 데이터가 삭제됨', '다른 창(포털 데이터 관리 등)에서 이 앱의 저장 데이터가 삭제되었습니다. 지운 데이터가 되살아나지 않도록 자동 저장을 멈췄습니다. 페이지를 새로고침해주세요.');
+    }
   });
-  imageElementCache.set(src, p);
-  return p;
-}
-
-// 원격 이미지 URL을 fetch로 가져와 data URL(base64)로 변환합니다. CORS 실패 시 null 반환합니다.
-async function fetchImageAsDataUrl(url){
-  try{
-    const res = await fetch(url, {mode: 'cors'});
-    if(!res.ok) return null;
-    const blob = await res.blob();
-    return await new Promise((resolve,reject)=>{
-      const fr = new FileReader();
-      fr.onload = ()=>resolve(fr.result);
-      fr.onerror = reject;
-      fr.readAsDataURL(blob);
-    });
-  }catch(e){
-    return null;
+  if(!window.jspdf || typeof window.jspdf.jsPDF !== 'function'){
+    setWarning('jspdf', 'PDF 라이브러리(jsPDF)를 불러오지 못해 PDF를 생성할 수 없습니다. 포털 폴더 구조(assets/vendor/jspdf-2.5.1.umd.min.js)가 그대로인지 확인해주세요.');
   }
-}
+  setBooting(true);
 
-// 이미지 src가 data URL이면 그대로, blob URL이면 그대로, 원격 URL이면 fetch하여 data URL로 변환합니다.
-// jsPDF addImage는 data URL이 필요하므로 원격 이미지를 PDF에 넣기 전에 반드시 이 함수를 거쳐야 합니다.
-async function ensureDataUrl(src){
-  if(!src) return null;
-  if(String(src).startsWith('data:')) return src;
-  if(String(src).startsWith('blob:')) return src;
-  return await fetchImageAsDataUrl(src);
-}
-
-// 캔버스 내용을 JPEG 바이트 배열로 변환합니다.
-function canvasToJpegBytes(canvas, quality=0.92){
-  const dataUrl = canvas.toDataURL('image/jpeg', quality);
-  const base64 = dataUrl.split(',')[1] || '';
-  const bin = atob(base64);
-  const out = new Uint8Array(bin.length);
-  for(let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-// dataURL 문자열을 PDF 파일에 넣을 수 있는 바이트 배열로 변환합니다.
-function dataUrlToBytes(dataUrl){
-  const base64 = String(dataUrl || '').split(',')[1] || '';
-  const bin = atob(base64);
-  const out = new Uint8Array(bin.length);
-  for(let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-// PDF 내부 텍스트에 안전하게 넣기 위해 특수문자를 이스케이프합니다.
-function encodePdfText(text){
-  return new TextEncoder().encode(String(text));
-}
-
-// 여러 개의 Uint8Array를 하나로 합칩니다. PDF 바이너리 조립에 사용합니다.
-function concatUint8Arrays(parts){
-  const total = parts.reduce((sum,p)=>sum+p.length,0);
-  const out = new Uint8Array(total);
-  let off = 0;
-  for(const p of parts){
-    out.set(p, off);
-    off += p.length;
+  const stored = readStoredState();
+  let stats = null;
+  if(stored.status === 'ok'){
+    try{ stats = applyStoredState(stored.data); }
+    catch(e){ stored.status = 'corrupt'; stored.error = e; }
   }
-  return out;
-}
+  if(stored.status === 'corrupt') handleCorruptState(stored.raw, stored.error);
+  if(stored.status === 'unavailable'){
+    setWarning('state', '브라우저 저장소(localStorage)를 사용할 수 없어 입력 내용이 저장되지 않습니다. 사생활 보호(시크릿) 모드나 사이트 데이터 차단 설정을 확인해주세요.');
+  }
+  if(stored.status !== 'ok') resetMemoryState();
+  updateMeta(); render();
 
-// 캔버스에 텍스트를 그리는 공통 함수입니다. 색상/굵기/정렬 옵션을 지원합니다.
-function drawText(ctx, text, x, y, opt={}){
-  const size = opt.size || 12;
-  const bold = opt.bold ? '700' : '400';
-  ctx.font = `${bold} ${size}px ${OFFLINE_FONT}`;
-  ctx.fillStyle = opt.color || '#111';
-  ctx.textAlign = opt.align || 'left';
-  ctx.textBaseline = opt.baseline || 'alphabetic';
-  ctx.fillText(String(text ?? ''), x, y);
-}
+  // 사진 저장소(IndexedDB)를 엽니다. 쓸 수 없으면 사진을 메모리에만 보관합니다.
+  try{ await openPhotoDb(); }
+  catch(e){
+    console.error('사진 저장소 열기 실패', e);
+    photoMemoryMode = true;
+    setWarning('photo-db', '사진 저장소(IndexedDB)를 열 수 없어 새로 첨부하는 사진은 이 화면에만 임시로 보관됩니다. 새로고침하거나 창을 닫으면 사진이 사라지니, 닫기 전에 PDF를 생성해주세요. (' + errText(e) + ')');
+  }
 
-// 캔버스 텍스트를 지정 너비 안에 들어가도록 줄바꿈합니다.
-function wrapText(ctx, text, maxWidth){
-  const lines = [];
-  String(text ?? '').split(/\r?\n/).forEach(par => {
-    let line = '';
-    for(const ch of Array.from(par)){
-      const test = line + ch;
-      if(ctx.measureText(test).width > maxWidth && line){
-        lines.push(line);
-        line = ch;
-      } else {
-        line = test;
-      }
+  if(stored.status === 'ok'){
+    let migrated = {moved:0, failed:0};
+    const hasInline = robots.some(r => Object.values(r.photos).some(isSafeDataImage));
+    // 메모리 모드에서는 옮기지 않습니다(옮긴 뒤 저장하면 새로고침 시 사진이 사라지므로 원본 유지).
+    if(hasInline && !photoMemoryMode) migrated = await migrateInlinePhotos();
+    if(migrated.failed){
+      setWarning('migrate', '예전 형식으로 저장된 사진 ' + migrated.failed + '장을 사진 저장소로 옮기지 못했습니다. 원본은 그대로 보존되어 있으며 다음 실행 때 다시 시도합니다.', [dismissAction('migrate')]);
     }
-    if(line) lines.push(line);
-  });
-  return lines.length ? lines : [''];
-}
-
-// 캔버스에 배경색과 테두리가 있는 사각형을 그립니다.
-function fillStrokeRect(ctx, x, y, w, h, fill, stroke){
-  if(fill){
-    ctx.fillStyle = fill;
-    ctx.fillRect(x, y, w, h);
-  }
-  if(stroke){
-    ctx.strokeStyle = stroke;
-    ctx.strokeRect(x, y, w, h);
-  }
-}
-
-// 이미지를 비율 유지로 지정 영역 안에 맞춰 캔버스에 그립니다.
-async function drawImageContain(ctx, src, x, y, w, h){
-  const img = await getImageElement(src);
-  if(!img) return false;
-  const ratio = img.naturalWidth / img.naturalHeight || 1;
-  let dw = w, dh = w / ratio;
-  if(dh > h){
-    dh = h;
-    dw = h * ratio;
-  }
-  const dx = x + (w - dw) / 2;
-  const dy = y + (h - dh) / 2;
-  ctx.drawImage(img, dx, dy, dw, dh);
-  return true;
-}
-
-// 오프라인(jsPDF 미사용) PDF 생성 방식입니다.
-// 각 보고서 페이지를 HTML5 Canvas에 직접 그린 뒤, PNG 이미지를 PDF 바이너리로 조립합니다.
-// 한글 폰트 렌더링이 확실하며, CDN 없이도 동작합니다.
-async function renderReportPages(now){
-  const scale = OFFLINE_PDF_SCALE;
-  const pageW = PDF_A4_W_MM * scale;
-  const pageH = PDF_A4_H_MM * scale;
-  const pages = [];
-
-  function newPage(){
-    const canvas = document.createElement('canvas');
-    canvas.width = pageW;
-    canvas.height = pageH;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, pageW, pageH);
-    return {canvas, ctx};
-  }
-
-  const logo = await getImageElement(LOGO_SRC);
-  let page = newPage();
-  await drawHeader(page.ctx);
-
-  async function drawHeader(ctx){
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, pageW, 22 * scale);
-    ctx.strokeStyle = '#E5E8ED';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, 22 * scale);
-    ctx.lineTo(pageW, 22 * scale);
-    ctx.stroke();
-
-    if(logo){
-      const maxW = 40 * scale;
-      const maxH = 12 * scale;
-      const ratio = logo.naturalWidth / logo.naturalHeight || 1;
-      let w = maxW, h = maxW / ratio;
-      if(h > maxH){ h = maxH; w = maxH * ratio; }
-      ctx.drawImage(logo, 14 * scale, 4 * scale + (maxH - h) / 2, w, h);
-    } else {
-      drawText(ctx, 'HL Robotics', 14 * scale, 13 * scale, {size: 14, bold: true});
+    if(stats.dropped){
+      setWarning('dropped', '형식이 올바르지 않은 사진 기록 ' + stats.dropped + '건은 불러오지 못해 제외했습니다.', [dismissAction('dropped')]);
     }
-    drawText(ctx, 'SENSOR INSPECTION TRACKER (RMEO)', 56 * scale, 10 * scale, {size: 9, color: '#808080'});
-    drawText(ctx, now, (PDF_A4_W_MM - 14) * scale, 10 * scale, {size: 9, color: '#808080', align: 'right'});
+    if(stats.changed || migrated.moved) saveState();
   }
-
-  async function drawRobotSection(ctx, r, stage, yMm){
-    const x = 14 * scale;
-    const w = (PDF_A4_W_MM - 28) * scale;
-    const noW = 12 * scale, nameW = 26 * scale, statusW = 20 * scale, photoW = 31 * scale;
-    const topH = 6.5 * scale, headH = 5.5 * scale, rowH = 26 * scale;
-
-    fillStrokeRect(ctx, x, yMm * scale, w, topH, '#1E3C72', '#1E3C72');
-    drawText(ctx, `${stageLabel(stage)} - ${r.num} 호기`, x + w / 2, yMm * scale + topH / 2 + 4, {size: 11, bold: true, color: '#fff', align: 'center', baseline: 'middle'});
-
-    const headers = ['No.', 'Sensor', 'Status', '정면', '좌측', '우측', '후면'];
-    const widths = [noW, nameW, statusW, photoW, photoW, photoW, photoW];
-    let hx = x;
-    let hy = (yMm + 6.5) * scale;
-    for(let i=0;i<headers.length;i++){
-      fillStrokeRect(ctx, hx, hy, widths[i], headH, '#6B7C93', '#6B7C93');
-      drawText(ctx, headers[i], hx + widths[i]/2, hy + headH/2 + 4, {size: 10, bold: true, color: '#fff', align: 'center', baseline: 'middle'});
-      hx += widths[i];
-    }
-
-    const anglesFor = SENSORS.map(getAnglesForSensor);
-    for(let si=0; si<SENSORS.length; si++){
-      const sensor = SENSORS[si];
-      const st = r.ss[stage]?.[si];
-      const memo = r.memo[stage]?.[si] || '';
-      const angles = anglesFor[si];
-      const rowY = (yMm + 12 + si * 26) * scale;
-      const isEven = si % 2 === 0;
-      if(isEven){
-        ctx.fillStyle = '#F5F8FC';
-        ctx.fillRect(x, rowY, w, rowH);
-      }
-      ctx.strokeStyle = '#D1D5DB';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x, rowY, noW, rowH);
-      ctx.strokeRect(x + noW, rowY, nameW, rowH);
-      ctx.strokeRect(x + noW + nameW, rowY, statusW, rowH);
-      for(let ai=0; ai<4; ai++){
-        ctx.strokeRect(x + noW + nameW + statusW + ai * photoW, rowY, photoW, rowH);
-      }
-
-      drawText(ctx, String(si + 1), x + noW / 2, rowY + rowH / 2 + 4, {size: 11, bold: true, color: '#333', align: 'center', baseline: 'middle'});
-      drawText(ctx, sensor.name, x + noW + 4, rowY + 9, {size: 10, color: '#444'});
-      drawText(ctx, sensor.type === 'lidar' ? 'LIDAR' : 'CAMERA', x + noW + 4, rowY + 20, {size: 8, color: '#888'});
-
-      if(st === 'ok'){
-        ctx.fillStyle = '#DFF5E6';
-        ctx.fillRect(x + noW + nameW, rowY, statusW, rowH);
-        ctx.strokeStyle = '#4CAF50';
-        ctx.strokeRect(x + noW + nameW, rowY, statusW, rowH);
-        drawText(ctx, '✓ 정상', x + noW + nameW + statusW / 2, rowY + rowH / 2 + 4, {size: 11, bold: true, color: '#1B7A3A', align: 'center', baseline: 'middle'});
-      } else if(st === 'ng'){
-        ctx.fillStyle = '#FDEAEA';
-        ctx.fillRect(x + noW + nameW, rowY, statusW, rowH);
-        ctx.strokeStyle = '#DC2626';
-        ctx.strokeRect(x + noW + nameW, rowY, statusW, rowH);
-        drawText(ctx, '⚠ 이상', x + noW + nameW + statusW / 2, rowY + 7, {size: 11, bold: true, color: '#B91C1C', align: 'center'});
-        if(memo){
-          ctx.fillStyle = '#8B1A1A';
-          ctx.font = `400 8px ${OFFLINE_FONT}`;
-          const lines = wrapText(ctx, memo, statusW - 6);
-          let ly = rowY + 16;
-          for(const line of lines.slice(0, 3)){
-            drawText(ctx, line, x + noW + nameW + 3, ly, {size: 8, color: '#8B1A1A'});
-            ly += 9;
-          }
-        }
-      } else {
-        ctx.fillStyle = '#F0F1F2';
-        ctx.fillRect(x + noW + nameW, rowY, statusW, rowH);
-        ctx.strokeStyle = '#9AA0A6';
-        ctx.strokeRect(x + noW + nameW, rowY, statusW, rowH);
-        drawText(ctx, '미확인', x + noW + nameW + statusW / 2, rowY + rowH / 2 + 4, {size: 10, color: '#A3A3A3', align: 'center', baseline: 'middle'});
-      }
-
-      drawText(ctx, `${angles.filter((_, ai)=>r.photos[stagePhotoKey(r.id, si, ai, stage)]).length}/${angles.length}`, x + noW + nameW + statusW - 4, rowY - 2, {size: 8, color: '#9CA3AF', align: 'right'});
-
-      for(let ai=0; ai<4; ai++){
-        const slotX = x + noW + nameW + statusW + ai * photoW;
-        const imgY = rowY + 1;
-        const imgW = photoW - 2;
-        const imgH = rowH - 2;
-        const key = stagePhotoKey(r.id, si, ai, stage);
-        const src = r.photos[key];
-        if(src){
-          await drawImageContain(ctx, src, slotX + 1, imgY, imgW, imgH);
-        } else {
-          ctx.fillStyle = '#EBEEF2';
-          ctx.fillRect(slotX + 1, imgY, imgW, imgH);
-          drawText(ctx, '—', slotX + photoW / 2, rowY + rowH / 2 + 4, {size: 12, color: '#C6CBD2', align: 'center', baseline: 'middle'});
-        }
-      }
-    }
-    return yMm + 12 + SENSORS.length * 26 + 4;
-  }
-
-  let y = 27;
-  for(const r of robots){
-    const sectionHeight = 12 + SENSORS.length * 26 + 4;
-    if(y + sectionHeight > 252){
-      pages.push(page.canvas);
-      page = newPage();
-      await drawHeader(page.ctx);
-      y = 27;
-    }
-    y = await drawRobotSection(page.ctx, r, activeStage, y);
-  }
-  pages.push(page.canvas);
-
-  for(let i=0;i<pages.length;i++){
-    const ctx = pages[i].getContext('2d');
-    ctx.strokeStyle = '#E5E8ED';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(14 * scale, 287 * scale);
-    ctx.lineTo((PDF_A4_W_MM - 14) * scale, 287 * scale);
-    ctx.stroke();
-    drawText(ctx, `HL Robotics - PARKIE Sensor Inspection Report  |  ${now}  |  ${i + 1} / ${pages.length}`, pageW / 2, 292 * scale, {size: 8, color: '#C0C0C0', align: 'center'});
-  }
-  return pages;
+  await preloadPhotoUrls();
+  if(stored.status === 'ok' || stored.status === 'empty') await collectGarbagePhotos();
+  appReady = true;
+  setBooting(false);
+  updateMeta(); render();
 }
-
-
-// 캔버스 내용을 PNG 바이트 배열로 변환합니다.
-function canvasToPngBytes(canvas){
-  const dataUrl = canvas.toDataURL('image/png');
-  const binary = atob(dataUrl.split(',')[1]);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-  for(let i=0;i<len;i++) bytes[i]=binary.charCodeAt(i);
-  return bytes;
-}
-
-// 렌더링된 캔버스 페이지 배열을 PDF/1.4 바이너리 형식으로 조립합니다.
-// 각 페이지는 PNG 이미지로 변환되어 XObject로 PDF에 포함됩니다.
-// 외부 라이브러리 없이 순수 JavaScript로 PDF 구조를 직접 생성합니다.
-function buildOfflinePdfFromCanvases(canvases){
-  const pageWpt = 595.28;
-  const pageHpt = 841.89;
-  const objectBytes = [];
-  const pageMeta = [];
-  let objNum = 3;
-  for(const canvas of canvases){
-    pageMeta.push({
-      imageRef: objNum++,
-      contentRef: objNum++,
-      pageRef: objNum++,
-      canvas
-    });
-  }
-
-  const ascii = s => encodePdfText(s);
-  const header = ascii('%PDF-1.4\n%\xFF\xFF\xFF\xFF\n');
-  objectBytes.push(ascii('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n'));
-  const kids = pageMeta.map(p => `${p.pageRef} 0 R`).join(' ');
-  objectBytes.push(ascii(`2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pageMeta.length} >>\nendobj\n`));
-
-  for(const meta of pageMeta){
-    const imgBytes = canvasToPngBytes(meta.canvas);
-    objectBytes.push(concatUint8Arrays([
-      ascii(`${meta.imageRef} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${meta.canvas.width} /Height ${meta.canvas.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length ${imgBytes.length} >>\nstream\n`),
-      imgBytes,
-      ascii('\nendstream\nendobj\n')
-    ]));
-
-    const content = `q\n${pageWpt} 0 0 ${pageHpt} 0 0 cm\n/Im1 Do\nQ\n`;
-    const contentBytes = ascii(content);
-    objectBytes.push(concatUint8Arrays([
-      ascii(`${meta.contentRef} 0 obj\n<< /Length ${contentBytes.length} >>\nstream\n`),
-      contentBytes,
-      ascii('endstream\nendobj\n')
-    ]));
-
-    objectBytes.push(ascii(`${meta.pageRef} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWpt} ${pageHpt}] /Resources << /XObject << /Im1 ${meta.imageRef} 0 R >> >> /Contents ${meta.contentRef} 0 R >>\nendobj\n`));
-  }
-
-  const fileParts = [header];
-  let offsets = [0];
-  let pos = header.length;
-  for(const obj of objectBytes){
-    offsets.push(pos);
-    fileParts.push(obj);
-    pos += obj.length;
-  }
-  const xrefStart = pos;
-  const objectCount = objectBytes.length;
-  let xref = `xref\n0 ${objectCount + 1}\n0000000000 65535 f \n`;
-  for(let i=1;i<offsets.length;i++){
-    xref += String(offsets[i]).padStart(10,'0') + ' 00000 n \n';
-  }
-  const trailer = `trailer\n<< /Size ${objectCount + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
-  return new Blob([...fileParts, ascii(xref), ascii(trailer)], {type:'application/pdf'});
-}
-
+boot().catch(e => {
+  console.error('앱 초기화 실패', e);
+  setWarning('boot', '앱을 초기화하는 중 오류가 발생했습니다: ' + errText(e));
+  appReady = true;
+  setBooting(false);
+  render();
+});
 </script>
 </body>
 </html>

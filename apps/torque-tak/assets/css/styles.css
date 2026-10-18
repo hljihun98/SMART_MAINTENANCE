@@ -149,11 +149,14 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .chk-warn .chk-ic{background:var(--warn-tint);color:var(--warn)}
 .chk-bad .chk-ic{background:var(--ng-tint);color:var(--ng)}
 .chk-na .chk-ic{background:var(--line-2);color:var(--ink-3)}
+/* 판정에 들어가지 않는 정보 항목(산포 상한 이용률) — 주의·NG와 섞이지 않게 브랜드 톤 */
+.chk-info .chk-ic{background:var(--brand-tint);color:var(--brand)}
 .chk-t{min-width:0;flex:1}
 .chk-t b{display:block;font-size:13.5px;font-weight:600}
 .chk-bad .chk-t b{color:var(--ng)}
 .chk-warn .chk-t b{color:var(--warn)}
 .chk-na .chk-t b{color:var(--ink-3)}
+.chk-info .chk-t b{color:var(--brand)}
 .chk-t span{display:block;font-size:12px;font-weight:500;color:var(--ink-3);margin-top:2px;line-height:1.5}
 /* 설계 NG 대응 방법 — 실패한 항목 바로 아래에 붙인다 */
 .chk-fix{margin-top:8px;padding:9px 11px 10px;background:var(--ng-tint);border-radius:var(--r-sm)}

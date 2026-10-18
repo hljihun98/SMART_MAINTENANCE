@@ -7,6 +7,30 @@ function syncLS(){
   laborSettings.hpd=parseInt(document.getElementById('l-hpd').value)||8;
   laborSettings.wk=parseInt(document.getElementById('l-wk').value)||3;
   laborSettings.startDate=document.getElementById('l-sd').value;
+  // 로봇별 완료 대수 (저장 대상)
+  const done={};
+  [['PARKIE','pk'],['CARRIE','ca'],['GOALIE','go']].forEach(([r,k])=>{
+    done[r]=Math.max(0,parseInt(document.getElementById('lb-done-'+k)?.value)||0);
+  });
+  laborSettings.done=done;
+}
+// 저장된 설정 → 입력칸 복원 (initApp·다른 탭 변경 반영 시 호출)
+// syncLS 가 DOM 값을 읽어 덮어쓰므로, 렌더 전에 반드시 DOM 을 상태와 맞춰야 합니다.
+function syncLaborInputsFromState(){
+  const setVal=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v;};
+  setVal('l-hpd',laborSettings.hpd||8);
+  setVal('l-wk',laborSettings.wk||3);
+  setVal('l-sd',laborSettings.startDate||'');
+  const done=laborSettings.done||{};
+  [['PARKIE','pk'],['CARRIE','ca'],['GOALIE','go']].forEach(([r,k])=>{
+    setVal('lb-done-'+k,done[r]||0);
+    const e=asmEntries[r]||{};
+    setVal('asc-'+k+'-from',e.from||'');
+    setVal('asc-'+k+'-to',e.to||'');
+    updAsmEntry(r);   // 라벨 갱신 (입력칸 값 = 상태값이므로 상태는 그대로)
+  });
+  updAsmSummary();
+  if(typeof syncRevUnit==='function')syncRevUnit();
 }
 function recalcLabor(){syncLS();rendLabor();rendDash();}
 
@@ -43,30 +67,28 @@ function rendLabor(){
 
 function rendLaborModules(){
   const r=activeLaborRobot;
-  const modules=laborModules[r];
-  const hpd=laborSettings.hpd,wk=laborSettings.wk;
-  const sd=laborSettings.startDate?new Date(laborSettings.startDate):new Date();
+  const modules=laborModules[r]||[];
   const clr={PARKIE:'var(--pk)',CARRIE:'var(--ca)',GOALIE:'var(--go)'}[r];
 
   document.getElementById('lb-modules').innerHTML=modules.map((mod,mi)=>{
     const taskRows=mod.tasks.map((t,ti)=>`
       <div class="lb-task-row" id="ltr-${r}-${mi}-${ti}" ondblclick="toggleLaborEdit('${r}',${mi},${ti})">
         <div class="lt-left">
-          <div class="lt-name">${t.name}</div>
-          ${t.note?`<div class="lt-note">${t.note}</div>`:''}
+          <div class="lt-name">${escHtml(t.name)}</div>
+          ${t.note?`<div class="lt-note">${escHtml(t.note)}</div>`:''}
         </div>
         <div class="lt-right">
-          <span class="lt-h">${t.hours}h</span>
-          <span class="lt-w">${t.workers}인</span>
+          <span class="lt-h">${escHtml(t.hours)}h</span>
+          <span class="lt-w">${escHtml(t.workers)}인</span>
           <button onclick="event.stopPropagation();delLaborTask('${r}',${mi},${ti})" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:14px;padding:2px 4px" title="삭제">✕</button>
         </div>
       </div>
       <div class="lt-edit-panel" id="lep-${r}-${mi}-${ti}">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <input class="lt-ei" placeholder="작업명" value="${t.name}" oninput="laborModules['${r}'][${mi}].tasks[${ti}].name=this.value;document.getElementById('ltr-${r}-${mi}-${ti}').querySelector('.lt-name').textContent=this.value;rendLaborSummary()">
-          <div style="display:flex;gap:6px"><input class="lt-ei lt-ei-sm" type="number" placeholder="h" value="${t.hours}" step="0.5" min="0.5" oninput="laborModules['${r}'][${mi}].tasks[${ti}].hours=parseFloat(this.value)||0;recalcLabor()"><input class="lt-ei lt-ei-sm" type="number" placeholder="인원" value="${t.workers}" min="1" oninput="laborModules['${r}'][${mi}].tasks[${ti}].workers=parseInt(this.value)||1;recalcLabor()"></div>
+          <input class="lt-ei" placeholder="작업명" value="${escHtml(t.name)}" oninput="laborModules['${r}'][${mi}].tasks[${ti}].name=this.value;document.getElementById('ltr-${r}-${mi}-${ti}').querySelector('.lt-name').textContent=this.value;rendLaborSummary()">
+          <div style="display:flex;gap:6px"><input class="lt-ei lt-ei-sm" type="number" placeholder="h" value="${escHtml(t.hours)}" step="0.5" min="0.5" oninput="laborModules['${r}'][${mi}].tasks[${ti}].hours=parseFloat(this.value)||0;recalcLabor()"><input class="lt-ei lt-ei-sm" type="number" placeholder="인원" value="${escHtml(t.workers)}" min="1" oninput="laborModules['${r}'][${mi}].tasks[${ti}].workers=parseInt(this.value)||1;recalcLabor()"></div>
         </div>
-        <textarea class="lt-ei" placeholder="메모 (작업 상세, 주의사항 등)" style="min-height:52px;resize:vertical" oninput="laborModules['${r}'][${mi}].tasks[${ti}].note=this.value;rendLaborModules()">${t.note||''}</textarea>
+        <textarea class="lt-ei" placeholder="메모 (작업 상세, 주의사항 등)" style="min-height:52px;resize:vertical" oninput="laborModules['${r}'][${mi}].tasks[${ti}].note=this.value;rendLaborModules()">${escHtml(t.note||'')}</textarea>
         <div style="text-align:right"><button class="btn b-se b-sm" onclick="toggleLaborEdit('${r}',${mi},${ti})">닫기</button></div>
       </div>`).join('');
     const modTotal=mod.tasks.reduce((a,t)=>a+t.hours,0);
@@ -77,7 +99,7 @@ function rendLaborModules(){
             <button onclick="moveModule('${r}',${mi},-1)" style="background:none;border:none;cursor:pointer;color:var(--t3);font-size:10px;padding:0 3px;line-height:1" title="위로">▲</button>
             <button onclick="moveModule('${r}',${mi},1)" style="background:none;border:none;cursor:pointer;color:var(--t3);font-size:10px;padding:0 3px;line-height:1" title="아래로">▼</button>
           </div>
-          <span id="mname-${r}-${mi}" ondblclick="startRenameModule('${r}',${mi})" style="cursor:pointer" title="더블클릭으로 이름 변경">${mod.name}</span>
+          <span id="mname-${r}-${mi}" ondblclick="startRenameModule('${r}',${mi})" style="cursor:pointer" title="더블클릭으로 이름 변경">${escHtml(mod.name)}</span>
           <span class="t-sm t-mu" style="font-weight:400">(${mod.tasks.length}개 작업)</span>
         </div>
         <div class="bg">
@@ -130,12 +152,9 @@ function rendLaborSummary(){
   // robotGoals(목표 대수 설정)가 아닌 asmEntries.from~to 를 사용
   const robots=['PARKIE','CARRIE','GOALIE'];
   const hpd=laborSettings.hpd,wk=laborSettings.wk;
-  const sd=laborSettings.startDate?new Date(laborSettings.startDate):new Date();
-  const doneMap={
-    PARKIE:parseInt(document.getElementById('lb-done-pk')?.value)||0,
-    CARRIE:parseInt(document.getElementById('lb-done-ca')?.value)||0,
-    GOALIE:parseInt(document.getElementById('lb-done-go')?.value)||0
-  };
+  const sd=parseLocalDate(laborSettings.startDate)||parseLocalDate(localDateStr());
+  // 완료 대수: 호기 범위 '시작 호기부터' 몇 대 완료했는지 (호기 번호가 아님)
+  const doneMap=laborSettings.done||{};
   const cmap={PARKIE:'var(--pk)',CARRIE:'var(--ca)',GOALIE:'var(--go)'};
   const unitCont=document.getElementById('lb-unit-tables');
   if(!unitCont)return;
@@ -149,10 +168,10 @@ function rendLaborSummary(){
     const fromU=ae&&ae.from?ae.from:1;
     const toU=ae&&ae.to?ae.to:(robotGoals[r]||0);
     if(!toU)return; // 설정 없으면 skip
-    const done=Math.min(doneMap[r],toU);
+    const done=Math.min(Math.max(0,parseInt(doneMap[r])||0),Math.max(0,toU-fromU+1));
     for(let u=fromU;u<=toU;u++){
-      const isDone=u<=done;
       const seq=u-fromU;
+      const isDone=seq<done;
       let startDate=null,endDate=null;
       if(!isDone&&dpu>0){
         startDate=addWD(sd,dpu*seq);
@@ -223,12 +242,12 @@ function rendAsmCalendar(){
   // ① 확정 일정 표시 (진한 색)
   confirmedSchedules.forEach(sc=>{
     sc.phases.forEach(ph=>{
-      if(ph.start) addEv(new Date(ph.start),{
+      if(ph.start) addEv(parseLocalDate(ph.start),{
         type:ph.type,label:ph.label,robot:sc.robot,
         unitFrom:sc.unitFrom,unitTo:sc.unitTo,
         color:ph.color,bgColor:ph.bgColor,textColor:ph.textColor,confirmed:true
       });
-      if((ph.type==='gtc')&&ph.end) addEv(new Date(ph.end),{
+      if((ph.type==='gtc')&&ph.end) addEv(parseLocalDate(ph.end),{
         type:'delivery',label:'🚚 납품',robot:sc.robot,
         unitFrom:sc.unitFrom,unitTo:sc.unitTo,
         color:'#10B981',bgColor:'#D1FAE5',textColor:'var(--gn-dark)',confirmed:true
@@ -291,7 +310,7 @@ function rendAsmCalendar(){
       const fs = isBig?'10px':isMed?'9px':'9px';
       const py = isBig?'3px':'1px';
       const borderW = isBig?'3px':ev.confirmed?'2px':'1px';
-      return `<div style="background:${ev.bgColor};border-left:${borderW} ${dash} ${ev.color};border-radius:4px;padding:${py} 5px;font-size:${fs};font-weight:${fw};color:${ev.textColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;${isBig?'box-shadow:0 1px 3px rgba(0,0,0,.1)':''}${ev.confirmed?'':'opacity:.82'}" title="${ev.robot} ${unitLabel} ${ev.label}">${ev.label}</div>`;
+      return `<div style="background:${escHtml(ev.bgColor)};border-left:${borderW} ${dash} ${escHtml(ev.color)};border-radius:4px;padding:${py} 5px;font-size:${fs};font-weight:${fw};color:${escHtml(ev.textColor)};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;${isBig?'box-shadow:0 1px 3px rgba(0,0,0,.1)':''}${ev.confirmed?'':'opacity:.82'}" title="${escHtml(ev.robot+' '+unitLabel+' '+ev.label)}">${escHtml(ev.label)}</div>`;
     }).join('');
 
     html+=`<div data-asm-dk="${dkStr}" onclick="${isPastAsm?'':` selectAsmDate('${dkStr}')`}" ondblclick="${isPastAsm?'':` asmCalDblClick('${dkStr}')`}" style="cursor:${isPastAsm?'not-allowed':'pointer'};min-height:56px;border-radius:7px;border:1.5px solid ${cellBorder};background:${cellBg};padding:5px 6px;transition:all .12s;${isPastAsm?'opacity:.35':''}">
@@ -311,8 +330,8 @@ function rendAsmCalendar(){
 
 function updModuleSel(){
   const r=document.getElementById('al-rb').value;
-  const mods=laborModules[r];
-  document.getElementById('al-mod').innerHTML=mods.map((m,i)=>`<option value="${i}">${m.name}</option>`).join('');
+  const mods=laborModules[r]||[];
+  document.getElementById('al-mod').innerHTML=mods.map((m,i)=>`<option value="${i}">${escHtml(m.name)}</option>`).join('');
 }
 
 function submitAddLabor(){
@@ -323,7 +342,9 @@ function submitAddLabor(){
   const h=parseFloat(document.getElementById('al-h').value);
   const w=parseInt(document.getElementById('al-w').value)||1;
   if(!nm||!h){toast('⚠️','작업명과 시간을 입력하세요','wa');return;}
-  laborModules[r][mi].tasks.push({name:nm,note,hours:h,workers:w});
+  const mod=(laborModules[r]||[])[mi];
+  if(!mod){toast('⚠️','먼저 모듈을 추가하거나 선택하세요','wa');return;}
+  mod.tasks.push({name:nm,note,hours:h,workers:w});
   closeMo('mo-addlabor');
   activeLaborRobot=r;
   recalcLabor();

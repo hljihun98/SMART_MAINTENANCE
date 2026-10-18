@@ -16,11 +16,11 @@ function rendInqAdmin(){
   if(!inquiries.length){cont.innerHTML='<div class="t-mu t-sm" style="text-align:center;padding:12px">문의가 없습니다</div>';return;}
   cont.innerHTML=inquiries.map((q,i)=>`<div class="inq-item">
     <div class="inq-head">
-      <div class="inq-from"><span class="inq-badge ${q.type==='수정요청'?'ib-new':'ib-done'}">${q.type}</span>${q.fromName} <span class="t-m t-sm">(${q.from})</span> — ${q.title}</div>
+      <div class="inq-from"><span class="inq-badge ${q.type==='수정요청'?'ib-new':'ib-done'}">${escHtml(q.type)}</span>${escHtml(q.fromName)} <span class="t-m t-sm">(${escHtml(q.from)})</span> — ${escHtml(q.title)}</div>
       <div style="display:flex;gap:7px;align-items:center"><span class="inq-badge ${q.status==='new'?'ib-new':'ib-done'}">${q.status==='new'?'미답변':'답변완료'}</span><span class="inq-time">${fd(q.ts)}</span></div>
     </div>
-    <div class="t-mu t-sm" style="line-height:1.6">${q.body}</div>
-    ${q.reply?`<div class="inq-reply">💬 <b>답변:</b> ${q.reply}</div>`:''}
+    <div class="t-mu t-sm" style="line-height:1.6;white-space:pre-wrap">${escHtml(q.body)}</div>
+    ${q.reply?`<div class="inq-reply">💬 <b>답변:</b> ${escHtml(q.reply)}</div>`:''}
     ${q.status==='new'?`<div style="margin-top:7px"><button class="btn b-pr b-sm" onclick="openReply(${i})">답변 작성</button></div>`:''}
   </div>`).join('');
 }

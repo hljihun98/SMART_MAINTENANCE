@@ -22,10 +22,10 @@ function rendChangelog(){
       const d=items[0]?.date||'';
       const types=[...new Set(items.map(c=>c.type))];
       return`<div style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:12px 16px;box-shadow:var(--sh)">
-        <div style="font-family:var(--fm);font-size:14px;font-weight:700;color:var(--ac);margin-bottom:4px">${v}</div>
-        <div style="font-size:11px;color:var(--t2);margin-bottom:8px">${d}</div>
+        <div style="font-family:var(--fm);font-size:14px;font-weight:700;color:var(--ac);margin-bottom:4px">${escHtml(v)}</div>
+        <div style="font-size:11px;color:var(--t2);margin-bottom:8px">${escHtml(d)}</div>
         <div style="display:flex;gap:4px;flex-wrap:wrap">
-          ${types.map(t=>`<span style="background:${typeBg[t]||'var(--s2)'};color:${typeTx[t]||'var(--t2)'};border-radius:4px;padding:1px 7px;font-size:10px;font-weight:600">${typeIcon[t]||''}${t}</span>`).join('')}
+          ${types.map(t=>`<span style="background:${typeBg[t]||'var(--s2)'};color:${typeTx[t]||'var(--t2)'};border-radius:4px;padding:1px 7px;font-size:10px;font-weight:600">${typeIcon[t]||''}${escHtml(t)}</span>`).join('')}
         </div>
         <div style="font-size:11px;color:var(--t2);margin-top:6px">${items.length}개 변경</div>
       </div>`;
@@ -41,11 +41,11 @@ function rendChangelog(){
   if(tb){
     tb.innerHTML=sorted.length
       ?sorted.map(c=>`<tr>
-          <td class="t-m t-sm">${c.date}</td>
-          <td><span style="font-family:var(--fm);font-size:12px;font-weight:700;color:var(--ac)">${c.ver}</span></td>
-          <td><span style="background:${typeBg[c.type]||'var(--s2)'};color:${typeTx[c.type]||'var(--t2)'};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap">${typeIcon[c.type]||''}${c.type}</span></td>
-          <td style="font-size:12px;color:var(--tx)">${c.body}</td>
-          <td class="t-sm t-mu">${c.author||'-'}</td>
+          <td class="t-m t-sm">${escHtml(c.date)}</td>
+          <td><span style="font-family:var(--fm);font-size:12px;font-weight:700;color:var(--ac)">${escHtml(c.ver)}</span></td>
+          <td><span style="background:${typeBg[c.type]||'var(--s2)'};color:${typeTx[c.type]||'var(--t2)'};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap">${typeIcon[c.type]||''}${escHtml(c.type)}</span></td>
+          <td style="font-size:12px;color:var(--tx)">${escHtml(c.body)}</td>
+          <td class="t-sm t-mu">${escHtml(c.author||'-')}</td>
         </tr>`).join('')
       :'<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--t2)">항목 없음</td></tr>';
   }
@@ -59,7 +59,8 @@ function submitChangelog(){
   const body=document.getElementById('cl-body').value.trim();
   const author=document.getElementById('cl-author').value.trim()||CU?.name||'사용자';
   if(!date||!ver||!body){toast('⚠️','날짜, 버전, 내용을 입력하세요','wa');return;}
-  changelogData.push({date,ver,type,body,author});
+  // custom:true → 화면에서 추가한 항목만 브라우저에 저장 (persistence.js changelogCustom)
+  changelogData.push({date,ver,type,body,author,custom:true});
   logActivity(CU.id,CU.name,'CHANGELOG',`개발 로그 추가: ${ver} [${type}] ${body.slice(0,40)}`);
   closeMo('mo-add-changelog');
   rendChangelog();
@@ -69,16 +70,16 @@ function submitChangelog(){
 function rendAdmin(){
   const users=getUsers();
   document.getElementById('tb-admin').innerHTML=Object.entries(users).map(([id,u])=>`<tr>
-    <td class="t-m" style="font-weight:600">${id}</td>
-    <td style="font-weight:500">${u.name||'-'}</td>
+    <td class="t-m" style="font-weight:600">${escHtml(id)}</td>
+    <td style="font-weight:500">${escHtml(u.name||'-')}</td>
     <td>${u.role==='admin'?'<span class="a-badge">관리자</span>':'<span class="t-mu t-sm">일반 사용자</span>'}</td>
-    <td class="t-mu t-sm">${loginTimes[id]||'-'}</td>
+    <td class="t-mu t-sm">${escHtml(loginTimes[id]||'-')}</td>
     <td><span class="sb2 s-ok">활성</span></td>
-    <td><button class="btn b-sm b-wa" onclick="openEditUser('${id}')">수정</button> ${id!==CU.id?`<button class="btn b-sm b-dn" onclick="delUser('${id}')">삭제</button>`:'<span class="t-sm t-mu">현재 계정</span>'}</td>
+    <td><button class="btn b-sm b-wa" onclick="openEditUser(${jsArg(id)})">수정</button> ${id!==CU.id?`<button class="btn b-sm b-dn" onclick="delUser(${jsArg(id)})">삭제</button>`:'<span class="t-sm t-mu">현재 계정</span>'}</td>
   </tr>`).join('');
-  // update user filter dropdown
+  // update user filter dropdown (선택값 유지)
   const sel=document.getElementById('al-filter-user');
-  if(sel){sel.innerHTML='<option value="">전체 사용자</option>'+Object.entries(users).map(([id,u])=>`<option value="${id}">${u.name}(${id})</option>`).join('');}
+  if(sel){const cur=sel.value;sel.innerHTML='<option value="">전체 사용자</option>'+Object.entries(users).map(([id,u])=>`<option value="${escHtml(id)}">${escHtml(u.name)}(${escHtml(id)})</option>`).join('');sel.value=cur;if(sel.value!==cur)sel.value='';}
   rendActivityLog();
 }
 
@@ -89,20 +90,21 @@ function rendActivityLog(){
   let list=[...activityLog];
   if(uf) list=list.filter(a=>a.userId===uf);
   if(tf) list=list.filter(a=>a.type===tf);
-  if(df) list=list.filter(a=>new Date(a.ts).toISOString().slice(0,10)===df);
+  // 날짜 필터는 로컬 날짜 기준 (UTC 로 비교하면 KST 00~09시 기록이 전날로 분류됨)
+  if(df) list=list.filter(a=>localDateStr(new Date(a.ts))===df);
 
   const typeLabel={
-    LOGIN:'🔑 로그인', IN:'📥 입고', OUT:'📤 출고', BOM:'📦 BOM',
+    LOGIN:'🔑 로그인', IN:'📥 입고', OUT:'📤 출고', IO:'🔁 입출고(일괄)', BOM:'📦 BOM',
     LABOR:'🏭 공수산정', TECH:'👤 작업인원', DELAY:'⚠️ 지연',
     CHANGELOG:'📝 개발로그', INQ:'📨 문의', ACCOUNT:'👤 계정관리'
   };
   const typeBg={
-    LOGIN:'var(--acl)',IN:'var(--gnl)',OUT:'var(--rel)',BOM:'var(--aml)',
+    LOGIN:'var(--acl)',IN:'var(--gnl)',OUT:'var(--rel)',IO:'var(--gnl)',BOM:'var(--aml)',
     LABOR:'#EDE9FF',TECH:'#E0F7FD',DELAY:'#FEF3C7',
     CHANGELOG:'var(--s2)',INQ:'var(--cal)',ACCOUNT:'#E0F2FE'
   };
   const typeTx={
-    LOGIN:'var(--ac)',IN:'var(--gn)',OUT:'var(--re)',BOM:'var(--am)',
+    LOGIN:'var(--ac)',IN:'var(--gn)',OUT:'var(--re)',IO:'var(--gn-dark)',BOM:'var(--am)',
     LABOR:'#5B21B6',TECH:'#0369A1',DELAY:'#92400E',
     CHANGELOG:'var(--t2)',INQ:'var(--ca)',ACCOUNT:'#075985'
   };
@@ -114,27 +116,28 @@ function rendActivityLog(){
     list.forEach(a=>{counts[a.type]=(counts[a.type]||0)+1;});
     summary.innerHTML=`<span style="font-size:11px;color:var(--t2)">총 ${list.length}건</span>`+
       Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([t,n])=>
-        `<span style="background:${typeBg[t]||'var(--s2)'};color:${typeTx[t]||'var(--t2)'};border-radius:5px;padding:2px 8px;font-size:11px;font-weight:600">${typeLabel[t]||t} ${n}</span>`
+        `<span style="background:${typeBg[t]||'var(--s2)'};color:${typeTx[t]||'var(--t2)'};border-radius:5px;padding:2px 8px;font-size:11px;font-weight:600">${escHtml(typeLabel[t]||t)} ${n}</span>`
       ).join('');
   }
 
   document.getElementById('tb-activity').innerHTML=list.length
     ?list.slice(0,200).map(a=>`<tr>
       <td class="t-m t-sm">${fd(a.ts)}</td>
-      <td class="t-m t-sm" style="font-weight:600;font-family:var(--fm)">${a.userId}</td>
-      <td class="t-sm">${a.userName}</td>
-      <td><span style="background:${typeBg[a.type]||'var(--s2)'};color:${typeTx[a.type]||'var(--t2)'};padding:2px 8px;border-radius:4px;font-size:10px;font-family:var(--fm);font-weight:600;white-space:nowrap">${typeLabel[a.type]||a.type}</span></td>
-      <td class="t-sm" style="color:var(--tx)">${a.detail}</td>
+      <td class="t-m t-sm" style="font-weight:600;font-family:var(--fm)">${escHtml(a.userId)}</td>
+      <td class="t-sm">${escHtml(a.userName)}</td>
+      <td><span style="background:${typeBg[a.type]||'var(--s2)'};color:${typeTx[a.type]||'var(--t2)'};padding:2px 8px;border-radius:4px;font-size:10px;font-family:var(--fm);font-weight:600;white-space:nowrap">${escHtml(typeLabel[a.type]||a.type)}</span></td>
+      <td class="t-sm" style="color:var(--tx)">${escHtml(a.detail)}</td>
     </tr>`).join('')
     :'<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--t2);font-size:12px">활동 로그가 없습니다</td></tr>';
 }
 
 function dlActivityLog(){
+  if(!xlsxReady())return;
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.aoa_to_sheet([['일시','사번','성명','활동유형','상세'],
     ...activityLog.map(a=>[fd(a.ts),a.userId,a.userName,a.type,a.detail])]);
   XLSX.utils.book_append_sheet(wb,ws,'활동로그');
-  XLSX.writeFile(wb,'ROBOSTOCK_활동로그_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  XLSX.writeFile(wb,'ROBOSTOCK_활동로그_'+localDateStr()+'.xlsx');
   toast('📥','활동 로그 다운로드 완료','ok');
 }
 
@@ -146,14 +149,14 @@ function rendActualTable(){
       const diffStr=diff===0?'±0':(diff>0?`+${diff}h`:`${diff}h`);
       const diffClr=diff===0?'var(--t2)':diff>0?'var(--re)':'var(--gn)';
       return`<tr>
-        <td><span class="rb ${rbc(a.robot)}">${a.robot}</span></td>
-        <td class="t-sm">${a.module}</td>
-        <td class="t-sm">${a.task}</td>
-        <td class="t-m t-sm">${a.planH}h</td>
-        <td class="t-m t-sm" style="font-weight:600">${a.actualH}h</td>
-        <td class="t-m t-sm" style="font-weight:600;color:${diffClr}">${diffStr}</td>
+        <td><span class="rb ${rbc(a.robot)}">${escHtml(a.robot)}</span></td>
+        <td class="t-sm">${escHtml(a.module)}</td>
+        <td class="t-sm">${escHtml(a.task)}</td>
+        <td class="t-m t-sm">${escHtml(a.planH)}h</td>
+        <td class="t-m t-sm" style="font-weight:600">${escHtml(a.actualH)}h</td>
+        <td class="t-m t-sm" style="font-weight:600;color:${diffClr}">${escHtml(diffStr)}</td>
         <td class="t-m t-sm">${fd(a.ts)}</td>
-        <td class="t-sm">${a.userName}</td>
+        <td class="t-sm">${escHtml(a.userName)}</td>
       </tr>`;
     }).join('')
     :'<tr><td colspan="8" style="text-align:center;padding:14px;color:var(--t2);font-size:12px">실제 공수 기록이 없습니다</td></tr>';
@@ -163,7 +166,7 @@ function updActualModSel(){
   const r=document.getElementById('ac-robot')?.value;
   const mods=laborModules[r]||[];
   const sel=document.getElementById('ac-mod');
-  if(sel)sel.innerHTML=mods.map((m,i)=>`<option value="${i}">${m.name}</option>`).join('');
+  if(sel)sel.innerHTML=mods.map((m,i)=>`<option value="${i}">${escHtml(m.name)}</option>`).join('');
   updActualTaskSel();
 }
 function updActualTaskSel(){
@@ -171,7 +174,7 @@ function updActualTaskSel(){
   const mi=parseInt(document.getElementById('ac-mod')?.value)||0;
   const tasks=(laborModules[r]||[])[mi]?.tasks||[];
   const sel=document.getElementById('ac-task');
-  if(sel)sel.innerHTML=tasks.map((t,i)=>`<option value="${i}">${t.name}</option>`).join('');
+  if(sel)sel.innerHTML=tasks.map((t,i)=>`<option value="${i}">${escHtml(t.name)}</option>`).join('');
   // update plan hour
   const ti=parseInt(sel?.value)||0;
   const ph=tasks[ti]?.hours||0;
@@ -208,6 +211,11 @@ function submitEditUser(){
   const pw=document.getElementById('eu-pw').value;
   const rl=document.getElementById('eu-rl').value;
   if(!nm){toast('⚠️','성명을 입력하세요','wa');return;}
+  // 마지막 관리자의 권한 강등 방지 (관리자가 0명이 되면 사용자 관리 불가)
+  if(u.role==='admin'&&rl!=='admin'){
+    const adminCount=Object.values(getUsers()).filter(x=>x&&x.role==='admin').length;
+    if(adminCount<=1){toast('❌','마지막 관리자의 권한은 내릴 수 없습니다. 다른 관리자를 먼저 지정하세요.','err');return;}
+  }
   const changes=[];
   if(u.name!==nm)changes.push(`이름 ${u.name}→${nm}`);
   if(u.role!==rl)changes.push(`권한 ${u.role}→${rl}`);

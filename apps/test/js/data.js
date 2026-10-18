@@ -61,20 +61,24 @@ function applyAsmEntries(showToast=true){
     }
   });
   if(conflict)return;
-  const sum=document.getElementById('asc-summary');
-  if(sum){
-    const parts=['PARKIE','CARRIE','GOALIE']
-      .filter(r=>{const e=asmEntries[r];return e.from&&e.to&&e.to>=e.from;})
-      .map(r=>`${r} ${asmEntries[r].from}~${asmEntries[r].to}호기`);
-    sum.textContent=parts.length?'등록: '+parts.join(' · '):'미설정';
-  }
+  updAsmSummary();
   rendAsmCalendar();syncRevUnit();updRevCalc();
   if(showToast)toast('✅','달력에 반영되었습니다','ok');
 }
 
-// 선택 초기화
+// 호기 등록 요약 문구 갱신
+function updAsmSummary(){
+  const sum=document.getElementById('asc-summary');
+  if(!sum)return;
+  const parts=['PARKIE','CARRIE','GOALIE']
+    .filter(r=>{const e=asmEntries[r];return e&&e.from&&e.to&&e.to>=e.from;})
+    .map(r=>`${r} ${asmEntries[r].from}~${asmEntries[r].to}호기`);
+  sum.textContent=parts.length?'등록: '+parts.join(' · '):'미설정';
+}
+
+// 선택 초기화 (객체를 재대입하지 않고 내용만 교체 — persistence.js 참조 유지)
 function clearAsmSelection(){
-  asmEntries={PARKIE:{from:null,to:null},CARRIE:{from:null,to:null},GOALIE:{from:null,to:null}};
+  ['PARKIE','CARRIE','GOALIE'].forEach(r=>{asmEntries[r]={from:null,to:null};});
   ['pk','ca','go'].forEach(k=>{
     const f=document.getElementById('asc-'+k+'-from');const t=document.getElementById('asc-'+k+'-to');
     if(f)f.value='';if(t)t.value='';
@@ -89,7 +93,6 @@ function closeReversePanel(){
   const p=document.getElementById('asm-reverse-panel');
   if(p)p.style.display='none';
 }
-// 이전 버전 호환용 stub (사용 안 함)
 
 let inquiries=[], currentPDpartNo=null;
 let robotGoals={PARKIE:0,CARRIE:0,GOALIE:0};
@@ -201,6 +204,10 @@ let changelogData=[
   // ── 포털 통합 및 모바일 개선 (6/11) ──────────────────────
   {date:'2026-06-11',ver:'v0.9.0',type:'UI개선',body:'ROBOSTOCK 포털 상태 테스트→사용가능으로 변경. 사이드바 sb-nav에 "메인 포털" 링크 추가(데스크톱·모바일 모두 접근 가능). 모바일 mc padding-top 동적 조정(syncMcPadding) 추가. 520~980px 구간 sb-logo padding-right 보강으로 로고·유저배지 겹침 방지.',author:'Claude'},
   {date:'2026-06-11',ver:'v0.9.1',type:'버그수정',body:'[High] robotDashShow가 persistence.js snapshot에 누락되어 새로고침 시 "대시보드에 표시" 토글 상태가 초기화되던 버그 수정. [Medium] submitActual에서 laborModules[r][mi] 접근 시 null 안전성 없어 모듈 전체 삭제 후 크래시 가능성 → optional chaining + 유효성 검사 추가.',author:'Claude'},
+  // ── 감사 결과 반영 (10/18) ──────────────────────────────
+  {date:'2026-10-18',ver:'v0.10.0',type:'데이터구조',body:'[저장] 변경이 있을 때만 저장(dirty check)하고 로그인하지 않은 탭은 저장하지 않음. storage 이벤트로 다른 탭 변경을 즉시 반영하고, 포털/다른 탭에서 초기화하면 저장을 멈추고 새로고침. 앱 내 초기화가 beforeunload 저장으로 되살아나던 버그 수정. 손상 데이터는 백업 키로 보관. 스키마 v2(확정 일정 날짜 +1일 보정·값 정리·사용자 개발로그 저장). [사진] 첨부 시 긴 변 1280px JPEG 로 리사이즈해 IndexedDB(robostock_images)에 저장, 상태에는 참조 id 만 보관(기존 base64 자동 이전).',author:'Claude'},
+  {date:'2026-10-18',ver:'v0.10.0',type:'버그수정',body:'납기 역산 확정 일정이 KST 에서 하루 앞당겨지던 문제 등 toISOString 날짜를 로컬 날짜로 교체(로그·활동로그 날짜 필터, 기본 날짜 포함). 공수산정 하루 작업시간·인원·시작일·호기 범위가 로그인/새로고침 때 덮어써지던 문제, 완료 대수를 호기 번호와 비교하던 문제 수정. 예약 모달에서 바꾼 시간이 무시되던 문제 수정 + 같은 인원 중복 예약 차단·범위 예약 주말 제외. Part Number 변경 시 중복 검사·하위 부품/입출고 참조 갱신. 마지막 관리자 권한 강등 방지. 스캐너 닫은 뒤 카메라가 켜진 채 남던 문제 수정.',author:'Claude'},
+  {date:'2026-10-18',ver:'v0.10.0',type:'보안',body:'사용자 입력을 innerHTML 에 넣는 모든 화면에 escHtml 적용, 인라인 핸들러 인자는 jsArg 로 이스케이프(기존 escHtml 만으로는 따옴표가 복원되어 우회 가능). 엑셀/직접입력 검증: 구분 IN/OUT·입고/출고만 허용, 수량 양의 정수, 출고 재고 부족 검사 통일, 로봇명 정규화. 엑셀 BOM 업로드는 빈 칸 기존값 유지·기존 부품 재고 미변경(신규 부품 초기 재고만 입고 기록으로 반영). 직접입력 반영 행 자동 제거·일괄 입출고 활동로그 기록. XLSX 를 취약한 CDN 0.18.5 → 저장소 포함 0.20.3 으로 교체.',author:'Claude'},
 ];
 
 // Technician
@@ -355,4 +362,5 @@ let laborModules={
     ]}
   ]
 };
-let laborSettings={hpd:8,wk:3,startDate:''};
+// done: 로봇별 조립 완료 대수 (호기 범위 시작부터 몇 대 완료했는지)
+let laborSettings={hpd:8,wk:3,startDate:'',done:{PARKIE:0,CARRIE:0,GOALIE:0}};

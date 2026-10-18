@@ -52,15 +52,15 @@ function rendBOM(){
     const rb2=revBg[rev]||'#F3F4F6';
 
     // Lv 뱃지 (단일 컬럼)
-    const lvBadge=`<span style="background:${lb};color:${lc};border:1px solid ${lc}44;border-radius:4px;padding:2px 6px;font-size:10px;font-family:var(--fm);font-weight:700">L${lv}</span>`;
+    const lvBadge=`<span style="background:${lb};color:${lc};border:1px solid ${lc}44;border-radius:4px;padding:2px 6px;font-size:10px;font-family:var(--fm);font-weight:700">L${escHtml(lv)}</span>`;
     // Rev 뱃지
-    const revBadge=`<span style="background:${rb2};color:${rc};border-radius:3px;padding:1px 6px;font-size:11px;font-family:var(--fm);font-weight:700">${rev}</span>`;
+    const revBadge=`<span style="background:${rb2};color:${rc};border-radius:3px;padding:1px 6px;font-size:11px;font-family:var(--fm);font-weight:700">${escHtml(rev)}</span>`;
     // Part Number 들여쓰기: 레벨 × 16px
-    const indent=lv*16;
+    const indent=(Number(lv)||0)*16;
     // 상위 부품 연결선 표시
     const prefix=lv>0?`<span style="display:inline-block;width:${indent}px;color:var(--t3);font-size:10px;text-align:right;padding-right:4px">${'└'}</span>`:'';
 
-    html+=`<tr class="bom-row" ondblclick="openPartDetail('${escHtml(b.partNo)}')" style="border-bottom:1px solid var(--bd);background:${lv>0?lb+'40':''}">
+    html+=`<tr class="bom-row" ondblclick="openPartDetail(${jsArg(b.partNo)})" style="border-bottom:1px solid var(--bd);background:${lv>0?lb+'40':''}">
       <td style="text-align:center;padding:4px 6px">${lvBadge}</td>
       <td style="padding:4px 6px;font-family:var(--fm);font-size:12px;font-weight:${lv<=1?'700':'500'};color:${lc};white-space:nowrap">
         ${prefix}${escHtml(b.partNo)}
@@ -69,14 +69,14 @@ function rendBOM(){
       <td style="padding:4px 8px;font-size:13px;font-weight:${lv===0?'700':lv===1?'600':'400'}">${escHtml(b.name)}</td>
       <td><span class="rb ${rbc(b.robot)}">${escHtml(b.robot)}</span></td>
       <td class="t-m t-sm">${escHtml(b.unit)}</td>
-      <td><div style="display:flex;align-items:center;gap:5px"><span class="t-m" style="min-width:20px;font-weight:600">${b.stock}</span><div class="pb"><div class="pf" style="width:${pct}%;background:${b.stock===0?'var(--re)':b.stock<=b.minStock?'var(--am)':'var(--gn)'}"></div></div></div></td>
-      <td class="t-m t-sm">${b.minStock}</td>
-      <td class="t-m t-sm">${b.price.toLocaleString()}</td>
+      <td><div style="display:flex;align-items:center;gap:5px"><span class="t-m" style="min-width:20px;font-weight:600">${escHtml(b.stock)}</span><div class="pb"><div class="pf" style="width:${pct||0}%;background:${b.stock===0?'var(--re)':b.stock<=b.minStock?'var(--am)':'var(--gn)'}"></div></div></div></td>
+      <td class="t-m t-sm">${escHtml(b.minStock)}</td>
+      <td class="t-m t-sm">${escHtml((Number(b.price)||0).toLocaleString())}</td>
       <td><span class="sb2 ${s.c}">${s.t}</span></td>
       <td onclick="event.stopPropagation()" style="white-space:nowrap">
-        <button class="btn b-sm b-wa" onclick="openEditPart('${escHtml(b.partNo)}')">수정</button>
-        <button class="btn b-sm b-su" onclick="quickIO('in','${escHtml(b.partNo)}')">입고</button>
-        <button class="btn b-sm b-dn" onclick="quickIO('out','${escHtml(b.partNo)}')">출고</button>
+        <button class="btn b-sm b-wa" onclick="openEditPart(${jsArg(b.partNo)})">수정</button>
+        <button class="btn b-sm b-su" onclick="quickIO('in',${jsArg(b.partNo)})">입고</button>
+        <button class="btn b-sm b-dn" onclick="quickIO('out',${jsArg(b.partNo)})">출고</button>
       </td>
     </tr>`;
   });
@@ -84,8 +84,6 @@ function rendBOM(){
 }
 function filtBOM(r,el){bomFilter=r;document.querySelectorAll('.tabs .tab').forEach(t=>t.classList.remove('act'));if(el)el.classList.add('act');rendBOM();}
 
-// BOM image handling
-function readBomImg(pn,f){const r=new FileReader();r.onload=ev=>{const b2=bom.find(b=>b.partNo===pn);if(b2){if(!b2.imgs)b2.imgs=[];b2.imgs.unshift(ev.target.result);rendBOM();}};r.readAsDataURL(f);}
 
 // Part edit (수정 모달 재활용)
 function openEditPart(pn){
@@ -121,35 +119,37 @@ function rendPDinfo(b){
   const lvNames=['L0 완성품','L1 ASSY','L2 서브어셈블리','L3 단위부품','L4 세부부품','L5 세부부품','L6 최하위'];
   // 상위 부품 후보: 같은 로봇, 현재 레벨보다 낮은 레벨 (단, 자기 자신 제외)
   const parentCandidates=bom.filter(x=>x.robot===b.robot && (x.level||0)<(b.level||0) && x.partNo!==b.partNo);
-  const parentOpts=`<option value="">없음 (최상위)</option>`+parentCandidates.map(p=>`<option value="${p.partNo}"${b.parentPartNo===p.partNo?' selected':''}>[L${p.level||0}] ${p.partNo} — ${p.name}</option>`).join('');
+  const parentOpts=`<option value="">없음 (최상위)</option>`+parentCandidates.map(p=>`<option value="${escHtml(p.partNo)}"${b.parentPartNo===p.partNo?' selected':''}>[L${escHtml(p.level||0)}] ${escHtml(p.partNo)} — ${escHtml(p.name)}</option>`).join('');
+  // 인라인 핸들러 인자: Part Number 는 jsArg 로 이스케이프 (따옴표·역슬래시 포함 값 안전)
+  const pnA=jsArg(b.partNo);
 
   document.getElementById('pd-info').innerHTML=`
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">Part Number</label><input class="fi" value="${b.partNo}" onchange="updPart('${b.partNo}','partNo',this.value)"></div>
-      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">Part Name</label><input class="fi" value="${b.name}" onchange="updPart('${b.partNo}','name',this.value)"></div>
-      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">적용 로봇</label><select class="fs" onchange="updPart('${b.partNo}','robot',this.value)"><option${b.robot==='PARKIE'?' selected':''}>PARKIE</option><option${b.robot==='CARRIE'?' selected':''}>CARRIE</option><option${b.robot==='GOALIE'?' selected':''}>GOALIE</option></select></div>
-      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">단위</label><input class="fi" value="${b.unit}" onchange="updPart('${b.partNo}','unit',this.value)"></div>
+      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">Part Number</label><input class="fi" value="${escHtml(b.partNo)}" onchange="updPart(${pnA},'partNo',this.value)"></div>
+      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">Part Name</label><input class="fi" value="${escHtml(b.name)}" onchange="updPart(${pnA},'name',this.value)"></div>
+      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">적용 로봇</label><select class="fs" onchange="updPart(${pnA},'robot',this.value)"><option${b.robot==='PARKIE'?' selected':''}>PARKIE</option><option${b.robot==='CARRIE'?' selected':''}>CARRIE</option><option${b.robot==='GOALIE'?' selected':''}>GOALIE</option></select></div>
+      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">단위</label><input class="fi" value="${escHtml(b.unit)}" onchange="updPart(${pnA},'unit',this.value)"></div>
       <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">레벨 (0~6)</label>
-        <select class="fs" onchange="updPart('${b.partNo}','level',parseInt(this.value))">${[0,1,2,3,4,5,6].map(l=>`<option value="${l}"${(b.level||0)===l?' selected':''}>${l} — ${lvNames[l]}</option>`).join('')}</select>
+        <select class="fs" onchange="updPart(${pnA},'level',parseInt(this.value))">${[0,1,2,3,4,5,6].map(l=>`<option value="${l}"${(b.level||0)===l?' selected':''}>${l} — ${lvNames[l]}</option>`).join('')}</select>
       </div>
-      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">Rev.</label><input class="fi" value="${b.rev||'A'}" placeholder="A" onchange="updPart('${b.partNo}','rev',this.value)"></div>
+      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">Rev.</label><input class="fi" value="${escHtml(b.rev||'A')}" placeholder="A" onchange="updPart(${pnA},'rev',this.value)"></div>
       <div class="fl" style="margin:0;grid-column:1/-1">
         <label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">상위 부품 (Parent) <span style="color:var(--ac);font-size:9px;text-transform:none;letter-spacing:0;font-weight:400">— 이 부품이 속하는 상위 어셈블리</span></label>
-        <select class="fs" onchange="updPart('${b.partNo}','parentPartNo',this.value)">${parentOpts}</select>
+        <select class="fs" onchange="updPart(${pnA},'parentPartNo',this.value)">${parentOpts}</select>
       </div>
       <div class="fl" style="margin:0">
         <label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">현재 재고 <span style="color:var(--am);font-weight:400;font-size:9px;letter-spacing:0;text-transform:none">🔒 입출고로만 변경</span></label>
-        <input class="fi" type="number" value="${b.stock}" readonly style="background:var(--s3);color:var(--t3);cursor:not-allowed">
+        <input class="fi" type="number" value="${escHtml(b.stock)}" readonly style="background:var(--s3);color:var(--t3);cursor:not-allowed">
       </div>
-      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">최소 재고</label><input class="fi" type="number" value="${b.minStock}" onchange="updPart('${b.partNo}','minStock',parseInt(this.value)||0)"></div>
-      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">단가 (원)</label><input class="fi" type="number" value="${b.price}" onchange="updPart('${b.partNo}','price',parseInt(this.value)||0)"></div>
-      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">대당 수량</label><input class="fi" type="number" value="${b.perUnit}" onchange="updPart('${b.partNo}','perUnit',parseInt(this.value)||1)"></div>
+      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">최소 재고</label><input class="fi" type="number" min="0" value="${escHtml(b.minStock)}" onchange="updPart(${pnA},'minStock',Math.max(0,parseInt(this.value)||0))"></div>
+      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">단가 (원)</label><input class="fi" type="number" min="0" value="${escHtml(b.price)}" onchange="updPart(${pnA},'price',Math.max(0,parseInt(this.value)||0))"></div>
+      <div class="fl" style="margin:0"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">대당 수량</label><input class="fi" type="number" min="1" value="${escHtml(b.perUnit)}" onchange="updPart(${pnA},'perUnit',Math.max(1,parseInt(this.value)||1))"></div>
     </div>
     ${rendBOMHierarchy(b)}
-    <div class="fl"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">상세 스펙 / 메모</label><textarea class="ft" style="min-height:80px" onchange="updPart('${b.partNo}','spec',this.value)">${b.spec||''}</textarea></div>
+    <div class="fl"><label style="font-size:10px;color:var(--t2);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;font-family:var(--fm)">상세 스펙 / 메모</label><textarea class="ft" style="min-height:80px" onchange="updPart(${pnA},'spec',this.value)">${escHtml(b.spec||'')}</textarea></div>
     <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn b-su b-sm" onclick="openAddPartAsChild('${b.partNo}','${b.robot}',${(b.level||0)+1})">+ 하위 부품 추가</button>
-      <button class="btn b-pr b-sm" onclick="savePDinfo('${b.partNo}')">변경사항 저장</button>
+      <button class="btn b-su b-sm" onclick="openAddPartAsChild(${pnA},${jsArg(b.robot)},${(Number(b.level)||0)+1})">+ 하위 부품 추가</button>
+      <button class="btn b-pr b-sm" onclick="savePDinfo(${pnA})">변경사항 저장</button>
     </div>`;
 }
 // ────────────────────────────────────────────────────────
@@ -161,8 +161,9 @@ function rendBOMHierarchy(b){
   // ── BOM 계층 구조 패널 (이미지 스타일) ────────────────
   // 상위 부품 → 현재 부품 → 하위 부품을 카드로 표시
   // 각 카드 클릭 시 해당 부품 상세로 이동 (현재 품목은 수정 가능)
-  const lv = b.level||0;
+  const lv = Number(b.level)||0;
   const robot = b.robot;
+  const pnA = jsArg(b.partNo), rbA = jsArg(robot);
   const lvNames=['L0 완성품','L1 ASSY','L2 서브어셈블리','L3 단위부품','L4 세부부품','L5 세부부품','L6 최하위'];
   const lvColors=['#6B7280','#3B5BF6','#0EA5E9','#10B981','#F59E0B','#EF4444','#7C3AED'];
   const lvBg   =['#F3F4F6','#EEF1FF','#E0F7FD','#D1FAE5','#FEF3C7','#FEE2E2','#EDE9FF'];
@@ -180,10 +181,10 @@ function rendBOMHierarchy(b){
     const revColors={TBD:'#F59E0B',A:'#6B7280',B:'#3B5BF6',C:'#059669',D:'#EF4444'};
     const rc=revColors[item.rev||'A']||'#6B7280';
     return`<div style="display:flex;align-items:center;gap:8px;background:${isCurrent?lc+'18':lb};border:${isCurrent?'2px solid '+lc:'1px solid '+lc+'22'};border-radius:7px;padding:7px 12px">
-      <span style="background:${lc};color:#fff;border-radius:3px;padding:1px 6px;font-size:10px;font-family:var(--fm);font-weight:700;flex-shrink:0">L${li}</span>
-      <span style="font-family:var(--fm);font-size:12px;font-weight:600;color:${lc};flex-shrink:0">${item.partNo}</span>
-      <span style="background:${rc}22;color:${rc};border-radius:3px;padding:1px 5px;font-size:10px;font-family:var(--fm);font-weight:700;flex-shrink:0">${item.rev||'A'}</span>
-      <span style="font-size:12px;color:var(--tx);font-weight:${isCurrent?'600':'400'};flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.name}</span>
+      <span style="background:${lc};color:#fff;border-radius:3px;padding:1px 6px;font-size:10px;font-family:var(--fm);font-weight:700;flex-shrink:0">L${escHtml(li)}</span>
+      <span style="font-family:var(--fm);font-size:12px;font-weight:600;color:${lc};flex-shrink:0">${escHtml(item.partNo)}</span>
+      <span style="background:${rc}22;color:${rc};border-radius:3px;padding:1px 5px;font-size:10px;font-family:var(--fm);font-weight:700;flex-shrink:0">${escHtml(item.rev||'A')}</span>
+      <span style="font-size:12px;color:var(--tx);font-weight:${isCurrent?'600':'400'};flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(item.name)}</span>
       ${isCurrent?`<span style="font-size:11px;font-weight:700;color:${lc};flex-shrink:0">현재</span>`:''}
     </div>`;
   };
@@ -193,25 +194,25 @@ function rendBOMHierarchy(b){
       <div>
         <span style="font-size:12px;font-weight:700;color:var(--tx)">BOM 계층 구조</span>
         <span style="font-size:11px;font-weight:400;color:var(--t2);margin-left:6px">— 현재:
-          <span style="color:${lvColors[lv]||'#6B7280'};font-weight:700">${lvNames[lv]||'L'+lv}</span>
+          <span style="color:${lvColors[lv]||'#6B7280'};font-weight:700">${escHtml(lvNames[lv]||'L'+lv)}</span>
         </span>
       </div>
       <div style="display:flex;gap:6px">
-        <button class="btn b-se b-sm" onclick="openSetParentModal('${b.partNo}')" title="이 부품의 상위 부품 변경">✏️ 상위 변경</button>
-        <button class="btn b-su b-sm" onclick="openAddPartAsChild('${b.partNo}','${robot}',${lv+1})" title="하위 부품 추가">+ 하위 부품 추가</button>
+        <button class="btn b-se b-sm" onclick="openSetParentModal(${pnA})" title="이 부품의 상위 부품 변경">✏️ 상위 변경</button>
+        <button class="btn b-su b-sm" onclick="openAddPartAsChild(${pnA},${rbA},${lv+1})" title="하위 부품 추가">+ 하위 부품 추가</button>
       </div>
     </div>
     <div style="padding:12px 14px;display:flex;flex-direction:column;gap:7px">`;
 
   // 상위 부품
   if(directParent){
-    html+=`<div style="font-size:11px;font-weight:600;color:var(--t2);margin-bottom:1px">▲ 상위 부품 (L${directParent.level||0})</div>`;
+    html+=`<div style="font-size:11px;font-weight:600;color:var(--t2);margin-bottom:1px">▲ 상위 부품 (L${escHtml(directParent.level||0)})</div>`;
     html+=card(directParent,false);
     html+=`<div style="border-left:2px dashed var(--bd);height:10px;margin-left:22px"></div>`;
   } else if(lv>0){
     html+=`<div style="font-size:11px;color:var(--am);margin-bottom:4px;display:flex;align-items:center;gap:8px">
       ▲ 상위 부품 미지정
-      <button class="btn b-wa b-sm" onclick="openSetParentModal('${b.partNo}')">상위 부품 지정하기</button>
+      <button class="btn b-wa b-sm" onclick="openSetParentModal(${pnA})">상위 부품 지정하기</button>
     </div>`;
   }
 
@@ -236,12 +237,12 @@ function rendBOMHierarchy(b){
     html+=`<div style="border-left:2px dashed var(--bd);height:10px;margin-left:22px"></div>`;
     html+=`<div style="font-size:11px;font-weight:600;color:var(--t2);margin-bottom:1px">▼ 하위 부품 (L${lv+1}) · ${directChildren.length}개</div>`;
     directChildren.forEach(c=>{ html+=card(c,false); });
-    html+=`<button class="btn b-se b-sm" style="margin-left:20px;margin-top:2px" onclick="openAddPartAsChild('${b.partNo}','${robot}',${lv+1})">+ 하위 부품 추가</button>`;
+    html+=`<button class="btn b-se b-sm" style="margin-left:20px;margin-top:2px" onclick="openAddPartAsChild(${pnA},${rbA},${lv+1})">+ 하위 부품 추가</button>`;
   } else {
     html+=`<div style="border-left:2px dashed var(--bd);height:10px;margin-left:22px"></div>`;
     html+=`<div style="display:flex;align-items:center;gap:8px;padding:6px 0">
       <span style="font-size:11px;color:var(--t3)">▼ 하위 부품 없음</span>
-      <button class="btn b-se b-sm" onclick="openAddPartAsChild('${b.partNo}','${robot}',${lv+1})">+ 하위 부품 추가</button>
+      <button class="btn b-se b-sm" onclick="openAddPartAsChild(${pnA},${rbA},${lv+1})">+ 하위 부품 추가</button>
     </div>`;
   }
 
@@ -269,14 +270,13 @@ function openAddPartAsChild(parentPN,robot,childLevel){
 // prompt() 대신 전용 모달로 교체
 function openSetParentModal(pn){
   const b=bom.find(x=>x.partNo===pn);if(!b)return;
-  const candidates=bom.filter(x=>x.robot===b.robot && x.partNo!==pn && (x.level||0)<(b.level||0) || (b.level||0)===0);
-  // 같은 로봇에서 레벨이 낮은(숫자 작은) 모든 부품
+  // 같은 로봇의 다른 모든 부품 (자기 자신 제외)
   const valid=bom.filter(x=>x.robot===b.robot && x.partNo!==pn);
   document.getElementById('spm-title').textContent=`"${b.name}" 의 상위 부품 지정`;
   document.getElementById('spm-pn').value=pn;
   const sel=document.getElementById('spm-parent');
   sel.innerHTML=`<option value="">없음 (최상위 — parentPartNo 비움)</option>`+
-    valid.map(p=>`<option value="${p.partNo}"${b.parentPartNo===p.partNo?' selected':''}>[L${p.level||0}] ${p.partNo} — ${p.name}</option>`).join('');
+    valid.map(p=>`<option value="${escHtml(p.partNo)}"${b.parentPartNo===p.partNo?' selected':''}>[L${escHtml(p.level||0)}] ${escHtml(p.partNo)} — ${escHtml(p.name)}</option>`).join('');
   openMo('mo-set-parent');
 }
 
@@ -303,47 +303,83 @@ function updPart(pn,key,val){
     return;
   }
   const b=bom.find(x=>x.partNo===pn);
-  if(b){
-    const oldVal=b[key];
-    b[key]=val;
-    // 변경 내역 활동 로그에 기록
-    logActivity(CU.id,CU.name,'BOM',`BOM 수정: ${pn} [${key}] ${oldVal} → ${val}`);
-    rendBOM();rendDash();
-  }
+  if(!b){toast('⚠️','부품을 찾을 수 없습니다. 상세 창을 다시 열어주세요.','wa');return;}
+  if(key==='partNo'){renamePartNo(b,val);return;}
+  const oldVal=b[key];
+  b[key]=val;
+  // 변경 내역 활동 로그에 기록
+  logActivity(CU.id,CU.name,'BOM',`BOM 수정: ${pn} [${key}] ${oldVal} → ${val}`);
+  if(key==='name'){const t=document.getElementById('pd-title');if(t&&currentPDpartNo===pn)t.textContent=`${b.name} (${b.partNo})`;}
+  rendBOM();rendDash();
+}
+
+// Part Number 변경: 중복 검사 + 하위 부품 parentPartNo · 입출고 기록 partNo 참조까지 함께 갱신
+function renamePartNo(b,val){
+  const oldPn=b.partNo;
+  const newPn=String(val ?? '').trim();
+  if(newPn===oldPn)return;
+  if(!newPn){toast('⚠️','Part Number는 비울 수 없습니다','wa');openPartDetail(oldPn);return;}
+  if(bom.some(x=>x!==b&&x.partNo===newPn)){toast('❌',`이미 존재하는 Part Number입니다: ${newPn}`,'err');openPartDetail(oldPn);return;}
+  b.partNo=newPn;
+  let nChild=0,nLog=0;
+  bom.forEach(x=>{if(x.parentPartNo===oldPn){x.parentPartNo=newPn;nChild++;}});
+  ioLogs.forEach(l=>{if(l.partNo===oldPn){l.partNo=newPn;nLog++;}});
+  if(currentPDpartNo===oldPn)currentPDpartNo=newPn;
+  logActivity(CU.id,CU.name,'BOM',`Part Number 변경: ${oldPn} → ${newPn} (하위 ${nChild}건 · 입출고 ${nLog}건 갱신)`);
+  rendBOM();rendDash();
+  openPartDetail(newPn);   // 모달 핸들러가 새 Part Number 를 가리키도록 다시 렌더
+  toast('✅',`Part Number 변경: ${oldPn} → ${newPn}`,'ok');
 }
 
 function rendPDimages(b){
   const imgs=b.imgs||[];
   let html=`<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">`;
   imgs.forEach((src,i)=>{
-    html+=`<div style="position:relative;aspect-ratio:1"><img src="${src}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;border:1px solid var(--bd);cursor:pointer" onclick="openLB('${src}')"><button onclick="delPartImg('${b.partNo}',${i})" style="position:absolute;top:4px;right:4px;width:20px;height:20px;background:rgba(0,0,0,.55);border:none;border-radius:50%;color:#fff;font-size:10px;cursor:pointer">✕</button></div>`;
+    html+=`<div style="position:relative;aspect-ratio:1"><img ${imgAttrs(src)} style="width:100%;height:100%;object-fit:cover;border-radius:8px;border:1px solid var(--bd);cursor:pointer" onclick="openLBFromImg(this)"><button onclick="delPartImg(${jsArg(b.partNo)},${i})" style="position:absolute;top:4px;right:4px;width:20px;height:20px;background:rgba(0,0,0,.55);border:none;border-radius:50%;color:#fff;font-size:10px;cursor:pointer">✕</button></div>`;
   });
   html+=`<div class="pd-img-add" onclick="document.getElementById('pd-img-fi').click()"><span style="font-size:22px">📷</span><span>이미지 추가</span><span class="t-sm t-mu">또는 드래그</span></div></div>`;
-  html+=`<div class="uz" ondragover="event.preventDefault()" ondrop="dropPartImgs('${b.partNo}',event)" style="padding:16px"><div class="t-sm t-mu">이미지를 여기에 드래그하여 추가</div></div>`;
+  html+=`<div class="uz" ondragover="event.preventDefault()" ondrop="dropPartImgs(${jsArg(b.partNo)},event)" style="padding:16px"><div class="t-sm t-mu">이미지를 여기에 드래그하여 추가</div></div>`;
   document.getElementById('pd-images').innerHTML=html;
 }
+// 부품 이미지 첨부: 리사이즈 후 IndexedDB 저장, 상태에는 참조(id)만 보관 (images.js)
+function attachPartImgs(b,files){
+  if(!files||!files.length)return;
+  toast('⏳','이미지 처리 중...','wa');
+  ImgStore.addFiles(files).then(refs=>{
+    if(!refs.length)return;
+    if(!b.imgs)b.imgs=[];
+    refs.forEach(r=>b.imgs.push(r));
+    if(currentPDpartNo===b.partNo)rendPDimages(b);
+    rendBOM();
+    toast('✅',`이미지 ${refs.length}개 추가`,'ok');
+  });
+}
 function addPartImg(e){
-  const b=bom.find(x=>x.partNo===currentPDpartNo);if(!b)return;
-  Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>{if(!b.imgs)b.imgs=[];b.imgs.push(ev.target.result);rendPDimages(b);rendBOM();};r.readAsDataURL(f);});
+  const b=bom.find(x=>x.partNo===currentPDpartNo);
+  const files=Array.from(e.target.files||[]);
   e.target.value='';
+  if(b)attachPartImgs(b,files);
 }
 function dropPartImgs(pn,e){
   e.preventDefault();const b=bom.find(x=>x.partNo===pn);if(!b)return;
-  Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/')).forEach(f=>{const r=new FileReader();r.onload=ev=>{if(!b.imgs)b.imgs=[];b.imgs.push(ev.target.result);rendPDimages(b);rendBOM();};r.readAsDataURL(f);});
+  attachPartImgs(b,Array.from(e.dataTransfer.files||[]));
 }
-function delPartImg(pn,i){const b=bom.find(x=>x.partNo===pn);if(b&&b.imgs){b.imgs.splice(i,1);rendPDimages(b);rendBOM();}}
+function delPartImg(pn,i){
+  const b=bom.find(x=>x.partNo===pn);
+  if(b&&b.imgs){const removed=b.imgs.splice(i,1);ImgStore.remove(removed);rendPDimages(b);rendBOM();}
+}
 
 function rendPDlogs(b){
   const logs=ioLogs.filter(l=>l.partNo===b.partNo).sort((a,c)=>c.ts-a.ts);
   document.getElementById('pd-logs').innerHTML=logs.length
-    ?`<table><thead><tr><th>일시</th><th>구분</th><th>수량</th><th>담당자</th><th>메모</th></tr></thead><tbody>${logs.map(l=>`<tr><td class="t-m t-sm">${fd(l.ts)}</td><td><span class="lb ${l.type==='IN'?'lb-in':'lb-out'}">${l.type==='IN'?'입고':'출고'}</span></td><td class="t-m">${l.qty} ${l.unit}</td><td class="t-sm">${l.userName}</td><td class="t-mu t-sm">${l.memo||'-'}</td></tr>`).join('')}</tbody></table>`
+    ?`<table><thead><tr><th>일시</th><th>구분</th><th>수량</th><th>담당자</th><th>메모</th></tr></thead><tbody>${logs.map(l=>`<tr><td class="t-m t-sm">${fd(l.ts)}</td><td><span class="lb ${l.type==='IN'?'lb-in':'lb-out'}">${l.type==='IN'?'입고':'출고'}</span></td><td class="t-m">${escHtml(l.qty)} ${escHtml(l.unit)}</td><td class="t-sm">${escHtml(l.userName)}</td><td class="t-mu t-sm">${escHtml(l.memo||'-')}</td></tr>`).join('')}</tbody></table>`
     :'<div class="t-mu t-sm" style="text-align:center;padding:20px">입출고 내역 없음</div>';
 }
 
 function rendPDphotos(b){
   const photos=ioLogs.filter(l=>l.partNo===b.partNo&&l.photos&&l.photos.length).flatMap(l=>l.photos.map(p=>({src:p,ts:l.ts,user:l.userName,type:l.type})));
   document.getElementById('pd-photos').innerHTML=photos.length
-    ?`<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${photos.map(p=>`<div><img src="${p.src}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid var(--bd);cursor:pointer" onclick="openLB('${p.src}')"><div class="t-sm t-mu" style="margin-top:3px">${p.user} · ${fd(p.ts)}</div></div>`).join('')}</div>`
+    ?`<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${photos.map(p=>`<div><img ${imgAttrs(p.src)} style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid var(--bd);cursor:pointer" onclick="openLBFromImg(this)"><div class="t-sm t-mu" style="margin-top:3px">${escHtml(p.user)} · ${fd(p.ts)}</div></div>`).join('')}</div>`
     :'<div class="t-mu t-sm" style="text-align:center;padding:20px">인증사진 없음</div>';
 }
 
@@ -356,7 +392,7 @@ function updAddPartParentSel(){
   // 상위 부품: 같은 로봇, 현재 레벨보다 낮은 레벨
   const candidates=bom.filter(x=>x.robot===rb&&(x.level||0)<lv);
   sel.innerHTML=`<option value="">없음 (최상위)</option>`+
-    candidates.map(p=>`<option value="${p.partNo}">[L${p.level||0}] ${p.partNo} — ${p.name}</option>`).join('');
+    candidates.map(p=>`<option value="${escHtml(p.partNo)}">[L${escHtml(p.level||0)}] ${escHtml(p.partNo)} — ${escHtml(p.name)}</option>`).join('');
   updAddPartParentPreview();
 }
 
@@ -384,11 +420,11 @@ function submitAddPart(){
   const parentPN=document.getElementById('ap-parent')?.value||'';
   bom.push({
     partNo:pn, name:nm,
-    robot:document.getElementById('ap-rb').value,
+    robot:normRobot(document.getElementById('ap-rb').value)||'PARKIE',
     unit:document.getElementById('ap-u').value,
     stock:0,                   // 재고 0 고정 (입출고로만 변경)
-    minStock:parseInt(document.getElementById('ap-ms').value)||0,
-    price:parseInt(document.getElementById('ap-pr').value)||0,
+    minStock:Math.max(0,parseInt(document.getElementById('ap-ms').value)||0),
+    price:Math.max(0,parseInt(document.getElementById('ap-pr').value)||0),
     imgs:[], perUnit:1, spec:'',
     level:lv, rev, parentPartNo:parentPN
   });

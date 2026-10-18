@@ -5,6 +5,7 @@
   const mq=window.matchMedia('(max-width: 760px)');
   const speed=22; // px per second
   let raf=0,lastTs=0,pausedUntil=0;
+  let pos=0; // 소수점 스크롤 위치 누적 (DPR 1 화면에서 scrollLeft 가 정수로 반올림돼 멈추던 문제 방지)
   let initialized=false;
   let cycleWidth=0;
 
@@ -45,6 +46,8 @@
     el.classList.remove('nav-paused');
     return true;
   }
+  // 순환이 필요 없을 때(데스크톱 폭·로그인 화면·메뉴가 넘치지 않음)는 루프를 멈춥니다.
+  // 화면 폭 변경(resize·미디어쿼리 change)이나 initApp 의 startMobileNav() 호출 시 다시 시작합니다.
   function tick(ts){
     const el=nav();
     if(!el){raf=0;return;}
@@ -52,13 +55,15 @@
       el.classList.remove('nav-rotating','nav-paused');
       delete el.dataset.navCloned;
       removeClones(el);
-      raf=requestAnimationFrame(tick);
+      raf=0;
       return;
     }
     const cycle=ensureClones(el);
     if(cycle<=el.clientWidth+6||el.scrollWidth<=el.clientWidth+6){
       el.classList.remove('nav-rotating','nav-paused');
-      raf=requestAnimationFrame(tick);
+      delete el.dataset.navCloned;
+      removeClones(el);
+      raf=0;
       return;
     }
     el.classList.add('nav-rotating');
@@ -66,8 +71,10 @@
     const dt=Math.min(80,ts-lastTs);
     lastTs=ts;
     if(resumeIfReady(el)){
-      el.scrollLeft+=speed*(dt/1000);
-      if(el.scrollLeft>=cycle)el.scrollLeft-=cycle;
+      if(Math.abs(el.scrollLeft-pos)>2)pos=el.scrollLeft; // 사용자가 직접 스크롤한 경우 그 위치부터
+      pos+=speed*(dt/1000);
+      if(pos>=cycle)pos-=cycle;
+      el.scrollLeft=pos;
     }
     raf=requestAnimationFrame(tick);
   }
@@ -116,5 +123,10 @@
     }
     pause(1200);
     syncMcPadding();
+    start();
   });
+  // 모바일 폭으로 바뀌면 루프 재시작
+  const onMqChange=()=>{if(mq.matches)start();};
+  if(mq.addEventListener)mq.addEventListener('change',onMqChange);
+  else if(mq.addListener)mq.addListener(onMqChange);
 })();

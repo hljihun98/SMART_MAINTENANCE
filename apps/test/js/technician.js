@@ -14,7 +14,7 @@ function techMonthNext(){techCalYear*=1;techCalMonth++;if(techCalMonth>11){techC
 function rendTechPage(){
   // ── 날짜 미선택 시 오늘 날짜 자동 선택 ────────────────
   if(!techSelectedDate){
-    techSelectedDate=new Date().toISOString().slice(0,10);
+    techSelectedDate=localDateStr();
   }
   rendTechMonthGrid();
   rendTechTimeGrid(techSelectedDate);
@@ -61,18 +61,29 @@ function calDragEnd(dk){
   if(oldBanner)oldBanner.remove();
   const tg=document.getElementById('tech-timegrid');
   if(tg){
-    const dates=[];
-    let cur=new Date(startDk); const endD=new Date(endDk);
-    while(cur<=endD){dates.push(cur.toISOString().slice(0,10));cur.setDate(cur.getDate()+1);}
+    const dates=weekdayDatesInRange(startDk,endDk);
     const banner=document.createElement('div');
     banner.id='drag-range-banner';
     banner.style.cssText='background:var(--acl);border:1.5px solid var(--ac);border-radius:8px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px';
     banner.innerHTML=
-      '<div style="font-size:13px;font-weight:700;color:var(--ac)">📅 '+startDk+' ~ '+endDk+' ('+dates.length+'일) 범위 선택됨</div>'+
-      '<div style="font-size:12px;color:var(--t2)">아래 타임그리드에서 드래그하면 <b>'+dates.length+'일 전체</b>에 동일 예약이 일괄 적용됩니다</div>'+
+      '<div style="font-size:13px;font-weight:700;color:var(--ac)">📅 '+startDk+' ~ '+endDk+' (평일 '+dates.length+'일) 범위 선택됨</div>'+
+      '<div style="font-size:12px;color:var(--t2)">아래 타임그리드에서 드래그하면 <b>평일 '+dates.length+'일</b>에 동일 예약이 일괄 적용됩니다 (주말 제외)</div>'+
       '<button class="btn b-se b-sm" onclick="clearTechDragRange()">범위 해제</button>';
     tg.parentNode.insertBefore(banner,tg);
   }
+}
+
+// 'YYYY-MM-DD' 범위의 평일(월~금) 날짜 목록 (로컬 날짜 기준)
+function weekdayDatesInRange(startDk,endDk){
+  const dates=[];
+  const cur=parseLocalDate(startDk), endD=parseLocalDate(endDk);
+  if(!cur||!endD)return dates;
+  while(cur<=endD){
+    const dw=cur.getDay();
+    if(dw!==0&&dw!==6)dates.push(localDateStr(cur));
+    cur.setDate(cur.getDate()+1);
+  }
+  return dates;
 }
 
 function highlightCalDrag(start,end){
@@ -111,9 +122,10 @@ function rendTechMonthGrid(){
       const t=technicians.find(x=>x.id===tid);
       if(!t)return'';
       const h=dayBookings.filter(b=>b.techId===tid).reduce((s,b)=>s+(b.endSlot-b.startSlot)*0.5,0);
-      return`<span style="display:inline-flex;align-items:center;gap:3px;background:${t.color}22;border-radius:4px;padding:1px 5px;margin-bottom:2px"><span style="width:6px;height:6px;border-radius:50%;background:${t.color};display:inline-block;flex-shrink:0"></span><span style="font-size:9px;color:${t.color};font-weight:600;font-family:var(--fm)">${t.name} ${h}h</span></span>`;
+      const tc=escHtml(t.color);
+      return`<span style="display:inline-flex;align-items:center;gap:3px;background:${tc}22;border-radius:4px;padding:1px 5px;margin-bottom:2px"><span style="width:6px;height:6px;border-radius:50%;background:${tc};display:inline-block;flex-shrink:0"></span><span style="font-size:9px;color:${tc};font-weight:600;font-family:var(--fm)">${escHtml(t.name)} ${h}h</span></span>`;
     }).join('');
-    const isPast=new Date(dk)<new Date(today.getFullYear(),today.getMonth(),today.getDate());
+    const isPast=parseLocalDate(dk)<new Date(today.getFullYear(),today.getMonth(),today.getDate());
     const delayOnDayArr=delayLogs.filter(dl2=>dl2.date===dk);
     const hasDelay=delayOnDayArr.length>0;
 
@@ -121,14 +133,12 @@ function rendTechMonthGrid(){
     const ganttBars=confirmedSchedules.flatMap(sc=>
       sc.phases.filter(ph=>ph.start<=dk&&ph.end>=dk&&ph.gantt!==false).map(ph=>({sc,ph}))
     );
-    const scId2html=(scid)=>scid.replace(/'/g,"\\'");
     const ganttHtml=ganttBars.map(function(item){
       const sc=item.sc, ph=item.ph;
-      const sid=sc.id;
-      return '<div data-scid="'+sid+'" ondblclick="event.stopPropagation();openScheduleDetail(this.dataset.scid)"'
-        +' style="display:flex;align-items:center;gap:3px;background:'+ph.bgColor+';border-left:2px solid '+ph.color+';border-radius:3px;padding:1px 5px;margin-bottom:1px;cursor:pointer;font-size:9px;font-weight:600;color:'+ph.textColor+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap"'
-        +' title="'+sc.robot+' '+sc.unitFrom+'~'+sc.unitTo+'호기 '+ph.label+'\n더블클릭: 상세 보기">'
-        +ph.label+'</div>';
+      return '<div data-scid="'+escHtml(sc.id)+'" ondblclick="event.stopPropagation();openScheduleDetail(this.dataset.scid)"'
+        +' style="display:flex;align-items:center;gap:3px;background:'+escHtml(ph.bgColor)+';border-left:2px solid '+escHtml(ph.color)+';border-radius:3px;padding:1px 5px;margin-bottom:1px;cursor:pointer;font-size:9px;font-weight:600;color:'+escHtml(ph.textColor)+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap"'
+        +' title="'+escHtml(sc.robot+' '+sc.unitFrom+'~'+sc.unitTo+'호기 '+ph.label)+'&#10;더블클릭: 상세 보기">'
+        +escHtml(ph.label)+'</div>';
     }).join('');
 
     html+=`<div
@@ -143,7 +153,7 @@ function rendTechMonthGrid(){
         <div style="display:flex;gap:3px;align-items:center">
           ${isToday?'<span style="font-size:8px;font-weight:800;background:#F97316;color:#fff;border-radius:3px;padding:1px 5px;letter-spacing:.3px">TODAY</span>':''}
           ${isSel&&!isPast?'<span style="font-size:8px;font-weight:700;background:var(--ac);color:#fff;border-radius:3px;padding:1px 4px">선택</span>':''}
-          ${hasDelay&&!isPast?`<span title="${delayOnDayArr[0].title}" style="font-size:8px;background:var(--aml);color:var(--am-dark);border-radius:3px;padding:1px 4px">⚠️</span>`:''}
+          ${hasDelay&&!isPast?`<span title="${escHtml(delayOnDayArr[0].title)}" style="font-size:8px;background:var(--aml);color:var(--am-dark);border-radius:3px;padding:1px 4px">⚠️</span>`:''}
         </div>
       </div>
       ${ganttHtml}
@@ -230,28 +240,18 @@ function endDrag2(e){
   document.getElementById('mo-tech-book').querySelector('.md-s').textContent=
     (tech?tech.name:'작업 인원')+' · '+dates+' · '+slotLabel24(s)+'~'+slotLabel24(en);
 
-  // 날짜/시간 미리 채우기
+  // 날짜/시간 미리 채우기 (범위 예약이면 날짜 입력은 잠금 — 범위가 기준)
   var tbDate=document.getElementById('tb-date');
   var tbTech=document.getElementById('tb-tech');
-  if(tbDate)tbDate.value=singleDk;
+  if(tbDate){tbDate.value=singleDk;tbDate.disabled=!!_pendingBooking.dateRange;}
   if(tbTech){
     tbTech.innerHTML=technicians.map(function(t){
-      return'<option value="'+t.id+'"'+(t.id===_drag.techId?' selected':'')+'>'+t.name+'</option>';
+      return'<option value="'+escHtml(t.id)+'"'+(t.id===_drag.techId?' selected':'')+'>'+escHtml(t.name)+'</option>';
     }).join('');
   }
-  // 시작/종료 슬롯 → 시간 select 업데이트
-  var tbStart=document.getElementById('tb-start');
-  var tbEnd=document.getElementById('tb-end');
-  if(tbStart){
-    tbStart.innerHTML=Array.from({length:WORK_SLOTS+1},function(_,i){
-      return'<option value="'+i+'"'+(i===s?' selected':'')+'>'+slotLabel24(i)+'</option>';
-    }).join('');
-  }
-  if(tbEnd){
-    tbEnd.innerHTML=Array.from({length:WORK_SLOTS+1},function(_,i){
-      return'<option value="'+i+'"'+(i===en?' selected':'')+'>'+slotLabel24(i)+'</option>';
-    }).join('');
-  }
+  // 시작/종료 슬롯 → 시간 select 업데이트 (값 = 슬롯 번호, submitTechBook 이 이 값을 그대로 사용)
+  fillSlotSelect(document.getElementById('tb-start'),s);
+  fillSlotSelect(document.getElementById('tb-end'),en);
   // 이전 입력 초기화
   var tbType=document.getElementById('tb-type');if(tbType)tbType.value='조립';
   var tbNote=document.getElementById('tb-note');if(tbNote)tbNote.value='';
@@ -259,6 +259,14 @@ function endDrag2(e){
   var tbUnit=document.getElementById('tb-unit');if(tbUnit)tbUnit.value='';
 
   openMo('mo-tech-book');
+}
+
+// 시간 select 를 슬롯(0=07:00 … 22=18:00) 옵션으로 채움
+function fillSlotSelect(sel,cur){
+  if(!sel)return;
+  sel.innerHTML=Array.from({length:WORK_SLOTS+1},function(_,i){
+    return'<option value="'+i+'"'+(i===cur?' selected':'')+'>'+slotLabel24(i)+'</option>';
+  }).join('');
 }
 
 // 드래그로 생성된 대기 예약 데이터
@@ -314,16 +322,17 @@ function rendTechTimeGrid(dk){
   technicians.forEach(function(tech){
     var dayB=techBookings.filter(function(b){return b.date===dk&&b.techId===tech.id;});
     var nameCell='<div style="width:'+LABEL_W+'px;flex-shrink:0;display:flex;align-items:center;gap:5px;padding:4px 8px;border-right:1px solid var(--bd);background:var(--s2);min-height:'+ROW_H+'px">';
-    nameCell+='<span style="width:9px;height:9px;border-radius:50%;background:'+tech.color+';flex-shrink:0"></span>';
-    nameCell+='<span style="font-size:12px;font-weight:600;white-space:nowrap">'+tech.name+'</span>';
+    var tcol=escHtml(tech.color);
+    nameCell+='<span style="width:9px;height:9px;border-radius:50%;background:'+tcol+';flex-shrink:0"></span>';
+    nameCell+='<span style="font-size:12px;font-weight:600;white-space:nowrap">'+escHtml(tech.name)+'</span>';
     if(CU&&CU.role==='admin'){
-      nameCell+='<button data-tid="'+tech.id+'" onclick="deleteTech(this.dataset.tid)" style="margin-left:auto;background:none;border:none;color:var(--t3);cursor:pointer;font-size:11px" title="삭제">✕</button>';
+      nameCell+='<button data-tid="'+escHtml(tech.id)+'" onclick="deleteTech(this.dataset.tid)" style="margin-left:auto;background:none;border:none;color:var(--t3);cursor:pointer;font-size:11px" title="삭제">✕</button>';
     }
     nameCell+='</div>';
     // 빈 슬롯 배경
     var bg='<div style="position:relative;display:flex;flex:1">';
     for(var sb=0;sb<SLOTS;sb++){
-      bg+='<div style="width:'+COL_W+'px;flex-shrink:0;height:'+ROW_H+'px;border-left:1px solid '+(sb%2===0?'var(--bd)':'var(--s3)')+';cursor:crosshair" data-slot="'+sb+'" data-tech="'+tech.id+'" data-date="'+dk+'" onmousedown="startDrag2(event)" onmouseenter="moveDrag2(event)" onmouseup="endDrag2(event)" title="'+slotLabel24(sb)+'"></div>';
+      bg+='<div style="width:'+COL_W+'px;flex-shrink:0;height:'+ROW_H+'px;border-left:1px solid '+(sb%2===0?'var(--bd)':'var(--s3)')+';cursor:crosshair" data-slot="'+sb+'" data-tech="'+escHtml(tech.id)+'" data-date="'+escHtml(dk)+'" onmousedown="startDrag2(event)" onmouseenter="moveDrag2(event)" onmouseup="endDrag2(event)" title="'+slotLabel24(sb)+'"></div>';
     }
     // 예약 오버레이
     dayB.forEach(function(b){
@@ -338,12 +347,12 @@ function rendTechTimeGrid(dk){
       var unplanned=bLog&&bLog.unplanned?bLog.unplanned:'';
       var hasLog=bLog&&(bLog.memo||bLog.unplanned);
       var dur=e2-s2;
-      bg+='<div style="position:absolute;left:'+lft+'px;top:3px;width:'+wd+'px;height:'+(ROW_H-8)+'px;background:'+tech.color+'20;border:2px solid '+tech.color+';border-radius:6px;padding:5px 8px;cursor:pointer;overflow:hidden;box-sizing:border-box;z-index:2" data-bid="'+b.id+'" onclick="openTechBookingDetail(this.dataset.bid)" ondblclick="cancelBooking(this.dataset.bid)">';
-      bg+='<div style="font-size:10px;font-weight:700;color:'+tech.color+'">'+slotLabel24(s2)+' ~ '+slotLabel24(e2)+'</div>';
-      if(bt)bg+='<div style="font-size:13px;font-weight:700;color:var(--tx);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+bt+'</div>';
-      if(bn&&bn!=='-')bg+='<div style="font-size:10px;color:var(--t2);margin-top:1px">📋 '+bn+'</div>';
-      if((bNote||memo)&&dur>=3)bg+='<div style="font-size:10px;color:var(--t2);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">💬 '+(memo||bNote)+'</div>';
-      if(unplanned)bg+='<div style="font-size:9px;color:var(--am);margin-top:1px">⚠️ '+unplanned.slice(0,30)+'</div>';
+      bg+='<div style="position:absolute;left:'+lft+'px;top:3px;width:'+wd+'px;height:'+(ROW_H-8)+'px;background:'+tcol+'20;border:2px solid '+tcol+';border-radius:6px;padding:5px 8px;cursor:pointer;overflow:hidden;box-sizing:border-box;z-index:2" data-bid="'+escHtml(b.id)+'" onclick="openTechBookingDetail(this.dataset.bid)" ondblclick="cancelBooking(this.dataset.bid)">';
+      bg+='<div style="font-size:10px;font-weight:700;color:'+tcol+'">'+slotLabel24(s2)+' ~ '+slotLabel24(e2)+'</div>';
+      if(bt)bg+='<div style="font-size:13px;font-weight:700;color:var(--tx);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(bt)+'</div>';
+      if(bn&&bn!=='-')bg+='<div style="font-size:10px;color:var(--t2);margin-top:1px">📋 '+escHtml(bn)+'</div>';
+      if((bNote||memo)&&dur>=3)bg+='<div style="font-size:10px;color:var(--t2);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">💬 '+escHtml(memo||bNote)+'</div>';
+      if(unplanned)bg+='<div style="font-size:9px;color:var(--am);margin-top:1px">⚠️ '+escHtml(String(unplanned).slice(0,30))+'</div>';
       if(hasLog)bg+='<span style="position:absolute;top:4px;right:5px;width:7px;height:7px;background:var(--gn);border-radius:50%;display:inline-block"></span>';
       bg+='</div>';
     });
@@ -352,13 +361,13 @@ function rendTechTimeGrid(dk){
   });
   var totals=technicians.map(function(t){
     var h=techBookings.filter(function(b){return b.date===dk&&b.techId===t.id;}).reduce(function(s3,b){return s3+(b.endSlot-b.startSlot)*0.5;},0);
-    if(h>0)return '<span style="display:inline-flex;align-items:center;gap:4px;background:'+t.color+'18;border-radius:6px;padding:3px 10px"><span style="width:7px;height:7px;border-radius:50%;background:'+t.color+'"></span><span style="font-size:12px;font-weight:600;color:'+t.color+'">'+t.name+' '+h+'h</span></span>';
+    var tc2=escHtml(t.color);
+    if(h>0)return '<span style="display:inline-flex;align-items:center;gap:4px;background:'+tc2+'18;border-radius:6px;padding:3px 10px"><span style="width:7px;height:7px;border-radius:50%;background:'+tc2+'"></span><span style="font-size:12px;font-weight:600;color:'+tc2+'">'+escHtml(t.name)+' '+h+'h</span></span>';
     return '';
   }).filter(Boolean).join('');
   tg.innerHTML=hdr+body+'<div style="padding:8px 6px;display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--bd)">'+(totals||'<span style="font-size:11px;color:var(--t3)">예약 없음</span>')+'</div>';
 }
 
-function submitDragBook(){toast('ℹ️','타임그리드에서 드래그하여 예약하세요','ok');}
 
 // ────────────────────────────────────────────────────────
 // 공수산정 달력 납기 역산
@@ -487,7 +496,6 @@ function updRevCalc(){
     const u1=f+b*PROC.PARALLEL_UNITS;
     const u2=Math.min(f+(b+1)*PROC.PARALLEL_UNITS-1,t2);
     const label=u1===u2?`${u1}호기`:`${u1}·${u2}호기 (동시)`;
-    const isMid=false; // 구동모듈 안착 표시 제거
     nextmBatchRows+=`
       <div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0 3px 10px;border-left:2px solid ${lc}66;margin-bottom:1px">
         <span style="color:var(--t2)">배치 ${b+1} (${label})</span>
@@ -661,8 +669,8 @@ function applyReverseSchedule(){
   const gbcStart=subtractWD(new Date(gbcEnd),PROC.GBC_DAYS);
   const partsOrder=subtractWD(new Date(gbcStart),PROC.PARTS_LEAD);
 
-  // ── 작업 시작일 업데이트 ──────────────────────────────
-  const sd=partsOrder.toISOString().slice(0,10);
+  // ── 작업 시작일 업데이트 (로컬 날짜 — toISOString 은 KST 에서 하루 앞당겨짐) ──
+  const sd=localDateStr(partsOrder);
   laborSettings.startDate=sd;
   const el=document.getElementById('l-sd');if(el)el.value=sd;
 
@@ -673,15 +681,15 @@ function applyReverseSchedule(){
   // 부품 발주·입고 단계
   phases.push({
     type:'parts', label:'부품 발주·입고',
-    start:partsOrder.toISOString().slice(0,10),
-    end:gbcStart.toISOString().slice(0,10),
+    start:localDateStr(partsOrder),
+    end:localDateStr(gbcStart),
     color:'#8B5CF6', bgColor:'#F5F3FF', textColor:'#6D28D9'
   });
   // GBC 센터 — 달력에는 표시 안 함 (상세모달에서만 확인)
   phases.push({
     type:'gbc', label:`GBC 구동모듈 (${count}대)`,
-    start:gbcStart.toISOString().slice(0,10),
-    end:gbcEnd.toISOString().slice(0,10),
+    start:localDateStr(gbcStart),
+    end:localDateStr(gbcEnd),
     color:'#3B5BF6', bgColor:'#EEF1FF', textColor:'#3730A3',
     gantt:false
   });
@@ -691,23 +699,23 @@ function applyReverseSchedule(){
     const u2=Math.min(f+(b+1)*PROC.PARALLEL_UNITS-1,t2);
     phases.push({
       type:'nextm', label:`NEXT-M ${u1}${u1!==u2?'~'+u2:''}호기`,
-      start:nextmBatchStart[b].toISOString().slice(0,10),
-      end:nextmBatchEnd[b].toISOString().slice(0,10),
+      start:localDateStr(nextmBatchStart[b]),
+      end:localDateStr(nextmBatchEnd[b]),
       color:cmap[_reverseRobot], bgColor:cmap[_reverseRobot]+'18', textColor:cmap[_reverseRobot]
     });
   }
   // EOL·GTC — 상세 모달에는 표시하되 월간 달력 간트 바에는 미표시
   phases.push({
     type:'eol', label:'EOL (SM·SW 검사)',
-    start:lastEolStart.toISOString().slice(0,10),
-    end:lastEolEnd.toISOString().slice(0,10),
+    start:localDateStr(lastEolStart),
+    end:localDateStr(lastEolEnd),
     color:'#F59E0B', bgColor:'#FEF3C7', textColor:'var(--am-dark)',
     gantt:false  // 월간 달력에 표시 안 함
   });
   phases.push({
     type:'gtc', label:'GTC 운영평가·납품',
-    start:lastEolEnd.toISOString().slice(0,10),
-    end:lastEolEnd.toISOString().slice(0,10),
+    start:localDateStr(lastEolEnd),
+    end:localDateStr(lastEolEnd),
     color:'#10B981', bgColor:'#D1FAE5', textColor:'var(--gn-dark)',
     gantt:false  // 월간 달력에 표시 안 함
   });
@@ -757,9 +765,9 @@ function openScheduleDetail(id){
   const cmap={PARKIE:'#0EA5E9',CARRIE:'#7C3AED',GOALIE:'#EC4899'};
   const phaseHtml=sc.phases.map(ph=>`
     <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--bd)">
-      <div style="width:8px;height:8px;border-radius:50%;background:${ph.color};flex-shrink:0"></div>
-      <div style="flex:1;font-size:12px;font-weight:600;color:${ph.textColor}">${ph.label}</div>
-      <div style="font-size:11px;color:var(--t2);font-family:var(--fm)">${ph.start}${ph.start!==ph.end?' ~ '+ph.end:''}</div>
+      <div style="width:8px;height:8px;border-radius:50%;background:${escHtml(ph.color)};flex-shrink:0"></div>
+      <div style="flex:1;font-size:12px;font-weight:600;color:${escHtml(ph.textColor)}">${escHtml(ph.label)}</div>
+      <div style="font-size:11px;color:var(--t2);font-family:var(--fm)">${escHtml(ph.start)}${ph.start!==ph.end?' ~ '+escHtml(ph.end):''}</div>
     </div>`).join('');
   document.getElementById('sd-phases').innerHTML=phaseHtml;
   openMo('mo-schedule-detail');
@@ -784,6 +792,8 @@ function deleteSchedule(){
   logActivity(CU.id,CU.name,'LABOR',`확정 일정 삭제: ${sc.robot} ${sc.unitFrom}~${sc.unitTo}호기 납기 ${sc.deadline}`);
   closeMo('mo-schedule-detail');
   rendTechMonthGrid();
+  rendAsmCalendar();   // 공수산정 달력·대시보드 달력도 동기화
+  rendCalendar();
   toast('🗑️','확정 일정이 삭제되었습니다','ok');
 }
 
@@ -855,29 +865,31 @@ function submitTechBook(){
   const unit=parseInt(document.getElementById('tb-unit').value)||null;
   const note=document.getElementById('tb-note').value.trim();
 
-  // 시작/종료: 드래그 방식이면 슬롯 기반, 모달 직접 입력이면 h 기반
-  let sSlot, eSlot;
-  if(_pendingBooking){
-    // 드래그로 생성된 예약: 슬롯값 그대로 사용
-    sSlot=_pendingBooking.startSlot; eSlot=_pendingBooking.endSlot;
-  } else {
-    // 모달 직접 입력 (시간 select → 슬롯 변환, WORK_START_H 기준)
-    const startH=parseInt(document.getElementById('tb-start').value);
-    const endH=parseInt(document.getElementById('tb-end').value);
-    sSlot=(startH-WORK_START_H)*2; eSlot=(endH-WORK_START_H)*2;
-  }
+  // 시작/종료: 모달의 시간 select 값(슬롯 번호)을 그대로 사용 → 모달에서 시간을 바꾸면 반영됨
+  const sSlot=parseInt(document.getElementById('tb-start').value);
+  const eSlot=parseInt(document.getElementById('tb-end').value);
+  const slotOk=v=>Number.isInteger(v)&&v>=0&&v<=WORK_SLOTS;
 
-  if(!techId||!date||eSlot<=sSlot){toast('⚠️','작업 인원, 날짜, 시간을 확인하세요','wa');return;}
+  if(!techId||!date||!slotOk(sSlot)||!slotOk(eSlot)||eSlot<=sSlot){toast('⚠️','작업 인원, 날짜, 시간을 확인하세요','wa');return;}
   if(!type){toast('⚠️','작업 유형을 선택하세요','wa');return;}
 
-  // 날짜 목록 (범위 선택 시 일괄)
-  const dates=[];
+  // 날짜 목록 (범위 선택 시 평일만 일괄)
+  let dates=[];
+  let weekendSkipped=0;
   if(_pendingBooking?.dateRange){
-    let cur=new Date(_pendingBooking.dateRange.start);
-    const endD=new Date(_pendingBooking.dateRange.end);
-    while(cur<=endD){dates.push(cur.toISOString().slice(0,10));cur.setDate(cur.getDate()+1);}
+    const rs=parseLocalDate(_pendingBooking.dateRange.start), re=parseLocalDate(_pendingBooking.dateRange.end);
+    dates=weekdayDatesInRange(_pendingBooking.dateRange.start,_pendingBooking.dateRange.end);
+    if(rs&&re)weekendSkipped=Math.max(0,Math.round((re-rs)/86400000)+1-dates.length);
+    if(!dates.length){toast('⚠️','선택한 범위에 평일이 없습니다','wa');return;}
   } else {
     dates.push(date);
+  }
+
+  // 같은 작업 인원의 겹치는 예약 차단
+  const conflicts=dates.filter(dk=>techBookings.some(b=>b.techId===techId&&b.date===dk&&sSlot<b.endSlot&&eSlot>b.startSlot));
+  if(conflicts.length){
+    toast('❌',`이미 예약된 시간과 겹칩니다: ${conflicts.slice(0,3).join(', ')}${conflicts.length>3?` 외 ${conflicts.length-3}일`:''}`,'err');
+    return;
   }
 
   dates.forEach(dk=>{
@@ -898,7 +910,7 @@ function submitTechBook(){
 
   _pendingBooking=null; // 임시 데이터 초기화
   closeMo('mo-tech-book'); rendTechPage();
-  toast('✅',dates.length>1?`${tname} ${dates.length}일 일괄 예약 완료`:'작업 예약이 등록되었습니다','ok');
+  toast('✅',dates.length>1?`${tname} ${dates.length}일 일괄 예약 완료${weekendSkipped?` (주말 ${weekendSkipped}일 제외)`:''}`:'작업 예약이 등록되었습니다','ok');
 }
 
 function openTechBookingDetail(id){
@@ -973,17 +985,18 @@ function rendDelayTable(){
     ?[...delayLogs].sort((a,b)=>b.ts-a.ts).map(d=>{
       const tech=technicians.find(t=>t.id===d.techId);
       return`<tr>
-        <td class="t-m t-sm">${d.date}</td>
-        <td class="t-sm">${tech?tech.name:"-"}</td>
-        <td><span style="background:var(--aml);color:var(--am-dark);border-radius:4px;padding:2px 7px;font-size:10px;font-family:var(--fm)">${d.type}</span></td>
-        <td style="font-weight:500;font-size:12px">${d.title}</td>
-        <td class="t-mu t-sm">${d.body||"-"}</td>
-        <td class="t-m t-sm" style="color:var(--re);font-weight:600">-${d.hours}h</td>
+        <td class="t-m t-sm">${escHtml(d.date)}</td>
+        <td class="t-sm">${tech?escHtml(tech.name):"-"}</td>
+        <td><span style="background:var(--aml);color:var(--am-dark);border-radius:4px;padding:2px 7px;font-size:10px;font-family:var(--fm)">${escHtml(d.type)}</span></td>
+        <td style="font-weight:500;font-size:12px">${escHtml(d.title)}</td>
+        <td class="t-mu t-sm">${escHtml(d.body||"-")}</td>
+        <td class="t-m t-sm" style="color:var(--re);font-weight:600">-${escHtml(d.hours)}h</td>
       </tr>`;
     }).join("")
     :"<tr><td colspan=\"6\" style=\"text-align:center;padding:14px;color:var(--t2);font-size:12px\">지연 사유 없음</td></tr>";
 }
 
 function populateTechSels(){
-  ['tb-tech','dl-tech'].forEach(id=>{const sel=document.getElementById(id);if(!sel)return;sel.innerHTML='<option value="">작업 인원 선택</option>'+technicians.map(t=>`<option value="${t.id}">${t.name}</option>`).join('');});
+  // 기존 선택값 유지 (드래그 예약 시 endDrag2 가 고른 작업 인원이 openMo 에서 초기화되던 문제 방지)
+  ['tb-tech','dl-tech'].forEach(id=>{const sel=document.getElementById(id);if(!sel)return;const cur=sel.value;sel.innerHTML='<option value="">작업 인원 선택</option>'+technicians.map(t=>`<option value="${escHtml(t.id)}">${escHtml(t.name)}</option>`).join('');if(cur&&technicians.some(t=>t.id===cur))sel.value=cur;});
 }

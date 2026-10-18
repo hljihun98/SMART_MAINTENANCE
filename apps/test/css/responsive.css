@@ -655,11 +655,6 @@ button,input,select,textarea{
     grid-template-columns:1fr;
   }
 
-  #tech-book-task,
-  #tech-book-memo{
-    width:100% !important;
-  }
-
   #lb-unit-tables{
     overflow-x:auto !important;
   }

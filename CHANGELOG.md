@@ -17,7 +17,7 @@
 
 GitHub의 **Tags** 메뉴나 `git checkout v1.0.0`(또는 `git checkout v26.08.06`)으로 당시 상태를 그대로 열어볼 수 있습니다.
 
-## v2.0.1 · (날짜 태그는 배포일에 부여) — 작업 중 (`rename/robostock` 브랜치)
+## v2.0.1 · v26.10.19.1
 
 ### 변경
 - ROBOSTOCK 앱 폴더를 `apps/test/` → **`apps/robostock/`**으로 변경 (다른 앱과 같은 이름 규칙)

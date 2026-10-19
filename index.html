@@ -2,9 +2,8 @@
  * SMART Maintenance Platform — 메인 포털
  *
  * 주요 기능
- * - 앱 목록 카드 그리드: 등록된 점검 도구를 카드 형식으로 나열하며, 클릭 시 해당 앱으로 이동합니다.
+ * - 앱 목록 카드 그리드: 등록된 현장 유지보수 도구(측정·계산·점검 보고)를 카드 형식으로 나열하며, 클릭 시 해당 앱으로 이동합니다.
  * - 앱 상태 표시: 사용 가능(초록) / 개발 중(회색) 배지로 각 앱의 배포 상태를 표시합니다.
- * - 실시간 날짜·시간: 우측 상단에 현재 시각을 30초마다 갱신합니다.
  * - 반응형 레이아웃: 680px 이하 모바일 화면에서는 1열 그리드로 전환됩니다.
  *
  * 만든 사람
@@ -91,23 +90,29 @@
     border-radius:999px;
     padding:3px 9px;
   }
-  /* 우측 끝 날짜·시간 표시 */
-  .appbar .when{
-    margin-left:auto;
-    font-family:var(--latin);
-    font-size:13px;
-    color:var(--dim);
-    letter-spacing:.01em;
-    white-space:nowrap;
-  }
 
   /* ── 메인 컨텐츠 래퍼 ── */
   .wrap{max-width:1040px;margin:0 auto;padding:30px 28px 64px;}
 
   /* 페이지 헤딩: 제목 + 부제목 */
   .pagehead{margin-bottom:6px;}
-  .pagehead h1{font-size:22px;font-weight:700;letter-spacing:-.015em;}
-  .pagehead p{font-size:13.5px;color:var(--muted);margin-top:5px;}
+  /* 제목 위 머리글: 이 페이지가 무엇인지 한 줄로 */
+  .pagehead .eyebrow{
+    display:inline-flex;align-items:center;gap:7px;
+    font-size:12px;font-weight:600;color:var(--blue);letter-spacing:.01em;margin-bottom:8px;
+  }
+  .pagehead .eyebrow::before{content:"";width:16px;height:2px;border-radius:2px;background:currentColor;}
+  .pagehead h1{font-size:24px;font-weight:700;letter-spacing:-.02em;line-height:1.35;word-break:keep-all;}
+  .pagehead h1 .nb{display:inline-block;}  /* 구절 단위로 묶어 좁은 화면에서는 쉼표 뒤에서만 줄바꿈 */
+  .pagehead p{font-size:14px;color:var(--ink-2);margin-top:8px;max-width:680px;line-height:1.6;word-break:keep-all;}  /* keep-all: 한글 단어 중간에서 줄바꿈하지 않음 */
+  /* 특징 칩: 현장에서 알아 둘 사용 조건 */
+  .facts{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;list-style:none;}
+  .facts li{
+    display:inline-flex;align-items:center;gap:6px;
+    font-size:12px;font-weight:500;color:var(--muted);
+    background:var(--card);border:1px solid var(--border);border-radius:999px;padding:5px 11px 5px 9px;
+  }
+  .facts svg{width:14px;height:14px;stroke:var(--blue);stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round;flex:none;}
 
   /* 앱 목록 헤더: "앱 목록" 레이블 + 앱 개수 뱃지 */
   .list-head{
@@ -169,6 +174,10 @@
     background:var(--accent-bg,#EEF3FF);
     border-radius:999px;padding:5px 11px;
   }
+  /* 태그 글자는 강조색을 22% 어둡게 — 연한 배경 위 작은 글씨의 대비를 4.5:1 이상으로 (색 띠·아이콘은 강조색 그대로) */
+  @supports (color:color-mix(in srgb,red,blue)){
+    .tag{color:color-mix(in srgb,var(--accent,var(--blue)) 78%,#000);}
+  }
 
   /* 카드 본문: 앱 이름 + 설명 */
   .card-body .name{font-size:16.5px;font-weight:700;letter-spacing:-.01em;margin-bottom:5px;}
@@ -206,7 +215,7 @@
   /* 모바일(680px 이하): 1열 그리드로 전환 */
   @media (max-width:680px){
     .appbar-inner{padding:14px 18px;flex-wrap:wrap;}
-    .appbar .when{width:100%;margin:6px 0 0;order:3;}
+    .appbar .sep{display:none;}   /* 줄바꿈되면 로고 옆에 세로선만 남으므로 숨김 */
     .wrap{padding:24px 18px 52px;}
     .grid{grid-template-columns:1fr;}
   }
@@ -287,15 +296,19 @@
         <img src="./logo.png" alt="HL Robotics" class="logo-mark">
       </a>
       <span class="sep"></span>
-      <span class="ctx">SMART Maintenance Platform <span class="vpill" id="ver-pill">v26.10.19.1</span></span>
-      <span class="when" id="when"></span>
+      <span class="ctx">SMART Maintenance Platform <span class="vpill" id="ver-pill">v26.10.20</span></span>
     </div>
   </div>
 
   <main class="wrap">
     <div class="pagehead">
-      <h1>점검 도구</h1>
-      <p>설비 상태를 점검할 도구를 선택하세요.</p>
+      <div class="eyebrow">현장 유지보수 도구</div>
+      <h1><span class="nb">스마트폰 하나로,</span> <span class="nb">감 대신 숫자와 기록으로</span></h1>
+      <p>벨트 장력은 소리로 측정하고, 볼트 체결토크는 규격에 맞춰 계산하고, 센서 점검 결과는 사진과 함께 PDF 보고서로 남깁니다.</p>
+      <ul class="facts">
+        <li><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2.5"/><path d="M11 18h2"/></svg>앱 설치 없이 바로 실행</li>
+        <li><svg viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M9 14h6"/><path d="M9 17h4"/></svg>PDF·CSV 보고서</li>
+      </ul>
     </div>
 
     <div class="list-head">
@@ -319,26 +332,29 @@
 <script>
   /* ── 플랫폼 버전 ── 배포(main Merge) 때 이 한 곳만 고치면 상단 배지·푸터가 함께 바뀐다.
      화면에는 날짜 버전만 표시한다. num은 git 번호 태그와 맞추기 위한 기록용.
-     num: 번호 버전(v주.부.수), date: 배포일(YY.MM.DD) — git 태그 v2.0.1 / v26.10.19.1 과 맞춘다 */
-  var VERSION = { num:'v2.0.1', date:'26.10.19.1' };
+     num: 번호 버전(v주.부.수), date: 배포일(YY.MM.DD) — git 태그 v2.0.2 / v26.10.20 과 맞춘다 */
+  var VERSION = { num:'v2.0.2', date:'26.10.20' };
 
   /* ── 등록된 앱 목록 ──
+     강조색 규칙: Tailwind 600 단계에서 색상환 약 30° 간격으로 골라 카드끼리 구분되게 한다
+       (파랑 #2563EB · 시안 #0891B2 · 녹색 #059669 · 보라 #7C3AED · 자주 #C026D3).
+       accentBg는 강조색 10% + 흰색 90%. 새 앱은 남은 간격(예: 인디고·로즈)에서 고른다.
      각 항목: href(경로), accent(강조색), icon(SVG 패스), tag(카테고리), name(앱 이름),
               desc(설명), ready(사용 가능 여부), status('test'면 열 수 있지만 '테스트 중'으로 표시) */
   var APPS = [
     { href:'./apps/sensor-report/', accent:'#2563EB', accentBg:'#EAF1FE',
       icon:'<path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M5 8V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2"/><path d="M8 13l2.5 3 2-2.5L16 18"/>',
       tag:'라이다 · 카메라', name:'센서 보고서', desc:'PARKIE 로봇의 라이다·카메라 센서 점검 결과와 사진을 정리해 PDF 보고서를 생성합니다.', ready:true },
-    { href:'./apps/belt-tension/', accent:'#0EA5A4', accentBg:'#E3F6F5',
+    { href:'./apps/belt-tension/', accent:'#0891B2', accentBg:'#E6F4F7',
       icon:'<circle cx="6" cy="12" r="3"/><circle cx="18" cy="12" r="3"/><path d="M6 9h12"/><path d="M6 15h12"/>',
       tag:'장력 N', name:'벨트 장력계', desc:'컨베이어 벨트의 장력을 측정하고 기준값과 비교합니다.', ready:true },
-    { href:'./apps/belt-tension-2.0/', accent:'#059669', accentBg:'#ECFDF5',
+    { href:'./apps/belt-tension-2.0/', accent:'#059669', accentBg:'#E6F5F0',
       icon:'<path d="M4 10v4"/><path d="M8 7v10"/><path d="M12 4v16"/><path d="M16 8v8"/><path d="M20 11v2"/>',
       tag:'장력 N · 음파', name:'벨트 장력계 2.0', desc:'음파 FFT 분석으로 벨트 장력을 측정합니다. 노이즈 저감·목표 잠금·CSV 내보내기를 지원합니다.', ready:true },
-    { href:'./apps/torque-tak/', accent:'#1B57E8', accentBg:'#EAF0FE',
+    { href:'./apps/torque-tak/', accent:'#7C3AED', accentBg:'#F2EBFD',
       icon:'<path d="M21.4 12 16.7 20.1 7.3 20.1 2.6 12 7.3 3.9 16.7 3.9Z"/><circle cx="12" cy="12" r="3.7"/>',
       tag:'체결토크 N·m', name:'Torque Tak!', desc:'볼트 사양과 체결 조건으로 권장 체결토크를 계산하고, 나사산 뽑힘·좌면 압괴 등 체결부 성립 여부를 검토합니다.', ready:true },
-    { href:'./apps/robostock/', accent:'#7C3AED', accentBg:'#F1ECFE',
+    { href:'./apps/robostock/', accent:'#C026D3', accentBg:'#F9E9FB',
       icon:'<path d="M9 3h6"/><path d="M10 3v6l-4.5 8a2 2 0 0 0 1.8 3h9.4a2 2 0 0 0 1.8-3L14 9V3"/><path d="M7 14h10"/>',
       tag:'재고 관리', name:'ROBOSTOCK', desc:'로봇 부품 재고·BOM·입출고·공수·작업 일정을 통합 관리합니다.<br>(ID: R00000 PW: test12!@)', ready:true, status:'test' }
   ];
@@ -377,15 +393,6 @@
     document.getElementById('app-count').textContent = '앱 '+APPS.length+'개';
     document.getElementById('ver-pill').textContent = 'v'+VERSION.date;
     document.getElementById('foot-ver').textContent = 'v'+VERSION.date+' · '+APPS.length+' apps';
-
-    /* 우측 상단 날짜·시간 실시간 표시 (30초마다 갱신) */
-    var el = document.getElementById('when');
-    function p(n){return String(n).padStart(2,'0');}  /* 한 자리 숫자를 두 자리로 패딩 */
-    function tick(){
-      var d = new Date();
-      el.textContent = d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
-    }
-    tick(); setInterval(tick, 30000);
   })();
 
   /* ── 데이터 관리 ──

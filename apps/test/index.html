@@ -1,0 +1,31 @@
+<!--
+ * ROBOSTOCK 옛 주소(apps/test/) 안내 페이지
+ * 앱 폴더가 apps/robostock/ 으로 바뀌었다. 현장 기기의 북마크·홈 화면 바로가기가 깨지지 않도록
+ * 옛 주소로 들어오면 새 주소로 바로 넘긴다. 저장 데이터는 같은 출처(origin)라 그대로 이어진다.
+ -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROBOSTOCK — 주소가 바뀌었습니다</title>
+<!-- 파비콘: HL 그룹 아이콘 (hlmando.com 제공 파일과 동일) -->
+<link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon/favicon-16x16.png">
+<link rel="icon" type="image/png" sizes="96x96" href="../../assets/favicon/favicon-96x96.png">
+<link rel="icon" type="image/png" sizes="192x192" href="../../assets/favicon/android-icon-192x192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="../../assets/favicon/apple-icon-180x180.png">
+<meta http-equiv="refresh" content="0; url=../robostock/">
+<link rel="canonical" href="../robostock/">
+<script>location.replace('../robostock/' + location.search + location.hash);</script>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+       font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#F4F6F8;color:#1B1F24;}
+  p{font-size:15px;text-align:center;line-height:1.6;padding:0 16px;}
+  a{color:#7C3AED;font-weight:600;}
+</style>
+</head>
+<body>
+  <p>ROBOSTOCK 주소가 바뀌었습니다.<br><a href="../robostock/">새 주소로 이동</a></p>
+</body>
+</html>

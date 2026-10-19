@@ -7,20 +7,27 @@
 <meta name="theme-color" content="#F4F6F8">
 <meta name="description" content="볼트 체결 조건에 따른 권장 토크를 빠르게 계산하는 모바일 웹 도구">
 <title>Torque Tak! · 볼트 체결토크</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M21.4 12 16.7 20.1 7.3 20.1 2.6 12 7.3 3.9 16.7 3.9Z' fill='none' stroke='%230B1220' stroke-width='1.9' stroke-linejoin='round'/><circle cx='12' cy='12' r='3.7' fill='%231B57E8'/></svg>">
+<!-- 파비콘: HL 그룹 아이콘 (hlmando.com 제공 파일과 동일) -->
+<link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon/favicon-16x16.png">
+<link rel="icon" type="image/png" sizes="96x96" href="../../assets/favicon/favicon-96x96.png">
+<link rel="icon" type="image/png" sizes="192x192" href="../../assets/favicon/android-icon-192x192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="../../assets/favicon/apple-icon-180x180.png">
 <!-- 계산값이 바뀌는 수정을 배포할 때는 ?v= 를 반드시 올린다. 빌드가 없어 파일명이 고정이라
      기존 방문자는 캐시의 옛 app.js를 그대로 받는데, 이 도구에서 그건 "어제와 다른 숫자"가
      아니라 "어제 그대로인 숫자"로 나타나서 알아채지 못한다. css·js를 같은 토큰으로 묶는다. -->
-<link rel="stylesheet" href="assets/css/styles.css?v=2026-10-18">
+<link rel="stylesheet" href="assets/css/styles.css?v=2026-10-19">
 </head>
 <body>
 <div class="bar" id="bar">
   <div class="bar-in">
+    <a class="brand-home" href="../../index.html" title="메인 포털로 이동" aria-label="Torque Tak! — 메인 포털로 이동">
     <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
       <path d="M21.4 12 16.7 20.1 7.3 20.1 2.6 12 7.3 3.9 16.7 3.9Z" fill="none" stroke="#0B1220" stroke-width="1.9" stroke-linejoin="round"/>
       <circle cx="12" cy="12" r="3.7" fill="#1B57E8"/>
     </svg>
     <h1>Torque Tak<i>!</i></h1><span class="sub">토크탁!</span>
+    </a>
     <a class="home-btn" href="../../index.html" title="메인 포털로 이동"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>메인으로</a>
   </div>
 </div>
@@ -263,6 +270,6 @@
   <div class="sheet-b" id="sheetBody"></div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="assets/js/app.js?v=2026-10-18"></script>
+<script src="assets/js/app.js?v=2026-10-19"></script>
 </body>
 </html>

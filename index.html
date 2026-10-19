@@ -2,7 +2,7 @@
  * SMART Maintenance Platform — 메인 포털
  *
  * 주요 기능
- * - 앱 목록 카드 그리드: 등록된 현장 유지보수 도구(측정·계산·점검 보고)를 카드 형식으로 나열하며, 클릭 시 해당 앱으로 이동합니다.
+ * - 앱 목록 카드 그리드: 등록된 로봇 엔지니어링 도구(측정·계산·점검 보고)를 카드 형식으로 나열하며, 클릭 시 해당 앱으로 이동합니다.
  * - 앱 상태 표시: 사용 가능(초록) / 개발 중(회색) 배지로 각 앱의 배포 상태를 표시합니다.
  * - 반응형 레이아웃: 680px 이하 모바일 화면에서는 1열 그리드로 전환됩니다.
  *
@@ -296,13 +296,13 @@
         <img src="./logo.png" alt="HL Robotics" class="logo-mark">
       </a>
       <span class="sep"></span>
-      <span class="ctx">SMART Maintenance Platform <span class="vpill" id="ver-pill">v26.10.20</span></span>
+      <span class="ctx">SMART Maintenance Platform <span class="vpill" id="ver-pill">v26.10.20.1</span></span>
     </div>
   </div>
 
   <main class="wrap">
     <div class="pagehead">
-      <div class="eyebrow">현장 유지보수 도구</div>
+      <div class="eyebrow">로봇 엔지니어링 도구</div>
       <h1><span class="nb">스마트폰 하나로,</span> <span class="nb">감 대신 숫자와 기록으로</span></h1>
       <p>벨트 장력은 소리로 측정하고, 볼트 체결토크는 규격에 맞춰 계산하고, 센서 점검 결과는 사진과 함께 PDF 보고서로 남깁니다.</p>
       <ul class="facts">
@@ -332,8 +332,8 @@
 <script>
   /* ── 플랫폼 버전 ── 배포(main Merge) 때 이 한 곳만 고치면 상단 배지·푸터가 함께 바뀐다.
      화면에는 날짜 버전만 표시한다. num은 git 번호 태그와 맞추기 위한 기록용.
-     num: 번호 버전(v주.부.수), date: 배포일(YY.MM.DD) — git 태그 v2.0.2 / v26.10.20 과 맞춘다 */
-  var VERSION = { num:'v2.0.2', date:'26.10.20' };
+     num: 번호 버전(v주.부.수), date: 배포일(YY.MM.DD) — git 태그 v2.0.3 / v26.10.20.1 과 맞춘다 */
+  var VERSION = { num:'v2.0.3', date:'26.10.20.1' };
 
   /* ── 등록된 앱 목록 ──
      강조색 규칙: Tailwind 600 단계에서 색상환 약 30° 간격으로 골라 카드끼리 구분되게 한다

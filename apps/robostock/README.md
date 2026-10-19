@@ -37,7 +37,8 @@ python3 -m http.server 5500
 npx serve .
 ```
 
-브라우저에서 `http://localhost:5500/apps/test/` 접속.
+브라우저에서 `http://localhost:5500/apps/robostock/` 접속.
+(옛 주소 `/apps/test/`는 이 주소로 자동 이동합니다.)
 
 ### 로그인 계정 (데모용)
 
@@ -55,7 +56,7 @@ npx serve .
 ## 폴더 구조
 
 ```
-apps/test/
+apps/robostock/
 ├── index.html              # 진입점. HTML 마크업 + CSS/JS 링크
 ├── README.md
 ├── VERSIONING.md           # 버전 정책(SemVer) 문서

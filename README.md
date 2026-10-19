@@ -8,7 +8,7 @@
 |---|---|---|---|
 | 센서 보고서 | `apps/sensor-report/` | PARKIE 로봇 라이다·카메라 센서 점검 및 PDF 보고서 생성 | 사용 가능 |
 | 벨트 장력계 | `apps/belt-tension/` | 마이크 음파 분석으로 컨베이어 벨트 장력(N) 측정 | 사용 가능 |
-| ROBOSTOCK | `apps/test/` | 로봇 부품 재고·BOM·공수산정·작업인원 일정 통합 관리 | 테스트 중 |
+| ROBOSTOCK | `apps/robostock/` | 로봇 부품 재고·BOM·공수산정·작업인원 일정 통합 관리 | 테스트 중 |
 | 벨트 장력계 2.0 | `apps/belt-tension-2.0/` | 음파 FFT 분석으로 벨트 장력(N) 측정 · 노이즈 저감 · CSV/PDF 보고서 | 사용 가능 |
 | Torque Tak! | `apps/torque-tak/` | 볼트 권장 체결토크 계산 · 체결부 성립 검토(VDI 2230) | 사용 가능 |
 
@@ -27,6 +27,7 @@
 |---|---|
 | `index.html` | 앱 목록 포털 (APPS 배열 하나만 편집하면 카드·카운트·푸터 자동 갱신) + 데이터 관리 |
 | `logo.png` | HL Robotics 공식 로고 (모든 앱이 `../../logo.png`로 참조) |
+| `assets/favicon/` | 파비콘 — HL 그룹 아이콘(hlmando.com과 같은 파일). 새 앱을 추가하면 `<title>` 아래에 같은 `<link rel="icon">` 묶음을 넣는다 |
 | `assets/vendor/` | 외부 라이브러리 사본 — CDN이 막히거나 끊겨도 동작하도록 저장소에 포함. 버전을 올릴 때는 파일명의 버전도 함께 바꾼다 |
 | `assets/js/utils.js`, `assets/css/common.css` | 공통 유틸·스타일 (현재 벨트 장력계 2.0이 사용) |
 
@@ -55,6 +56,7 @@
 
 | 번호 태그 | 날짜 태그 | 내용 |
 |---|---|---|
+| `v2.0.1` | `v26.10.19.1` | ROBOSTOCK 주소 변경(`apps/robostock/`) · 파비콘 · 로고 클릭 시 포털 이동 |
 | `v2.0.0` | `v26.10.19` | 대규모 서비스 업데이트 · Torque Tak! 추가 · 전체 점검 결과 반영 |
 | `v1.0.0` | `v26.08.06` | 메이저 업데이트 이전 안정 버전 |
 

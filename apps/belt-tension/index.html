@@ -22,6 +22,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#F4F6F9">
 <title>음파식 벨트 텐션 측정기</title>
+<!-- 파비콘: HL 그룹 아이콘 (hlmando.com 제공 파일과 동일) -->
+<link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon/favicon-16x16.png">
+<link rel="icon" type="image/png" sizes="96x96" href="../../assets/favicon/favicon-96x96.png">
+<link rel="icon" type="image/png" sizes="192x192" href="../../assets/favicon/android-icon-192x192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="../../assets/favicon/apple-icon-180x180.png">
 
 <!-- Pretendard(한글/UI) + JetBrains Mono(수치/계측 표기) -->
 
@@ -417,6 +423,7 @@ body{background:#F4F6F9 !important;background-image:none !important;font-size:14
 .topbar{background:#fff;border:1px solid #E5E8ED;border-radius:10px;padding:0 14px;height:54px;margin-top:14px;gap:12px;}
 .tb-left{display:flex;align-items:center;gap:8px;flex:1;min-width:0;overflow:hidden;}
 .tb-logo{height:22px;width:auto;display:block;object-fit:contain;flex:none;}
+.tb-home{display:flex;align-items:center;flex:none;border-radius:4px}.tb-home:focus-visible{outline:2px solid #2563EB;outline-offset:3px}
 .tb-name{font-size:11px;color:#9CA3AF;border-left:1px solid #E5E8ED;padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
 .tb-version{flex:none;font-size:11px;color:#6B7280;background:#F4F6F9;border:1px solid #E5E8ED;border-radius:999px;padding:2px 8px;}
 .home-btn{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#6B7280;text-decoration:none;background:#F4F6F9;border:1px solid #E5E8ED;border-radius:999px;padding:4px 10px;white-space:nowrap;transition:background .15s,color .15s;flex:none;}
@@ -516,7 +523,7 @@ tbody tr:nth-child(even){background:#FAFBFC;}
   <!-- ===== TOP BAR ===== -->
   <div class="topbar">
     <div class="tb-left">
-      <img class="tb-logo" id="tb-logo" src="../../logo.png" alt="HL Robotics">
+      <a class="tb-home" href="../../index.html" title="메인 포털로 이동" aria-label="HL Robotics — 메인 포털로 이동"><img class="tb-logo" id="tb-logo" src="../../logo.png" alt="HL Robotics"></a>
       <span class="tb-name">음파식 벨트 텐션 측정기</span>
       <span class="tb-version">v1.0.0</span>
     </div>

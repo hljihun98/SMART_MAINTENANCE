@@ -18,6 +18,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PARKIE 센서 점검</title>
+<!-- 파비콘: HL 그룹 아이콘 (hlmando.com 제공 파일과 동일) -->
+<link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../assets/favicon/favicon-16x16.png">
+<link rel="icon" type="image/png" sizes="96x96" href="../../assets/favicon/favicon-96x96.png">
+<link rel="icon" type="image/png" sizes="192x192" href="../../assets/favicon/android-icon-192x192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="../../assets/favicon/apple-icon-180x180.png">
 <style>
 /* ===============================
    전체 화면 스타일 영역
@@ -29,6 +35,7 @@ body{font-family:'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo','Segoe UI'
 .app{max-width:1200px;margin:0 auto;padding-bottom:3rem}
 .topbar{background:#fff;border-bottom:1px solid #E5E8ED;padding:0 20px;height:54px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:30;gap:12px}
 .tb-logo{height:22px;width:auto;display:block;object-fit:contain}
+.tb-home{display:flex;align-items:center;flex:none;border-radius:4px}.tb-home:focus-visible{outline:2px solid #2563EB;outline-offset:3px}
 .tb-sub{font-size:11px;color:#9CA3AF;border-left:1px solid #E5E8ED;padding-left:10px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
 .tb-clock{font-size:11px;color:#9CA3AF;font-variant-numeric:tabular-nums;white-space:nowrap}
 .home-btn{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#6B7280;text-decoration:none;background:#F4F6F9;border:1px solid #E5E8ED;border-radius:999px;padding:4px 10px;white-space:nowrap;transition:background .15s,color .15s}
@@ -367,7 +374,7 @@ input.n-inp:focus{border-color:#0099CC}
   <!-- 상단 바: 로고, 제목, 현재 시간을 표시합니다. -->
   <div class="topbar">
     <div style="display:flex;align-items:center;gap:10px;overflow:hidden">
-      <img class="tb-logo" id="tb-logo" src="../../logo.png" alt="HL Robotics">
+      <a class="tb-home" href="../../index.html" title="메인 포털로 이동" aria-label="HL Robotics — 메인 포털로 이동"><img class="tb-logo" id="tb-logo" src="../../logo.png" alt="HL Robotics"></a>
       <div class="tb-sub">PARKIE 센서 점검</div>
     </div>
     <div style="display:flex;align-items:center;gap:10px">

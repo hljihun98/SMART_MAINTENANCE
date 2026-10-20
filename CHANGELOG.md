@@ -17,7 +17,7 @@
 
 GitHub의 **Tags** 메뉴나 `git checkout v1.0.0`(또는 `git checkout v26.08.06`)으로 당시 상태를 그대로 열어볼 수 있습니다.
 
-## v2.0.7 · (날짜 태그는 배포일에 부여) — 작업 중 (`portal/app-groups` 브랜치)
+## v2.0.7 · v26.10.21
 
 ### 변경
 - 전체 코드 최적화·오류 점검 결과 중 남은 항목(낮음 등급 오류·최적화)을 [docs/BACKLOG.md](docs/BACKLOG.md)에 기록, CLAUDE.md에 안내 추가

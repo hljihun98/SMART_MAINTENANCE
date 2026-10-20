@@ -86,9 +86,9 @@ function rendLaborModules(){
       <div class="lt-edit-panel" id="lep-${r}-${mi}-${ti}">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <input class="lt-ei" placeholder="작업명" value="${escHtml(t.name)}" oninput="laborModules['${r}'][${mi}].tasks[${ti}].name=this.value;document.getElementById('ltr-${r}-${mi}-${ti}').querySelector('.lt-name').textContent=this.value;rendLaborSummary()">
-          <div style="display:flex;gap:6px"><input class="lt-ei lt-ei-sm" type="number" placeholder="h" value="${escHtml(t.hours)}" step="0.5" min="0.5" oninput="laborModules['${r}'][${mi}].tasks[${ti}].hours=parseFloat(this.value)||0;recalcLabor()"><input class="lt-ei lt-ei-sm" type="number" placeholder="인원" value="${escHtml(t.workers)}" min="1" oninput="laborModules['${r}'][${mi}].tasks[${ti}].workers=parseInt(this.value)||1;recalcLabor()"></div>
+          <div style="display:flex;gap:6px"><input class="lt-ei lt-ei-sm" type="number" placeholder="h" value="${escHtml(t.hours)}" step="0.5" min="0.5" oninput="updLaborTask('${r}',${mi},${ti},'hours',this)"><input class="lt-ei lt-ei-sm" type="number" placeholder="인원" value="${escHtml(t.workers)}" min="1" oninput="updLaborTask('${r}',${mi},${ti},'workers',this)"></div>
         </div>
-        <textarea class="lt-ei" placeholder="메모 (작업 상세, 주의사항 등)" style="min-height:52px;resize:vertical" oninput="laborModules['${r}'][${mi}].tasks[${ti}].note=this.value;rendLaborModules()">${escHtml(t.note||'')}</textarea>
+        <textarea class="lt-ei" placeholder="메모 (작업 상세, 주의사항 등)" style="min-height:52px;resize:vertical" oninput="updLaborTask('${r}',${mi},${ti},'note',this)">${escHtml(t.note||'')}</textarea>
         <div style="text-align:right"><button class="btn b-se b-sm" onclick="toggleLaborEdit('${r}',${mi},${ti})">닫기</button></div>
       </div>`).join('');
     const modTotal=mod.tasks.reduce((a,t)=>a+t.hours,0);
@@ -103,14 +103,42 @@ function rendLaborModules(){
           <span class="t-sm t-mu" style="font-weight:400">(${mod.tasks.length}개 작업)</span>
         </div>
         <div class="bg">
-          <span class="lb-mod-title" style="color:var(--ac)">${modTotal}h</span>
+          <span class="lb-mod-title" id="lmt-${r}-${mi}" style="color:var(--ac)">${modTotal}h</span>
           <button class="btn b-se b-sm" onclick="delModule('${r}',${mi})">모듈 삭제</button>
         </div>
       </div>
       ${taskRows}
-      <div class="lb-total"><span class="lb-total-l">모듈 소계</span><span class="lb-total-v">${modTotal}h</span></div>
+      <div class="lb-total"><span class="lb-total-l">모듈 소계</span><span class="lb-total-v" id="lmt2-${r}-${mi}">${modTotal}h</span></div>
     </div>`;
   }).join('')||`<div class="t-mu t-sm" style="text-align:center;padding:20px">작업 항목이 없습니다. "+ 작업 항목" 버튼으로 추가하세요.</div>`;
+}
+
+// 작업 편집 패널의 시간·인원·메모 입력: 상태와 해당 행·모듈 소계 표시만 갱신하고 요약만 다시 계산.
+// (키 입력마다 rendLaborModules 로 목록 전체를 다시 그리면 패널이 닫히고 포커스를 잃어 '12'·'1.5'·메모를 입력할 수 없음)
+function updLaborTask(r,mi,ti,key,el){
+  const mod=(laborModules[r]||[])[mi];
+  const t=mod?.tasks?.[ti];
+  if(!t||!el)return;
+  const row=document.getElementById(`ltr-${r}-${mi}-${ti}`);
+  if(key==='hours'){
+    t.hours=parseFloat(el.value)||0;
+    const h=row?.querySelector('.lt-h');if(h)h.textContent=t.hours+'h';
+    const total=mod.tasks.reduce((a,x)=>a+x.hours,0)+'h';
+    ['lmt-','lmt2-'].forEach(p=>{const e=document.getElementById(`${p}${r}-${mi}`);if(e)e.textContent=total;});
+  } else if(key==='workers'){
+    t.workers=parseInt(el.value)||1;
+    const w=row?.querySelector('.lt-w');if(w)w.textContent=t.workers+'인';
+  } else if(key==='note'){
+    t.note=el.value;
+    const left=row?.querySelector('.lt-left');
+    if(left){
+      let n=left.querySelector('.lt-note');
+      if(t.note){if(!n){n=document.createElement('div');n.className='lt-note';left.appendChild(n);}n.textContent=t.note;}
+      else if(n)n.remove();
+    }
+    return;   // 메모는 공수 계산에 영향 없음
+  } else return;
+  syncLS();rendLaborSummary();rendDash();
 }
 
 function toggleLaborEdit(r,mi,ti){

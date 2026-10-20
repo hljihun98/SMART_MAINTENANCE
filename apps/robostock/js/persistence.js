@@ -18,6 +18,8 @@
  *   - 다른 탭/메인 포털이 저장 키를 지우면(초기화) 저장을 멈추고 새로고침합니다.
  *   - 저장 데이터가 손상되었으면 원본을 백업 키에 보관한 뒤 기본값으로 시작합니다.
  *     (백업조차 실패하면 손상 데이터를 덮어쓰지 않도록 자동 저장을 중단)
+ *   - 고아 사진 정리(GC)는 저장 데이터를 정상 로드한 탭에서만 실행하고, 백업 원문이 가리키는 사진은 남깁니다.
+ *   - 사진 삭제는 releaseImageRefs() 로: 다른 기록이 같은 사진을 쓰고 있으면 IndexedDB 에서 지우지 않습니다.
  *   - 저장 실패(용량 초과 등)는 한 번만 명확히 경고하고 앱은 계속 동작합니다.
  */
 (function () {
@@ -30,6 +32,9 @@
   var lastSavedRaw = null;   // 마지막으로 저장/로드한 문자열 (dirty check 기준)
   var saveBlocked = false;   // 초기화 중 / 손상 데이터 보호 중이면 저장 금지
   var quotaWarned = false;
+  // 저장 데이터를 정상적으로 읽어 반영했을 때만 true → 고아 사진 정리(GC) 실행 조건.
+  // 손상·읽기 실패·저장 데이터 없음으로 기본값에서 시작한 탭은 어떤 사진이 쓰이는지 모르므로 GC 금지.
+  var loadOk = false;
 
   function clone(v) { return JSON.parse(JSON.stringify(v)); }
   // 코드 기본값 (저장 데이터에 없는 키를 채울 때 사용)
@@ -217,7 +222,27 @@
     imageLists().forEach(function (arr) { arr.forEach(function (r) { if (ImgStore.isRef(r)) set.add(r); }); });
     // 입고 모달에 첨부 중(아직 미등록)인 사진도 보호 (pendPh 는 data.js 의 let 전역)
     if (typeof pendPh !== 'undefined' && Array.isArray(pendPh)) pendPh.forEach(function (r) { set.add(r); });
+    backupImageRefs(set);
     return set;
+  }
+  // 손상 데이터 백업 원문이 가리키는 사진도 보호 (백업을 복원했을 때 사진이 남아 있도록).
+  // 원문은 깨진 JSON 이라 파싱하지 않고 참조 id 형식만 찾습니다.
+  function backupImageRefs(set) {
+    var raw;
+    try { raw = localStorage.getItem(BACKUP_KEY); } catch (e) { return; }
+    if (!raw) return;
+    var m = raw.match(/img_(?:m_)?[0-9a-z]+_[0-9a-z]+/g);
+    if (m) m.forEach(function (r) { set.add(r); });
+  }
+  // 사진 삭제 요청: 다른 부품·입출고 기록·첨부 중 목록·백업에서 아직 쓰는 참조는 IndexedDB 에서 지우지 않음.
+  // (기존 base64 이전 시 같은 사진은 같은 id 하나로 합쳐지므로, 한 곳에서 지워도 다른 곳은 남아야 함)
+  // 호출 전에 삭제할 참조를 상태 배열에서 먼저 빼야 합니다.
+  function releaseImageRefs(refs) {
+    if (!window.ImgStore) return Promise.resolve();
+    var inUse = collectImageRefs();
+    var dead = [];
+    (refs || []).forEach(function (r) { if (ImgStore.isRef(r) && !inUse.has(r) && dead.indexOf(r) < 0) dead.push(r); });
+    return dead.length ? ImgStore.remove(dead) : Promise.resolve();
   }
 
   function parseRaw(raw) {
@@ -247,6 +272,7 @@
     }
     applyState(d);
     lastSavedRaw = raw;
+    loadOk = true;
   }
 
   // ── 다른 탭/포털 변경 반영 ──────────────────────────
@@ -294,6 +320,7 @@
   // 디버그/수동 초기화용으로 전역 노출 (콘솔에서 resetRobostock() 호출 가능)
   window.saveState = saveState;
   window.loadState = loadState;
+  window.releaseImageRefs = releaseImageRefs;
   window.resetRobostock = function () {
     saveBlocked = true;   // reload 중 beforeunload/visibilitychange 저장으로 되살아나지 않게
     try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* 무시 */ }
@@ -314,9 +341,9 @@
     var notice = sessionStorage.getItem(NOTICE_KEY);
     if (notice) { sessionStorage.removeItem(NOTICE_KEY); setTimeout(function () { notify('ℹ️', notice, 'ok'); }, 300); }
   } catch (e) { /* 무시 */ }
-  // 고아 이미지 정리 (마이그레이션이 끝난 뒤 여유 있게)
+  // 고아 이미지 정리 (마이그레이션이 끝난 뒤 여유 있게) — 저장 데이터를 정상 로드한 경우에만
   setTimeout(function () {
-    if (window.ImgStore && !saveBlocked) ImgStore.gc(collectImageRefs());
+    if (window.ImgStore && loadOk && !saveBlocked) ImgStore.gc(collectImageRefs());
   }, 5000);
 
   // ── 2) 저장 트리거 (모두 '로그인 상태 + 실제 변경'일 때만 저장) ──

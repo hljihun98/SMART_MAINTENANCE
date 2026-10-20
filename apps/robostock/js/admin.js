@@ -175,16 +175,25 @@ function updActualTaskSel(){
   const tasks=(laborModules[r]||[])[mi]?.tasks||[];
   const sel=document.getElementById('ac-task');
   if(sel)sel.innerHTML=tasks.map((t,i)=>`<option value="${i}">${escHtml(t.name)}</option>`).join('');
-  // update plan hour
-  const ti=parseInt(sel?.value)||0;
-  const ph=tasks[ti]?.hours||0;
+  updActualPlan();
+}
+// 선택된 작업의 계획 시간 표시 (작업 select onchange 에서도 호출)
+function updActualPlan(){
+  const r=document.getElementById('ac-robot')?.value;
+  const mi=parseInt(document.getElementById('ac-mod')?.value);
+  const ti=parseInt(document.getElementById('ac-task')?.value);
+  const task=(laborModules[r]||[])[mi]?.tasks?.[ti];
   const planEl=document.getElementById('ac-plan');
-  if(planEl)planEl.value=ph;
+  if(planEl)planEl.value=task?task.hours:'';
 }
 function submitActual(){
   const r=document.getElementById('ac-robot').value;
-  const mi=parseInt(document.getElementById('ac-mod').value)||0;
-  const ti=parseInt(document.getElementById('ac-task').value)||0;
+  const modV=document.getElementById('ac-mod').value;
+  const taskV=document.getElementById('ac-task').value;
+  // 목록이 비어 있으면(모듈·작업 없음) 첫 항목으로 대신 기록하지 않고 거부
+  if(modV===''||taskV===''){toast('⚠️','모듈과 작업 항목을 선택하세요','wa');return;}
+  const mi=parseInt(modV);
+  const ti=parseInt(taskV);
   const mod=(laborModules[r]||[])[mi];
   const task=mod?.tasks?.[ti];
   if(!mod||!task){toast('⚠️','작업 항목을 다시 선택해주세요','wa');return;}

@@ -94,12 +94,13 @@ function addPh(e){
 }
 function removePendPh(i){
   const removed=pendPh.splice(i,1);
-  ImgStore.remove(removed);   // 아직 입출고에 등록되지 않은 사진이므로 저장소에서도 삭제
+  // 아직 입출고에 등록되지 않은 사진이므로 저장소에서도 삭제 (다른 기록이 쓰는 참조는 남김 — persistence.js)
+  if(typeof releaseImageRefs==='function')releaseImageRefs(removed);
   rendPg();
 }
 // 입고 모달을 새로 열 때: 등록하지 않고 남은 첨부 사진 정리
 function discardPendPh(){
-  if(pendPh.length)ImgStore.remove(pendPh.splice(0));
+  if(pendPh.length){const removed=pendPh.splice(0);if(typeof releaseImageRefs==='function')releaseImageRefs(removed);}
   rendPg();
 }
 function rendPg(){

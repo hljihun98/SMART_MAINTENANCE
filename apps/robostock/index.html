@@ -1,5 +1,7 @@
 <!DOCTYPE html>
 <html lang="ko">
+<head>
+<meta charset="UTF-8">
 <!--
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║  ROBOSTOCK — AI 개발 로그 (AI DEVELOPMENT LOG)                              ║
@@ -91,8 +93,6 @@
  * 만든 날짜: 2026-04-01
   
 -->
-<head>
-<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ROBOSTOCK</title>
 <!-- 파비콘: HL 그룹 아이콘 (hlmando.com 제공 파일과 동일) -->
@@ -877,7 +877,7 @@
       <div class="fl"><label>로봇</label><select class="fs" id="ac-robot" onchange="updActualModSel()"><option value="PARKIE">PARKIE</option><option value="CARRIE">CARRIE</option><option value="GOALIE">GOALIE</option></select></div>
       <div class="fl"><label>모듈</label><select class="fs" id="ac-mod" onchange="updActualTaskSel()"></select></div>
     </div>
-    <div class="fl"><label>작업 항목</label><select class="fs" id="ac-task"></select></div>
+    <div class="fl"><label>작업 항목</label><select class="fs" id="ac-task" onchange="updActualPlan()"></select></div>
     <div class="f2">
       <div class="fl"><label>계획 시간 (h)</label><input class="fi" type="number" id="ac-plan" readonly style="color:var(--t2)"></div>
       <div class="fl"><label>실제 시간 (h)</label><input class="fi" type="number" id="ac-actual" placeholder="0.5" step="0.5" min="0.1"></div>

@@ -664,6 +664,16 @@
 
   renderMgmt();
   measureIdb();
+
+  /* 포털이 다시 보일 때마다 저장 용량을 새로 계산한다.
+     - pageshow(persisted): 앱에서 뒤로가기로 돌아오면 브라우저가 이전 화면을 캐시(bfcache)에서 그대로 꺼내므로,
+       앱에서 저장한 데이터가 목록에 반영되지 않았다.
+     - visibilitychange: 다른 탭에서 앱을 쓰고 돌아온 경우.
+     - storage: 다른 탭에서 저장·삭제한 경우. */
+  function refreshMgmt(){ renderMgmt(); measureIdb(); }
+  window.addEventListener('pageshow', function(e){ if(e.persisted) refreshMgmt(); });
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) refreshMgmt(); });
+  window.addEventListener('storage', refreshMgmt);
 </script>
 </body>
 </html>

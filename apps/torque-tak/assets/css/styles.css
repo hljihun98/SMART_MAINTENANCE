@@ -209,7 +209,9 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .sec-head{display:flex;align-items:baseline;justify-content:space-between;padding:16px 18px 0}
 .sec-head .v{font-family:var(--num);font-size:15px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .draw-box{padding:4px 12px 0}
-#draw{display:block;width:100%;height:auto}
+/* 단면도(viewBox 340×200)는 폭에 맞춰 늘어나므로 최대 폭을 둔다 — PC 절반 화면에서 약 2배로 커져 글자·그림이 과하게 컸다.
+   440px = 최대 약 1.3배, 스마트폰(카드 폭 약 350px)에서는 영향 없음 */
+#draw{display:block;width:100%;height:auto;max-width:440px;margin:0 auto}
 /* 슬라이더 — 트랙·레일·채움, 눈금(최소·적합·상한)과 라벨, 썸, 적합 진입 시 "탁!" 애니메이션 */
 .le-ctl{padding:6px 18px 18px}
 .track{position:relative;height:46px;touch-action:none;display:flex;align-items:center;cursor:grab}

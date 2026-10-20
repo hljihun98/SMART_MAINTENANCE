@@ -512,4 +512,10 @@ th:last-child,td:last-child{padding-right:0}
 }
 
 @media(prefers-reduced-motion:reduce){*{animation-duration:.01ms !important;transition-duration:.01ms !important}}
+/* 움직임 줄이기(Windows '애니메이션 효과' 끔 등)에서도 적합 진입 "탁!"은 보여야 한다 — 위 규칙이 0.01ms로 줄여
+   보이지 않았다. 이 모드에서는 튀어 오르는 움직임 없이 제자리에 0.7초 나타났다 사라지게만 한다(선택자 우선순위로 덮음). */
+@media(prefers-reduced-motion:reduce){
+  .snap.go{animation:snapStill .7s linear !important;animation-duration:.7s !important}
+  @keyframes snapStill{0%,80%{opacity:1;transform:translateX(-50%)}100%{opacity:0;transform:translateX(-50%)}}
+}
 :focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:6px}

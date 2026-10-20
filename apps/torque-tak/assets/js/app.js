@@ -492,8 +492,12 @@ function compute(o,_probe){
      비나사부가 나사부를 다 먹은 경우 둘 다 여기로 모인다. 예전에는 이 두 갈래가 하향
      제한을 그냥 건너뛰어서, 성립하지 않는 체결부가 전 구간 최대 토크를 표시했다 —
      M10-20에 비나사부 18mm를 넣으면 NG 없이 105 N·m(17.6mm면 0.75 N·m)가 나왔고,
-     접시 M5는 길이 3mm에서 7.5 N·m, 4mm에서 1.9 N·m로 길수록 토크가 떨어졌다. */
-  const noReach = lenOK && (shortCs || LeReach<1e-6);
+     접시 M5는 길이 3mm에서 7.5 N·m, 4mm에서 1.9 N·m로 길수록 토크가 떨어졌다.
+     세 번째 갈래는 판재보다 짧은 길이다 — render가 맞춰 둔 판재·물림을 지우지 않고 보류한
+     상태(lePending)를 pend로 넘긴다. 볼트 끝이 판재 안에 있으니 물릴 나사부가 없다. 예전에는
+     이때 Le 0이 "미설정"으로 읽혀 판재 두께 0을 가정한 토크가 나왔다(M5-12 Le 6 → M5-6에서 10.9 N·m). */
+  const pend    = (o.pend && !(o.Le>0)) ? o.pend : null;
+  const noReach = lenOK && (shortCs || LeReach<1e-6 || !!pend);
 
   /* 나사산 뽑힘 — Fstrip은 Le에 정비례하므로 계수 stripK로 묶어 둔다.
      암나사(탭 모재)와 수나사(볼트) 중 약한 쪽이 지배한다. */
@@ -511,17 +515,24 @@ function compute(o,_probe){
   const FhiHead= Fhead/(1-K_SCAT);
   const margin = hasLe?Fstrip/FhiHead:null;
   /* 판정이 "적합"으로 바뀌는 최소 Le — Le에 의존하는 검토만 고려.
-     기하보다 뒤에 두면 도달 가능성 판단에 쓸 수 없어 여기서 구한다. */
+     기하보다 뒤에 두면 도달 가능성 판단에 쓸 수 없어 여기서 구한다.
+     박판·소수 나사산 경계(thinRegime: 3산 미만 또는 Le 2.5mm 미만)도 Le 검토다. 3산은 6산이
+     덮지만 2.5mm는 6p가 2.5보다 작은 M1.6·M2와 세목 M2.5·M3에서 따로 걸린다 — 빠져 있으면
+     기준선(예: M2 A2-70 2.4mm)에서 "범위 밖" NG가 떠 기준 눈금이 막히고, 판정이 "적합"인
+     Le 3.0에서도 "Le만으로는 적합해지지 않습니다"라고 안내했다. */
   const LeOk = Math.max(
     STRIP_WARN*FhiHead/stripK,    // 뽑힘 여유 1.75배 (Fhi 기준)
-    6*p,                          // 유효 나사산 6산
+    6*p,                          // 유효 나사산 6산 (박판 경계 3산도 여기서 충족)
+    2.5,                          // 박판·소수 나사산 경계 Le 2.5mm
     M.thin?4:0,                   // 박판 모재 최소 물림
     LeMin                         // 볼트가 먼저 파단하는 조건
   );
   /* Le 미설정의 "탭 충분 가정"은 볼트가 그만큼 물릴 수 있을 때만 성립한다.
      짧은 볼트는 판재 두께 0을 가정해도 기준 물림에 못 닿으므로 도달 가능한
-     최대 물림으로 축력을 묶는다 — 그래야 길이를 바꾸면 토크가 따라 움직인다. */
-  const LeAssume = (!hasLe&&LeReach!=null&&LeReach>0) ? Math.min(LeOk,LeReach) : null;
+     최대 물림으로 축력을 묶는다 — 그래야 길이를 바꾸면 토크가 따라 움직인다.
+     물릴 나사부가 없으면(noReach) 가정할 물림도 없다 — 남겨 두면 계산 근거·단면도가
+     물림 0인 체결부에 "가정 물림"을 적는다. */
+  const LeAssume = (!hasLe&&!noReach&&LeReach!=null&&LeReach>0) ? Math.min(LeOk,LeReach) : null;
   /* 가정값이 기준값이 아니라 길이 한도에서 왔는지 — 문구를 여기로 갈라야 한다.
      reachLimited(토크까지 깎였는지)와는 다르다. 한도에 걸렸어도 뽑힘 여유가
      남아 토크는 그대로일 수 있다. */
@@ -709,6 +720,11 @@ function compute(o,_probe){
   if(shortCs)
     add("bad","볼트 길이","접시머리 높이 "+f1c(headH)+" mm보다 짧은 볼트는 성립하지 않습니다 — "
         +"접시는 호칭 길이에 머리가 포함됩니다","M"+d+"×"+o.len,"str",FIX.cslen);
+  else if(pend)
+    add("bad","볼트 길이",(pend.grip!=null
+        ?"볼트 길이 "+o.len+" mm가 판재 두께 "+f1c(pend.grip)+" mm를 넘지 못해 물릴 나사부가 없습니다"
+        :"볼트 길이 "+o.len+" mm 안에 맞춰 둔 물림 "+f1c(pend.Le)+" mm가 들어가지 않습니다")
+        +" — 축력을 만들 수 없습니다","0 mm","str",FIX.reach);
   else if(LeReach===null) add("na","볼트 길이 여유","볼트 길이를 입력하면 검토합니다","—");
   else if(LeReach<=0) add("bad","볼트 길이 여유",(ls>0
       ?"비나사부 "+ls.toFixed(1)+" mm(+불완전 나사 2피치)가 볼트를 다 먹어 물릴 나사부가 없습니다"
@@ -934,7 +950,7 @@ function compute(o,_probe){
 
   return{d,p,As,cls,C,H,M,K,mu,Klo,Khi,kf:F_,washer,washerSel,washerOn,washerIgnored,Fy,Fu,FuHead,Fwant,Fhead,Feff,Flo,Fhi,Fserv,FservMin,Freq,
          Fstrip,Ats,LeMin,LeOk,LeReach,LeAssume,LeShow,reachCapped,kInt,kExt,stripExt,stripK,tauU,FhiHead,breakMode,
-         okPossible,threads,margin,limited,reachLimited,noReach,hasLe,Le:o.Le,
+         okPossible,threads,margin,limited,reachLimited,noReach,pend,hasLe,Le:o.Le,
          L,Tfric,Tadh,Trem,remRatio,adhBase,
          Trec,Tbreak,sigma,tau,tgf,sigEq,util,utilHi,Db,dLoad,DKm,SG,pBear,pRatio,pHW,
          headH,shortCs,Lu,Lk,Lbore,ls,lg,slv,shankOn,dS,dP,phi,Fz,
@@ -1195,9 +1211,11 @@ function render(fast){
     }
   }
 
+  /* 보류 상태(lePending)는 "미설정"이 아니라 "물림 0"이다 — compute가 판재 두께 0을 가정해
+     토크를 내지 않도록 pend로 함께 넘긴다 */
   R=compute({d:P.d,pitch:P.pitch,cls:S.cls,head:S.head,mat:S.mat,k:S.k,washer:S.washer,lock:S.lock,
              preload:S.preload,Le:LeUse,loadType:S.loadType,load:S.load,
-             len:P.len,shank:S.shank,slevel:S.slevel});
+             len:P.len,shank:S.shank,slevel:S.slevel,pend:lePending});
 
   if(!fast){
     const chip=(t,c)=>{const e=document.createElement("span");e.className="pill"+(c?" "+c:"");e.textContent=t;pr.appendChild(e);};
@@ -1224,7 +1242,7 @@ function render(fast){
   }else{
     setDigits("—");
     $("bandWrench").innerHTML="<b>물릴 나사부가 없어 축력을 만들 수 없습니다</b>";
-    $("bandForce").textContent="볼트 길이·비나사부를 먼저 맞추세요";
+    $("bandForce").textContent=R.pend?"볼트 길이를 판재 두께보다 길게 맞추세요":"볼트 길이·비나사부를 먼저 맞추세요";
   }
 
   $("verdict").classList.toggle("idle",R.lvl==="idle");
@@ -1239,7 +1257,8 @@ function render(fast){
 
   $("sForce").innerHTML=f0(R.Feff)+'<small>N</small>';
   $("sUtil").innerHTML=pctCmp(R.util,[0.90,1.0]).replace("%","")+'<small>%</small>';
-  $("sBreak").innerHTML=sig3(R.Tbreak)+'<small>N·m</small>';
+  /* 물릴 나사부가 없으면 파단 토크도 없다 — 권장 토크와 같이 "—"로 둔다 (0.00은 계산값으로 읽힌다) */
+  $("sBreak").innerHTML=(R.Tbreak>0?sig3(R.Tbreak):"—")+'<small>N·m</small>';
 
   /* 볼트 길이 슬라이더는 선택 — 켰을 때만 두 줄짜리 레이아웃이 된다 */
   const lo=lenOn();
@@ -1261,7 +1280,7 @@ function render(fast){
   const cap=leCap(), atCap=isFinite(cap)&&R.hasLe&&S.Le>=cap-0.05;
   $("leNote").textContent =
       lePending     ? (lePending.grip!=null
-                        ? "볼트 길이 "+P.len+" mm가 판재 두께 "+f1(lePending.grip)+" mm보다 짧아 물림이 없습니다 — "
+                        ? "볼트 길이 "+P.len+" mm가 판재 두께 "+f1(lePending.grip)+" mm를 넘지 못해 물림이 없습니다 — "
                           +"맞춰 둔 물림 "+f1(lePending.Le)+" mm는 길이를 늘리면 돌아옵니다"
                         : "볼트 길이 "+P.len+" mm로는 맞춰 둔 물림 "+f1(lePending.Le)+" mm가 성립하지 않습니다 — 길이를 확인하세요")
     : !R.okPossible ? "다른 검토 항목이 막고 있어 Le만으로는 적합해지지 않습니다"
@@ -1608,9 +1627,11 @@ function drawSection(){
   /* 물린 나사산 — 그릴 수 있는 점은 26개까지지만 라벨은 실제 산수를 쓴다.
      예전에는 라벨도 26에서 잘려 검토 항목이 "40.0산"인데 그림은 "26산"이라고 말했다.
      잘렸을 때는 가운데 한 칸을 비워 생략을 눈으로도 알린다. */
-  const nTrue=Math.max(1,Math.round(Le/R.p));
+  /* 물릴 나사부가 없으면(noReach) 나사산을 그리지 않는다 — 예전에는 Le 0에서도 "1산 물림"이 찍혔다 */
+  const none=R.noReach&&!R.hasLe;
+  const nTrue=none?0:Math.max(1,Math.round(Le/R.p));
   const n=Math.min(26,nTrue), cut=nTrue>n, skip=cut?Math.floor(n/2):-1;
-  const step=eng/n, rr=Math.max(1.6,Math.min(2.7,step*0.24));
+  const step=eng/Math.max(1,n), rr=Math.max(1.6,Math.min(2.7,step*0.24));
   for(let i=0;i<n;i++){
     if(i===skip)continue;
     const x=blkL+i*step+step*.5;
@@ -1641,7 +1662,7 @@ function drawSection(){
   const modeTxt=idle?"":strip?"뽑힘 지배"
     :R.breakMode==="strip-int"||R.breakMode==="strip-ext"?"과하중 시 뽑힘 먼저"
     :R.breakMode==="head"?"머리 파단":"볼트 목 파단";
-  g.push(`<text x="${blkL+eng/2}" y="${cy-rMaj-14}" text-anchor="middle" font-size="10.5" font-weight="700" fill="${col}">${nTrue}산 물림${modeTxt?" · "+modeTxt:""}</text>`);
+  g.push(`<text x="${blkL+eng/2}" y="${cy-rMaj-14}" text-anchor="middle" font-size="10.5" font-weight="700" fill="${col}">${none?"물림 없음":nTrue+"산 물림"+(modeTxt?" · "+modeTxt:"")}</text>`);
 
   const dy=cy+bh+18;
   g.push(`<path d="M${N(blkL,dy-5)} L${N(blkL,dy+5)} M${N(blkL+eng,dy-5)} L${N(blkL+eng,dy+5)}" stroke="${col}" stroke-width="1.4" stroke-linecap="round"/>`);
@@ -1651,7 +1672,7 @@ function drawSection(){
      "Le 8.8" 같은 성립 불가 치수가 뜨지 않게 하는 것이 이 표시의 요점이다 */
   if(idle)
     g.push(`<text x="${blkL+eng/2}" y="${dy+32}" text-anchor="middle" font-size="10" font-weight="600" fill="${DC.ink3}">`
-      +`${R.reachCapped?"길이로 물릴 수 있는 최대 · 미설정":"적합 기준값 · 아직 미설정"}</text>`);
+      +`${none?"물릴 나사부 없음 · 권장 토크 없음":R.reachCapped?"길이로 물릴 수 있는 최대 · 미설정":"적합 기준값 · 아직 미설정"}</text>`);
   if(wOn)g.push(`<text x="${plateL-2}" y="${dy+17}" text-anchor="end" font-size="10" font-weight="600" fill="${DC.dim}">${WASHER[R.washer].label}</text>`);
   /* 볼트 길이 치수 — 물림 치수 바깥쪽에 한 줄 더 (제도 관례대로 전체 치수가 아래).
      "나사 길이"로 쓰면 바로 위 비나사부 치수와 나란해져 나사부 길이로 읽힌다. */
@@ -1714,10 +1735,12 @@ const lenMax  =()=>{const t=Math.max(25,8*(P&&!P.err?P.d:5),
 const lenMin  =()=>S.Le>0?Math.max(headHOf(),S.grip||0):headHOf();
 /* 바닥을 만족하는 표준 길이 목록 — 없으면 길이를 건드리지 않는다 */
 /* 바닥은 판재 관통, 천장은 사양이 받아 주는 한계 — 위를 안 자르면 화살표 키가
-   BOLT_LEN 끝(200)까지 걸어가고 그 값이 사양 상한을 넘으면 오류 상태가 된다. */
+   BOLT_LEN 끝(200)까지 걸어가고 그 값이 사양 상한을 넘으면 오류 상태가 된다.
+   바닥은 엄격 부등호다 — 판재 두께와 같은 길이는 볼트 끝이 탭 면에서 멈춰 물림이 0이다.
+   예전에는 Home 한 번에 그 길이(M5 판재 6 → M5-6)로 내려가 물림 없는 상태가 됐다. */
 const lenPicks=()=>{
   const hi=(P&&!P.err)?lenCapOf(P.d):Infinity;
-  return BOLT_LEN.filter(x=>x>=lenMin()&&x<=hi);
+  return BOLT_LEN.filter(x=>x>lenMin()&&x<=hi);
 };
 /* 사양 문자열을 다시 쓰되 비표준 피치와 머리 표기는 보존한다 */
 function specWithLen(len){
@@ -1807,7 +1830,7 @@ function updateSlider(measure){
     lt.setAttribute("aria-valuemin",f1(lenMin()));
     lt.setAttribute("aria-valuemax",lmax);
     lt.setAttribute("aria-valuetext",(P.len!=null?P.len+"mm":"미지정")
-      +", 물림 "+f1(R.LeShow)+"mm"+(R.hasLe?"":" (가정)")
+      +", 물림 "+f1(R.LeShow)+"mm"+(R.hasLe?"":R.noReach?" (물릴 나사부 없음)":" (가정)")
       +", 체결 두께 "+(R.Lk!=null?f1(Math.max(0,R.Lk)):"—")+"mm");
   }
 
@@ -1845,6 +1868,7 @@ function updateSlider(measure){
   t.setAttribute("aria-valuemax",f1(max));
   t.setAttribute("aria-valuetext",R.hasLe
     ?f1(R.Le)+"mm, "+R.threads.toFixed(1)+"산, 판정 "+R.tag
+    :R.noReach?"미설정, 물릴 나사부 없음, 판정 "+R.tag
     :"미설정, "+(R.reachCapped?"볼트 길이 한도 "+f1(R.LeShow):"적합 기준 "+f1(R.LeOk))+"mm 가정");
 }
 (function slider(){
@@ -2015,7 +2039,9 @@ function writeBasis(){
         ? `육각홀이 먼저 한계라 조일 수 있는 축력이 줄어듭니다. 제조사 공표값 기준 `
           +`(Unbrako 목표 응력 420 / 표준 800 MPa = 0.53 · Bossard 감액 토크 ≈0.45 · Hobson ≈0.63)`
         : `자체 경험값 — 규격 근거 없음`}</span>`;
-  if(R.limited) s3+=`<br><span class="bad">산포 상한 축력에서 뽑힘 안전율 ${STRIP_SF.toFixed(1)}을 지키도록 <b>${f0(R.Feff)} N</b>으로 하향 제한</span>`;
+  /* 물림 0이면 축력이 0인 이유는 뽑힘 하향 제한이 아니다 — 그 문구를 쓰면 원인을 잘못 짚는다 */
+  if(R.noReach&&!R.hasLe) s3+=`<br><span class="bad">물릴 나사부가 없어 걸 수 있는 축력이 <b>0 N</b>입니다 — 권장 토크를 내지 않습니다</span>`;
+  else if(R.limited) s3+=`<br><span class="bad">산포 상한 축력에서 뽑힘 안전율 ${STRIP_SF.toFixed(1)}을 지키도록 <b>${f0(R.Feff)} N</b>으로 하향 제한</span>`;
   else s3+=`<br>적용 축력 <b>${f0(R.Feff)} N</b>`;
   s3+=`<br><span class="mut">마찰 산포 ±${K_SCAT*100}% → 실제 ${f0(R.Flo)} ~ ${f0(R.Fhi)} N. `
      +`이 폭은 VDI 2230의 조임계수 αA ≈ 1.8에 해당합니다. `
@@ -2099,6 +2125,11 @@ function writeBasis(){
       +`<span class="bad">물릴 나사부가 0 mm — 뽑힘 검토가 아니라 체결 자체가 성립하지 않습니다.</span><br>`
       +(R.shortCs
         ? `접시 머리 높이 ${f1(R.headH)} mm보다 짧은 볼트라 머리 밑 원통부가 없습니다.`
+        : R.pend
+        ? (R.pend.grip!=null
+            ? `볼트 길이 ${R.len} mm가 판재 두께 ${f1(R.pend.grip)} mm를 넘지 못해 볼트 끝이 판재 안에 있습니다. `
+              +`맞춰 둔 물림 ${f1(R.pend.Le)} mm는 길이를 늘리면 돌아옵니다.`
+            : `볼트 길이 ${R.len} mm 안에 맞춰 둔 물림 ${f1(R.pend.Le)} mm가 들어가지 않습니다.`)
         : `비나사부 ${f1(R.ls)} mm + 불완전 나사 2p ${f1(2*R.p)} mm가 머리 밑 길이 `
           +`${R.Lu!=null?f1(R.Lu):"—"} mm를 다 씁니다.`)
       +`<br><span class="mut">걸 수 있는 축력이 0이므로 권장 토크를 내지 않습니다.</span>`
@@ -2327,11 +2358,15 @@ function ownCompare(same){
   const lo=Math.min.apply(null,o), hi=Math.max.apply(null,o);
   const mid=o.slice().sort((a,b)=>a-b)[Math.floor(o.length/2)];
   const gap=(R.Trec/mid-1)*100, near=Math.abs(gap)<=15;
+  /* 물릴 나사부가 없으면 앱 권장 토크가 없다 — "0.00 N·m (−100%)"로 비교하지 않는다 */
+  const app = R.Trec>0
+    ? ` · 현재 설정의 앱 권장 <b>${sig3(R.Trec)} N·m</b> `
+      +`<span class="${near?"good":"wr"}">(${gap>0?"+":""}${gap.toFixed(0)}%)</span>`
+    : ` · <span class="wr">현재 설정은 물릴 나사부가 없어 앱 권장 토크가 없습니다</span>`;
   return `<p style="margin:0 0 10px"><b>사내 권장 체결 토크</b> — M${R.d} ${HEAD[S.head].label} ${o.length}건 `
     +(lo===hi?`<b>${sig3(lo)} N·m</b>`:`<b>${sig3(lo)} ~ ${sig3(hi)} N·m</b> (중앙 ${sig3(mid)})`)
-    +` · 현재 설정의 앱 권장 <b>${sig3(R.Trec)} N·m</b> `
-    +`<span class="${near?"good":"wr"}">(${gap>0?"+":""}${gap.toFixed(0)}%)</span>`
-    +(R.limited?` <span class="wr">— 앱은 뽑힘 여유를 지키려 토크를 하향 제한한 상태입니다</span>`:``)+`. `
+    +app
+    +(R.limited&&R.Trec>0?` <span class="wr">— 앱은 뽑힘 여유를 지키려 토크를 하향 제한한 상태입니다</span>`:``)+`. `
     +`<span class="mut">사내 값은 시트 산정값의 90%이고 강도구분·모재가 적혀 있지 않습니다 — `
     +`앱 설정(${R.cls} · ${MAT[S.mat].label} · ${KF[S.k].label})과 조건이 다르면 그만큼 벌어집니다.</span></p>`;
 }

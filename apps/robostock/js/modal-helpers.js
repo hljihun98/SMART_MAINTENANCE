@@ -23,6 +23,8 @@ function openMo(id){
   }
   if(id==='mo-out'){filtBOMSel('out');['out-bc','out-qty','out-memo'].forEach(x=>document.getElementById(x).value='');document.getElementById('out-unit').value='';}
   if(id==='mo-addlabor') updModuleSel();
+  // 실제 공수 기록: 열 때 선택된 로봇 기준으로 모듈·작업 목록과 계획 시간을 채움
+  if(id==='mo-actual') updActualModSel();
   if(id==='mo-tech-book'||id==='mo-delay'){
     populateTechSels();
     if(id==='mo-tech-book'){

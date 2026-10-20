@@ -366,7 +366,8 @@ function dropPartImgs(pn,e){
 }
 function delPartImg(pn,i){
   const b=bom.find(x=>x.partNo===pn);
-  if(b&&b.imgs){const removed=b.imgs.splice(i,1);ImgStore.remove(removed);rendPDimages(b);rendBOM();}
+  // 배열에서 먼저 뺀 뒤 해제: 다른 부품·입출고 기록이 같은 사진(같은 id)을 쓰면 IndexedDB 에서 지우지 않음 (persistence.js)
+  if(b&&b.imgs){const removed=b.imgs.splice(i,1);if(typeof releaseImageRefs==='function')releaseImageRefs(removed);rendPDimages(b);rendBOM();}
 }
 
 function rendPDlogs(b){

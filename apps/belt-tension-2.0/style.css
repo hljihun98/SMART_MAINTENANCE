@@ -215,7 +215,7 @@ select{font-size:15px;}
 .field input::placeholder{color:var(--text-faint);font-weight:400;}
 .field input:focus, select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow);}
 .field input.invalid{border-color:var(--red);box-shadow:0 0 0 3px rgba(251,106,120,.18);}
-.estimate-input{display:grid;grid-template-columns:1fr 96px;gap:9px;align-items:stretch;}
+.estimate-input{display:grid;grid-template-columns:1fr;gap:9px;align-items:stretch;}
 .estimate-input input{font-size:15px;}
 .estimate-input .btn{min-height:0;padding:0 16px;font-size:13px;}
 .note{margin-top:13px;padding:12px 14px;border-radius:var(--r-xs);font-size:12px;line-height:1.6;
@@ -776,6 +776,16 @@ tbody tr:nth-child(even){background:#FAFBFC;}
   /* 비활성 플로우 스텝 숨기기 — Step 4(보고서)는 항상 스크롤로 접근 가능 */
   .flow-step:not(.s-active):not(#fs4){display:none;}
   #fs4{margin-top:14px;}
+  /* 막다른 화면 방지 — 위 규칙보다 우선하도록 #id.flow-step 으로 지정
+     · 모든 호기 완료(Step 4): 호기 설정(#fs1)을 보여 다음 호기를 바로 추가
+     · 측정 기록·초기화(#fs5): 측정 중(Step 2)이 아니면 표시, 단순 모드(data-flow=off)는 항상 표시 */
+  body[data-step="4"] #fs1.flow-step{display:block;}
+  body:not([data-step="2"]) #fs5.flow-step,
+  body[data-flow="off"] #fs5.flow-step{display:block;}
+  /* 측정 중(Step 2)에는 호기 설정의 머리글 한 줄만 — '현재 호기 취소' 버튼 접근용 */
+  body[data-flow="on"][data-step="2"] #fs1.flow-step{display:block;}
+  body[data-step="2"] #fs1.flow-step>:not(.flow-step-head){display:none;}
+  body[data-step="2"] #fs1.flow-step>.flow-step-head{margin-bottom:0;}
 
 }
 

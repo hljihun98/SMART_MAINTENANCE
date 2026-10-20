@@ -36,6 +36,21 @@ const EDGE_CONF_CAP = 30;        // 경계 피크의 신뢰도 상한 — 저장
 const LIVE_SAVE_MIN_CONF = 50;   // 연속 측정 모드 저장 최소 신뢰도 (버퍼 5프레임이 채워지고 안정적일 때 65)
 const REARM_QUIET_MS = 300;      // 연속 모드 저장 후, 신호가 이 시간 이상 사라져야 다음 측정 허용(같은 진동 재저장 방지)
 
+/* ---------- 정상(定常) 톤 배제 — 험·모터음이 f/2·f/3 자리에 있을 때 오판 방지 ----------
+   60/120 Hz 전원 험이나 모터음처럼 계속 나는 톤이 우연히 선택 피크의 f/2·f/3 자리에 있으면 정수배 검사를 통과해
+   기본파로 채택됐음(예: 360 Hz 과장력 벨트 + 120 Hz 험 → 120 Hz, 장력 1/9 → 반대 방향 NG). 합성 신호로 확인.
+   → bin별 '주변 레벨'을 조용한 프레임(충격 수집 중 아님 + 대역 안에 뚜렷한 피크 없음)에서만 비대칭으로 추적
+     (오를 때 느리게, 내릴 때 빠르게 — trackAmbient)하고, 기본파 후보는 주변 레벨보다 SUBHARM_MIN_RISE_DB 이상
+     새로 커진 성분만 인정한다. 계속 나는 톤은 튕기기 전부터 추적값에 들어 있고, 튕긴 벨트의 기본파는
+     울리는 동안 추적이 멈춰 있어 학습되지 않는다(합성 신호: 느슨한 벨트 환산 결과 예전과 동일).
+   선택 피크 자체에는 적용하지 않으므로 정상 벨트(subN=1)의 측정값은 바뀌지 않는다. */
+const AMBIENT_RISE_S = 4;        // 주변 레벨 상승 시정수(초) — 측정 중 새로 생긴 정상 톤을 수 초 안에 학습
+const AMBIENT_FALL_S = 0.15;     // 하강 시정수(초) — 사라진 톤·지나간 충격음은 곧바로 원래 바닥으로
+const AMBIENT_WARMUP_MARGIN_S = 0.2; // 측정 시작 직후 'FFT 창 채움 시간(fftSize/sampleRate) + 이 여유' 동안은 (충격 수집 중이 아니면)
+const AMBIENT_WARMUP_RISE_S = 0.1;   //  모든 프레임을 빠르게 학습 — 첫 프레임이 무음·부분 창이어도, 대역 안 험(대역 피크라 이후엔 추적이
+                                     //  멈춤)도 바로 학습. 16384 FFT·48 kHz ≈ 0.54 s. 이 사이에 튕긴 첫 타격은 연속 모드에서 한 번 무시될 수 있음
+const SUBHARM_MIN_RISE_DB = 6;   // 기본파 후보는 주변 레벨보다 이만큼 이상 커야 함(계속 나는 톤은 ≈0 dB)
+
 /* ---------- PDF 헬퍼 (센서점검 앱 동일 스타일) ---------- */
 const PDF_FONT = "'Noto Sans KR','Malgun Gothic','Apple SD Gothic Neo',Arial,sans-serif";
 const MM_TO_PX = 96 / 25.4;
@@ -129,6 +144,7 @@ let learnRequested=false; // 재학습 버튼 클릭 시에만 true — 자동 �
 const LEARN_DURATION_MS=3000;  // 학습 완료까지 필요한 조용한 시간 (ms)
 let targetLock={enabled:true, widthPct:30};
 let lockCenter=NaN, lockLoBin=-1, lockHiBin=-1;
+let ambientDb=null, ambientLastTs=0, ambientT0=0, ambientSettled=false;   // bin별 주변 레벨(dB) 추적값 — 정상 톤 배제용 (측정 시작/중지 시 초기화)
 let adaptiveTrigger=false;  // true=적응형(v2), false=고정 0.08(v1 클래식)
 let flowEnabled=true;
 let nrHintShown=false, unstableCount=0;  // 노이즈 저감 안내 토스트 (세션 내 1회)
@@ -464,8 +480,10 @@ function saveCurrentSlot(){
     slot.average = avg;
     const lo=slot.targetN*(1-slot.tolPct/100), hi=slot.targetN*(1+slot.tolPct/100);
     slot.avgJudge = avg>=lo&&avg<=hi ? 'OK' : 'NG';
-    const allDone = activeRobot.slots.every(s=>s.completedAt);
-    if(allDone){
+    // 다음 슬롯 = 아직 완료되지 않은 첫 슬롯. 세션 진행에서 순서를 바꿔 측정해도 완료된 슬롯·범위 밖으로 가지 않음
+    // (예전 activeSlotIdx++ → 마지막 슬롯을 먼저 끝내면 TypeError, 중간 슬롯을 먼저 끝내면 완료 슬롯에 값이 더 쌓였음)
+    const nextIdx = activeRobot.slots.findIndex(s=>!s.completedAt);
+    if(nextIdx<0){
       activeRobot.completedAt = new Date();
       const completedUnit = activeRobot.unit;
       renderRobots();
@@ -487,6 +505,9 @@ function saveCurrentSlot(){
       } else {
         saveState(); // 슬롯·호기 완료 상태 저장
         activeRobot = null;
+        // 측정할 호기가 없으므로 마이크 반납 — 다음 호기를 추가한 뒤 '측정 시작'으로 바로 이어서 측정할 수 있게
+        // (예전엔 측정이 계속 켜져 있어 '측정 시작'이 무시되고 저장 시 '호기가 설정되지 않았습니다'가 떴음)
+        if(measuring) stopMeasure();
         resetForNextMeasurement(true);
         setStep(4);
         updateSessionSwitchRow();
@@ -495,7 +516,7 @@ function saveCurrentSlot(){
       return;
     }
     saveState(); // 슬롯 완료 상태(completedAt·average·avgJudge) 저장
-    activeSlotIdx++;
+    activeSlotIdx = nextIdx;
     toast(slot.label+' 완료 (평균 '+slot.average.toFixed(1)+' N → '+slot.avgJudge+') — 다음으로 이동','ok',3000);
     renderRobotProgress();
     renderRobots();
@@ -514,19 +535,26 @@ function saveCurrentSlot(){
 /* ---------- 현재 호기 설정 취소 ---------- */
 function cancelCurrentRobot(){
   if(!activeRobot){ setStep(1); return; }
-  const hasMeasurements = activeRobot.slots.some(s=>s.values.length>0);
+  const robot = activeRobot;
+  const hasMeasurements = robot.slots.some(s=>s.values.length>0);
   if(hasMeasurements &&
      !confirm('이미 저장된 측정값이 있습니다.\n현재 호기 측정을 취소하면 미완료 상태로 남습니다. 계속할까요?')) return;
   if(measuring) stopMeasure();
-  robots=robots.filter(r=>r!==activeRobot);
+  // 호기를 지우지 않는다(예전엔 확인창 문구와 달리 호기·측정값을 통째로 삭제했음)
+  //  - 측정값 있음: 미완료(일시중지)로 남김 → 세션 진행에서 슬롯을 누르거나 '측정 시작'으로 이어서 측정(initRobotIfNeeded 재개 경로)
+  //  - 측정값 없음: 대기열로 되돌림 → 다시 시작하거나 대기열에서 삭제
+  if(!hasMeasurements) robot.startedAt = null;
   activeRobot=null; activeSlotIdx=0; currentResult=null;
   renderRobots();
   renderRobotProgress();
+  renderRobotQueuePreview();
   updateReportButtons();
   setStep(1);
   updateSessionSwitchRow();
   saveState();
-  toast('측정 설정을 취소했습니다.','warn');
+  toast(hasMeasurements
+    ? robot.unit+'호기 측정을 중단했습니다. 미완료로 남아 있으며 세션 진행에서 이어서 측정할 수 있습니다.'
+    : '측정 설정을 취소했습니다.', 'warn', hasMeasurements ? 4500 : undefined);
 }
 
 /* ---------- 측정 초기화 ---------- */
@@ -728,7 +756,7 @@ function deleteRobot(id){
   toast(robot.unit+'호기가 삭제됐습니다.','warn');
 }
 
-const estFreq=$('estFreq'), kconst=$('kconst');
+const estFreq=$('estFreq');
 const statusDot=$('statusDot'), statusText=$('statusText'), statusPill=$('statusPill');
 const liveFreq=$('liveFreq'), livePeak=$('livePeak'), meterFill=$('meterFill'), meterVal=$('meterVal');
 const canvas=$('spectrum'), ctx=canvas&&canvas.getContext('2d');
@@ -811,8 +839,9 @@ function refreshPresetEstimate(){
   if(isFinite(expectedFreq)){
     estFreq.value = expectedFreq.toFixed(2);
   } else {
-    const k = parseFloat(kconst.value)||1000;
-    if(isFinite(span) && span>0) estFreq.value = (k/span).toFixed(2);
+    // 목표 장력·형상이 없으면 예상 주파수를 계산할 수 없음 → 비워 둠(측정 대상 고정은 중심이 없으면 적용 안 됨)
+    // 예전 k/Span(k=1000) 대체값은 실제 벨트(약 200~310 Hz)와 무관한 10 Hz대라 고정 대역이 엉뚱하게 좁혀졌음
+    estFreq.value = '';
   }
   updateAssistInfo();
 }
@@ -899,6 +928,7 @@ async function openAudio(myToken){
 
   measuring=true; peakBuffer=[]; peakFlagBuffer=[];
   rearmPending=false; rearmQuietSince=0;
+  ambientDb=null; ambientLastTs=0; ambientSettled=false;   // 첫 프레임으로 주변 레벨 초기화 (FFT 크기가 바뀌었을 수 있음)
   resetCollection();
   nrHintShown=false; unstableCount=0;
   ambientRms=0.02;    // 측정 시작 시 기준선 리셋 (filterStrength=2 기준 초기 임계값 ≈ 0.08)
@@ -925,6 +955,7 @@ function stopMeasure(keepStatus){
   analyser=null;
   resetCollection();   // 수집 중 중지 → 재시작 시 이전 벨트 스냅샷으로 결과가 나오지 않도록
   peakBuffer=[]; peakFlagBuffer=[];
+  ambientDb=null; ambientLastTs=0; ambientSettled=false;
   btnStart.disabled=false; btnStop.disabled=true; btnSave.disabled=true;
   selFFT.disabled=false;
   dispFreq=0;
@@ -1005,6 +1036,9 @@ function analyzeLoop(){
   for(let i=minBin;i<=maxBin;i++){ if(floatBuf[i] >= peakDb-6) aboveCount++; }
   const broadband = (aboveCount/Math.max(1,n)) > BROADBAND_RATIO;
 
+  // 정상 톤 배제용 주변 레벨 추적 — 검출과 같은 스펙트럼(노이즈 저감 적용 후)
+  const ambientWarming = trackAmbient(floatBuf, performance.now(), peakBin, peakDb, meanDb, broadband, analyser.fftSize/sampleRate + AMBIENT_WARMUP_MARGIN_S);
+
   let lvl=0; for(let i=minBin;i<=maxBin;i++){ if(byteBuf[i]>lvl) lvl=byteBuf[i]; }
   const lvlPct=Math.round(lvl/255*100);
   meterFill.style.width=lvlPct+'%'; meterVal.textContent=lvlPct+'%';
@@ -1071,7 +1105,10 @@ function analyzeLoop(){
     livePeak.textContent='약함'; livePeak.style.color='var(--amber)';
     liveFreq.textContent='--';
   }
-  else if(broadband || (peakDb - meanDb) < PROMINENCE_DB){
+  // 대역 최대 피크가 튕기기 전부터 있던 정상 톤(대역 안 험·모터음)이면 벨트 신호가 아님 → 검출 없음으로 처리
+  // (예전엔 험 주파수를 장력으로 표시했고, 연속 모드 저장 후 재무장도 풀리지 않았음).
+  // 측정 시작 직후 주변 레벨을 배우는 동안(≈0.5 s, FFT 창 채움 중)도 검출 보류 — 그 사이 튕긴 소리를 배우다 배음 환산이 어긋나지 않도록
+  else if(broadband || (peakDb - meanDb) < PROMINENCE_DB || isStationaryTone(peakBin, peakDb) || ambientWarming){
     setStatus('listen','대기 중 — 벨트를 튕겨주세요','LISTENING');
     livePeak.textContent='—'; livePeak.style.color='var(--muted)';
     liveFreq.textContent='--';
@@ -1157,6 +1194,52 @@ function localFloorDb(buf, bin, loLimit, hiLimit){
   }
   return vals.length ? median(vals) : -Infinity;
 }
+/* bin별 주변 레벨(dB) 비대칭 추적: 오를 때 시정수 riseS(기본 AMBIENT_RISE_S), 내릴 때 AMBIENT_FALL_S. 첫 프레임으로 초기화.
+   dt=프레임 간격(초) */
+function updateAmbient(buf, dt, riseS){
+  const N=buf.length;
+  if(!ambientDb || ambientDb.length!==N){
+    ambientDb=new Float32Array(N);
+    for(let i=0;i<N;i++){ const v=buf[i]; ambientDb[i]=isFinite(v)?v:-200; }
+    return;
+  }
+  if(!(dt>0)) return;
+  const kUp=1-Math.exp(-dt/(riseS||AMBIENT_RISE_S)), kDn=1-Math.exp(-dt/AMBIENT_FALL_S);
+  for(let i=0;i<N;i++){
+    const v=isFinite(buf[i])?buf[i]:-200, a=ambientDb[i];
+    ambientDb[i]=a+(v-a)*(v>a?kUp:kDn);
+  }
+}
+/* analyzeLoop에서 매 프레임 호출. 첫 프레임으로 초기화하고, 이후에는 '조용한' 프레임(충격 수집 중 아님 +
+   대역 안에 뚜렷한 피크 없음)에서만 갱신 — 벨트가 울리는 동안 멈춰 두어 튕긴 벨트의 기본파가 주변 레벨로
+   학습되지 않게 한다(느슨한 벨트의 f/2·f/3 환산은 예전과 동일). 단, 시작 직후 warmS초(창 채움+여유)는 무조건 빠르게 학습. 대역 최대 피크가 이미 아는 정상 톤(대역 안 험)이면
+   벨트가 울리는 프레임이 아니므로 조용한 프레임으로 본다(계속 나는 대역 안 톤 때문에 추적이 영영 멈추지 않도록).
+   tNowMs=performance.now(), warmS=시작 직후 무조건 학습 시간(초). 반환: 아직 안정되지 않았으면 true */
+function trackAmbient(buf, tNowMs, peakBin, peakDb, meanDb, broadband, warmS){
+  const dt = ambientLastTs ? Math.min(0.1, (tNowMs-ambientLastTs)/1000) : 0;
+  ambientLastTs = tNowMs;
+  if(!ambientDb || !(peakDb > -150)) ambientT0 = tNowMs;   // 마이크 데이터가 들어오기 전(무음 프레임)에는 학습 시작 시각을 미룸
+  const warm = (tNowMs-ambientT0)/1000 < warmS;             // 시작 직후(창 채움 중): 무조건 빠르게 학습
+  const bandHasPeak = peakDb >= ABS_MIN_DB && !broadband && (peakDb - meanDb) >= PROMINENCE_DB;
+  const quiet = warm || !bandHasPeak || isStationaryTone(peakBin, peakDb);
+  const riseS = warm ? AMBIENT_WARMUP_RISE_S : AMBIENT_RISE_S;
+  if(!ambientDb || (!collecting && quiet)) updateAmbient(buf, dt, riseS);
+  // 워밍업이 끝난 뒤 '조용한' 프레임이 한 번 나와야 안정 — 워밍업 중에 튕긴 소리(일부만 학습됨)가 다 사라질 때까지 보류
+  if(!warm && quiet) ambientSettled = true;
+  return !ambientSettled;   // true = 주변 레벨이 아직 안정되지 않음 → 연속 경로는 검출을 보류
+}
+/* 이 bin의 성분이 튕기기 전부터 계속 나던 톤(험·모터음)인가 — 주변 레벨에서 이 bin(±1) 자리에 톤 피크가 있고,
+   지금 레벨이 그보다 SUBHARM_MIN_RISE_DB 미만으로만 커졌으면 true.
+   (주변 레벨이 옆 험의 주엽 가장자리 때문에 높을 뿐인 bin은 해당 없음 — 8192 FFT에서 105 Hz가 120 Hz 험 주엽 안에 드는 경우 등) */
+function isStationaryTone(bin, db){
+  if(!ambientDb || bin<1 || bin>=ambientDb.length-1) return false;
+  let j=bin;
+  if(ambientDb[bin-1]>ambientDb[j]) j=bin-1;
+  if(ambientDb[bin+1]>ambientDb[j]) j=bin+1;
+  if(j<1 || j>=ambientDb.length-1) return false;
+  const tonePeak = ambientDb[j]>=ambientDb[j-1] && ambientDb[j]>=ambientDb[j+1];
+  return tonePeak && db-ambientDb[j] < SUBHARM_MIN_RISE_DB;
+}
 /* 선택 피크(peakBin)에 대해 f/2, f/3 위치에 유의미한 국소 피크가 있으면 그쪽을 기본주파수로.
    최대 2단계(→ 4·6·9배 배음까지) 반복. 반환 subN = 선택 피크가 기본파의 몇 배인지(1=그대로) */
 function resolveFundamental(buf, binHz, peakBin, anaLo, anaHi){
@@ -1170,6 +1253,7 @@ function resolveFundamental(buf, binHz, peakBin, anaLo, anaHi){
       if(cand.db < ABS_MIN_DB) continue;                       // 절대 신호 약함
       if(cand.db - refDb < SUBHARM_MIN_REL_DB) continue;        // 선택 피크 대비 너무 약함
       if(cand.db - localFloorDb(buf, cand.bin, anaLo, anaHi) < SUBHARM_MIN_PROM_DB) continue; // 노이즈 바닥과 구분 안 됨
+      if(isStationaryTone(cand.bin, cand.db)) continue;         // 튕기기 전부터 있던 정상 톤(60/120 Hz 험·모터음)
       const fc = interpolatePeak(buf, cand.bin, binHz);
       if(Math.abs(fc*n/fCur - 1) > SUBHARM_TOL) continue;       // 정수배 관계가 아님(예: 60 Hz 험)
       if(!pick || n>pick.n) pick={bin:cand.bin, n, f:fc};       // 둘 다 맞으면 더 낮은 주파수(큰 n)
@@ -1255,9 +1339,7 @@ function computeLockCenter(){
         span=parseFloat(inSpan.value), cf=parseFloat(inCF.value), targetN=parseFloat(inTargetN.value);
   const ef=calcExpectedFreq(mass,width,span,targetN,cf);
   if(isFinite(ef) && ef>0) return ef;
-  const k=parseFloat(kconst.value)||1000;
-  if(isFinite(span) && span>0) return k/span;
-  return NaN;
+  return NaN;   // 예상 주파수를 알 수 없으면 대역을 좁히지 않음 (k/Span 대체 경로 제거)
 }
 
 function setNoiseChip(txt){
@@ -1285,6 +1367,9 @@ function detectFundamentalBandpass(floatBuf, binHz, bandLo, bandHi, anaLo, anaHi
   if(peakBin<0 || !isFinite(peakDb)) return null;
   // 대역 안이 노이즈뿐이면(기본파가 대역 밖 등) 프레임을 버림 — 노이즈 최대값이 주파수로 채택되는 것 방지
   if(peakDb - localFloorDb(floatBuf, peakBin, bandLo, bandHi) < PEAK_MIN_PROM_DB) return null;
+  // 대역 최대 피크가 충격 전부터 있던 정상 톤(대역 안 험·모터음)이면 프레임을 버림 — 벨트가 감쇠한 뒤 수집 구간
+  // 끝부분에서 험이 대역 최대가 되어 결과에 섞이지 않도록 (예전엔 그 험을 f/2·f/3로 잘못 환산해 우연히 걸러졌음)
+  if(isStationaryTone(peakBin, peakDb)) return null;
   return analyzePeak(floatBuf, binHz, peakBin, bandLo, bandHi, anaLo, anaHi, narrowed);
 }
 
@@ -1877,8 +1962,10 @@ function setFlowMode(enabled){
   activeRobot=null; activeSlotIdx=0; currentResult=null;
 
   const stepBar=document.querySelector('.step-bar');
-  const flowOnlyEls=['fs1','fs4','fs5'];
+  // #fs5(측정 기록·초기화)는 단순 모드 기록 표도 그리므로 숨기지 않는다 (예전엔 단순 모드에서 기록이 보이지 않았음)
+  const flowOnlyEls=['fs1','fs4'];
   const simCSV=$('btnSimpleCSV');
+  document.body.dataset.flow = enabled ? 'on' : 'off';   // 모바일 CSS: 단순 모드에서 기록(#fs5) 표시
 
   if(enabled){
     if(stepBar) stepBar.style.display='';
@@ -2198,7 +2285,6 @@ btnPDF.addEventListener('click', downloadPDF);
   inSpan.addEventListener(evt, refreshPresetEstimate);
   inCF.addEventListener(evt, refreshPresetEstimate);
   inTargetN.addEventListener(evt, refreshPresetEstimate);
-  kconst.addEventListener(evt, refreshPresetEstimate);
 });
 
 /* ---------- 측정 보조 토글 ---------- */
@@ -2276,7 +2362,7 @@ selLockWidth.addEventListener('change', ()=>{
   targetLock.widthPct=parseInt(selLockWidth.value,10)||30; updateAssistInfo();
 });
 ['input','change'].forEach(evt=>{
-  [inMass,inWidth,inSpan,inCF,inTargetN,estFreq,kconst].forEach(el=>el.addEventListener(evt, updateAssistInfo));
+  [inMass,inWidth,inSpan,inCF,inTargetN,estFreq].forEach(el=>el.addEventListener(evt, updateAssistInfo));
 });
 
 /* ---------- 측정 플로우 토글 ---------- */
@@ -2363,10 +2449,11 @@ window.addEventListener('load', ()=>{
   // flowEnabled 상태에 따라 UI 초기화
   const swFlowEl=$('swFlow');
   if(swFlowEl) swFlowEl.setAttribute('aria-pressed', flowEnabled?'true':'false');
+  document.body.dataset.flow = flowEnabled ? 'on' : 'off';
   if(!flowEnabled){
     const stepBar=document.querySelector('.step-bar');
     if(stepBar) stepBar.style.display='none';
-    ['fs1','fs4','fs5'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
+    ['fs1','fs4'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });   // #fs5(기록)는 단순 모드에서도 표시
     const prog=$('measureProgress'); if(prog) prog.style.display='none';
     const simCSV=$('btnSimpleCSV'); if(simCSV) simCSV.style.display='';
     const fs2=$('fs2'), fs3=$('fs3');

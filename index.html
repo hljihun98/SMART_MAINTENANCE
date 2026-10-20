@@ -209,6 +209,7 @@
   .pill.ok{color:var(--green);background:var(--green-bg);}  /* 사용 가능 상태 */
   .pill.dev{color:var(--muted);background:#F1F3F5;}          /* 개발 중 상태 */
   .pill.test{color:#B45309;background:#FEF3C7;}              /* 테스트 중 상태 (열 수는 있음) */
+  .pill.legacy{color:var(--muted);background:#F1F3F5;}        /* 이전 버전 (열 수는 있지만 새 버전 사용 권장) */
   .pill svg{width:13px;height:13px;stroke:currentColor;stroke-width:2.2;fill:none;stroke-linecap:round;stroke-linejoin:round;}
   /* "열기 →" 텍스트: 호버 시 화살표 간격이 넓어지는 애니메이션 */
   .open{
@@ -315,7 +316,7 @@
         <img src="./logo.png" alt="HL Robotics" class="logo-mark">
       </a>
       <span class="sep"></span>
-      <span class="ctx">SMART Maintenance Platform <span class="vpill" id="ver-pill">v26.10.20.3</span></span>
+      <span class="ctx">SMART Maintenance Platform <span class="vpill" id="ver-pill">v26.10.20.4</span></span>
     </div>
   </div>
 
@@ -352,28 +353,28 @@
 <script>
   /* ── 플랫폼 버전 ── 배포(main Merge) 때 이 한 곳만 고치면 상단 배지·푸터가 함께 바뀐다.
      화면에는 날짜 버전만 표시한다. num은 git 번호 태그와 맞추기 위한 기록용.
-     num: 번호 버전(v주.부.수), date: 배포일(YY.MM.DD) — git 태그 v2.0.5 / v26.10.20.3 과 맞춘다 */
-  var VERSION = { num:'v2.0.5', date:'26.10.20.3' };
+     num: 번호 버전(v주.부.수), date: 배포일(YY.MM.DD) — git 태그 v2.0.6 / v26.10.20.4 과 맞춘다 */
+  var VERSION = { num:'v2.0.6', date:'26.10.20.4' };
 
   /* ── 등록된 앱 목록 ──
      강조색 규칙: Tailwind 600 단계에서 색상환 약 30° 간격으로 골라 카드끼리 구분되게 한다
        (파랑 #2563EB · 시안 #0891B2 · 녹색 #059669 · 보라 #7C3AED · 자주 #C026D3).
        accentBg는 강조색 10% + 흰색 90%. 새 앱은 남은 간격(예: 인디고·로즈)에서 고른다.
      각 항목: href(경로), accent(강조색), icon(SVG 패스), tag(카테고리), name(앱 이름),
-              desc(설명), ready(사용 가능 여부), status('test'면 열 수 있지만 '테스트 중'으로 표시) */
+              desc(설명), ready(사용 가능 여부), status('test'면 열 수 있지만 '테스트 중', 'legacy'면 '이전 버전'으로 표시) */
   var APPS = [
     { href:'./apps/sensor-report/', accent:'#2563EB', accentBg:'#EAF1FE',
       icon:'<path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M5 8V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2"/><path d="M8 13l2.5 3 2-2.5L16 18"/>',
       tag:'라이다 · 카메라', name:'센서 보고서', desc:'PARKIE 로봇의 라이다·카메라 센서 점검 결과와 사진을 정리해 PDF 보고서를 생성합니다.', ready:true },
-    { href:'./apps/belt-tension/', accent:'#0891B2', accentBg:'#E6F4F7',
-      icon:'<circle cx="6" cy="12" r="3"/><circle cx="18" cy="12" r="3"/><path d="M6 9h12"/><path d="M6 15h12"/>',
-      tag:'장력 N', name:'벨트 장력계', desc:'컨베이어 벨트의 장력을 측정하고 기준값과 비교합니다.', ready:true },
     { href:'./apps/belt-tension-2.0/', accent:'#059669', accentBg:'#E6F5F0',
       icon:'<path d="M4 10v4"/><path d="M8 7v10"/><path d="M12 4v16"/><path d="M16 8v8"/><path d="M20 11v2"/>',
       tag:'장력 N · 음파', name:'벨트 장력계 2.0', desc:'음파 FFT 분석으로 벨트 장력을 측정합니다. 노이즈 저감·목표 잠금·CSV 내보내기를 지원합니다.', ready:true },
     { href:'./apps/torque-tak/', accent:'#7C3AED', accentBg:'#F2EBFD',
       icon:'<path d="M21.4 12 16.7 20.1 7.3 20.1 2.6 12 7.3 3.9 16.7 3.9Z"/><circle cx="12" cy="12" r="3.7"/>',
       tag:'체결토크 N·m', name:'Torque Tak!', desc:'볼트 사양과 체결 조건으로 권장 체결토크를 계산하고, 나사산 뽑힘·좌면 압괴 등 체결부 성립 여부를 검토합니다.', ready:true },
+    { href:'./apps/belt-tension/', accent:'#0891B2', accentBg:'#E6F4F7',
+      icon:'<circle cx="6" cy="12" r="3"/><circle cx="18" cy="12" r="3"/><path d="M6 9h12"/><path d="M6 15h12"/>',
+      tag:'장력 N', name:'벨트 장력계', desc:'컨베이어 벨트의 장력을 측정하고 기준값과 비교합니다. 새 측정은 벨트 장력계 2.0을 사용하세요.', ready:true, status:'legacy' },
     { href:'./apps/robostock/', accent:'#C026D3', accentBg:'#F9E9FB',
       icon:'<path d="M9 3h6"/><path d="M10 3v6l-4.5 8a2 2 0 0 0 1.8 3h9.4a2 2 0 0 0 1.8-3L14 9V3"/><path d="M7 14h10"/>',
       tag:'재고 관리', name:'ROBOSTOCK', desc:'로봇 부품 재고·BOM·입출고·공수·작업 일정을 통합 관리합니다.<br>(ID: R00000 PW: test12!@)', ready:true, status:'test' }
@@ -394,6 +395,7 @@
       /* 사용 가능 여부에 따라 배지 HTML 결정 */
       var pill = !a.ready            ? '<span class="pill dev">개발 중</span>'
                : a.status === 'test' ? '<span class="pill test">테스트 중</span>'
+               : a.status === 'legacy' ? '<span class="pill legacy">이전 버전</span>'
                :                       '<span class="pill ok">'+CHECK+'사용 가능</span>';
       /* CSS 커스텀 속성으로 각 카드의 강조색을 개별 설정 */
       return '<a class="card" href="'+a.href+'" style="--accent:'+a.accent+';--accent-bg:'+a.accentBg+';">'+

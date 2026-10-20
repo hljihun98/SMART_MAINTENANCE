@@ -489,15 +489,18 @@ function saveCurrentSlot(){
       renderRobots();
       renderRobotProgress();
 
-      const nextPending = robots.find(r=>!r.startedAt);
+      /* 다음 호기: 아직 시작 안 한 호기 → 없으면 일시중지(취소)된 미완료 호기를 이어서.
+         예전엔 시작 안 한 호기만 찾아, 일시중지 호기가 남아 있어도 '모든 호기 측정 완료'로 끝냈다. */
+      const nextPending = robots.find(r=>!r.startedAt)
+        || robots.find(r=>r!==activeRobot && r.startedAt && !r.completedAt);
       if(nextPending){
-        nextPending.startedAt = new Date();
+        if(!nextPending.startedAt) nextPending.startedAt = new Date();
         saveState(); // 슬롯·호기 완료 + 다음 호기 시작 상태까지 모두 저장
         activeRobot = null; activeSlotIdx = 0;
         resetForNextMeasurement(false);
         activeRobot = nextPending;
-        activeSlotIdx = 0;
-        applySlotPreset(nextPending.slots[0]);
+        activeSlotIdx = Math.max(0, nextPending.slots.findIndex(s=>!s.completedAt));   // 재개면 남은 첫 슬롯부터
+        applySlotPreset(nextPending.slots[activeSlotIdx]);
         renderRobotProgress();
         renderRobots();
         updateSessionSwitchRow();

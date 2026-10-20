@@ -1382,8 +1382,17 @@ async function loadPhotoForPdf(ref){
     URL.revokeObjectURL(url);
   }
 }
+// 사진 위에 겹쳐 그리는 촬영 각도 라벨 — 반투명 어두운 배경 + 흰 글씨. 사진을 거의 가리지 않게 작게 둔다.
+function pdfAngleBadge(doc,text,x,y){
+  const t=textToPng(text,{size:5,bold:true,color:[255,255,255],pad:1});
+  const canAlpha = typeof doc.GState==='function' && typeof doc.setGState==='function';
+  if(canAlpha) doc.setGState(new doc.GState({opacity:0.6}));
+  doc.setFillColor(20,30,45); doc.roundedRect(x,y,t.wmm,t.hmm,0.6,0.6,'F');
+  if(canAlpha) doc.setGState(new doc.GState({opacity:1}));
+  doc.addImage(t.data,'PNG',x,y,t.wmm,t.hmm,undefined,'FAST');
+}
 // PDF 한 섹션을 생성합니다. 특정 호기의 센서 상태/사진을 표 형태로 그립니다.
-// 사진 칸마다 그 센서의 실제 촬영 각도(예: 카메라 '정면/측면', FRONT LIDAR '상면')를 표시합니다.
+// 사진 칸마다 그 센서의 실제 촬영 각도(예: 카메라 '정면/측면', FRONT LIDAR '상면')를 사진 왼쪽 위에 겹쳐 표시합니다.
 async function pdfAddSection(doc,r,stage,startY){
   const M=PDF_M, C=PDF_COL, totalW=PDF_TABLE_W, rowH=PDF_ROW_H;
   let y=startY;
@@ -1391,7 +1400,7 @@ async function pdfAddSection(doc,r,stage,startY){
   doc.rect(M,y,totalW,PDF_TITLE_H,'FD');
   pdfText(doc,stageLabel(stage)+' — '+r.num+' 호기', M+totalW/2, y+PDF_TITLE_H/2, {align:'center',valign:'middle',size:8,bold:true,color:[255,255,255]});
   y+=PDF_TITLE_H;
-  const hCols=[{t:'No.',w:C.no},{t:'Sensor',w:C.name},{t:'Status',w:C.status},{t:'사진 (칸마다 촬영 각도 표시)',w:C.photo*4}];
+  const hCols=[{t:'No.',w:C.no},{t:'Sensor',w:C.name},{t:'Status',w:C.status},{t:'사진 (촬영 각도는 사진 왼쪽 위)',w:C.photo*4}];
   let hx=M;
   hCols.forEach(h=>{
     doc.setFillColor(100,120,150); doc.setDrawColor(100,120,150); doc.setLineWidth(0.25);
@@ -1440,10 +1449,10 @@ async function pdfAddSection(doc,r,stage,startY){
         rx+=C.photo; continue;
       }
       doc.rect(rx,y,C.photo,rowH);
-      const capH=4.2;
-      const areaX=rx+1, areaY=y+capH, areaW=C.photo-2, areaH=rowH-capH-1;
+      // 사진은 칸 전체(여백 1mm)를 쓴다 — 각도 라벨 줄을 따로 두면 사진이 작아져 확인하기 어려웠다.
+      const areaX=rx+1, areaY=y+1, areaW=C.photo-2, areaH=rowH-2;
       const ref = r.photos[stagePhotoKey(r.id,si,ai,stage)];
-      let drawn=false, failed=false;
+      let drawn=false, failed=false, px=areaX, py=areaY;
       if(ref){
         try{
           const pic = await loadPhotoForPdf(ref);
@@ -1451,16 +1460,19 @@ async function pdfAddSection(doc,r,stage,startY){
             const ratio = pic.w/pic.h;
             let w = areaW, h = areaW/ratio;
             if(h>areaH){ h=areaH; w=areaH*ratio; }
-            doc.addImage(pic.data, 'JPEG', areaX+(areaW-w)/2, areaY+(areaH-h)/2, w, h, undefined, 'FAST');
+            px=areaX+(areaW-w)/2; py=areaY+(areaH-h)/2;
+            doc.addImage(pic.data, 'JPEG', px, py, w, h, undefined, 'FAST');
             drawn=true;
           } else failed=true;
         }catch(e){ console.warn('PDF 사진 삽입 실패', e); failed=true; }
       }
-      if(!drawn){
+      if(drawn){
+        pdfAngleBadge(doc, angles[ai], px+0.7, py+0.7);   // 촬영 각도 — 사진 왼쪽 위에 겹쳐 표시
+      } else {
         doc.setFillColor(235,238,242); doc.rect(areaX,areaY,areaW,areaH,'F');
         pdfText(doc,failed?'불러오기 실패':'미첨부',rx+C.photo/2,areaY+areaH/2,{align:'center',valign:'middle',size:5.5,color:failed?[180,60,60]:[170,170,170]});
+        pdfText(doc,angles[ai],areaX+0.4,areaY+0.3,{size:5,bold:true,color:[140,148,160]});
       }
-      pdfText(doc,angles[ai],rx+0.6,y+0.4,{size:5.5,bold:true,color:[90,100,120]});
       rx+=C.photo;
     }
     y+=rowH;

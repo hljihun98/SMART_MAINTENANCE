@@ -1188,9 +1188,14 @@ let lePending=null;                  // 길이가 판재보다 짧아 보류 중
 const LS_KEY="torque-tak/v2";
 const LS_OLD=["torque-tak/v1"];       // 뜻이 바뀌어 읽지 않는 옛 키 — 남겨 두면 저장소만 차지한다
 let saveT=null;
-/* 상태 S를 localStorage에 그대로 저장 — 사생활 모드 등에서 막히면 조용히 넘어간다 */
+/* 마지막으로 저장(또는 첫 렌더 직후 기준으로 기억)한 상태 문자열.
+   열었다 아무것도 바꾸지 않고 닫으면 이 값과 같으므로 저장하지 않는다 — 포털 데이터 관리에 잡히지 않게. */
+let lastSaved=null;
+/* 상태 S를 localStorage에 저장 — 바뀐 것이 있을 때만. 사생활 모드 등에서 막히면 조용히 넘어간다 */
 function saveState(){
-  try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
+  const v=JSON.stringify(S);
+  if(v===lastSaved) return;
+  try{localStorage.setItem(LS_KEY,v); lastSaved=v;}catch(e){}
 }
 /* 저장 디바운스 — 연속 입력 중에는 마지막 입력 0.4초 뒤에 한 번만 쓴다 */
 function queueSave(){ clearTimeout(saveT); saveT=setTimeout(saveState,400); }
@@ -2678,6 +2683,8 @@ document.addEventListener("visibilitychange",()=>{if(document.hidden)saveState()
   if(S.load>0) $("load").value=S.load;
   if(S.shank>0)$("shank").value=S.shank;
   render();
+  /* 첫 렌더가 예약한 저장은 취소하고, 지금 상태를 기준으로 기억한다 — 이후 사용자가 바꾼 경우에만 저장된다 */
+  clearTimeout(saveT); lastSaved=JSON.stringify(S);
   /* 최초 측정은 프레임 하나 뒤에 한 번 — 스타일이 다 앉은 뒤의 폭이어야 정확하다 */
   requestAnimationFrame(()=>{segsStale();buildSegs();updateSlider(true);updateQuickNav();});
 })();

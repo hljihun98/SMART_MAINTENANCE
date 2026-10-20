@@ -1,5 +1,9 @@
 <!DOCTYPE html>
 <html lang="ko">
+
+<head>
+
+<meta charset="UTF-8">
 <!--
  * PARKIE 센서 점검 앱
  *
@@ -17,10 +21,6 @@
  * - 이메일: hljihun98@gmail.com
  * 만든 날짜: 2026-06-06
  -->
-
-<head>
-
-<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PARKIE 센서 점검</title>
 <!-- 파비콘: HL 그룹 아이콘 (hlmando.com 제공 파일과 동일) -->
@@ -146,6 +146,8 @@ input.n-inp:focus{border-color:#0099CC}
 .toast{text-align:center;font-size:12px;color:#6B7280;padding:5px 20px;min-height:22px}
 /* 저장 데이터를 불러오고 변환하는 동안에는 입력을 막습니다. */
 .app.booting .info-panel,.app.booting .robot-grid,.app.booting .action-bar{pointer-events:none;opacity:.55}
+/* PDF를 만드는 동안에는 단계 전환·호기 추가/삭제 등 상태를 바꾸는 입력을 막습니다(생성 결과가 섞이지 않도록). */
+.app.pdf-busy .info-panel,.app.pdf-busy .robot-grid,.app.pdf-busy .action-bar{pointer-events:none;opacity:.7}
 @keyframes rise{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
 .app>*{animation:rise .55s cubic-bezier(.2,.75,.25,1) both;}
 .app>*:nth-child(1){animation-delay:.02s}.app>*:nth-child(2){animation-delay:.07s}
@@ -533,7 +535,7 @@ let toastTimer = null, saveTimer = null;
 let logoImagePromise = null;
 // 저장 데이터 불러오기/변환이 끝났는지 여부입니다.
 let appReady = false;
-// PDF 생성 중복 실행 방지 플래그입니다.
+// PDF 생성 중 여부입니다. 중복 실행을 막고, 생성 중에는 상태를 바꾸는 조작을 막습니다(setPdfLock).
 let pdfBusy = false;
 // 자동 저장을 멈춰야 하는 사유(손상 원본 보호, 다른 창에서 데이터 삭제 등)입니다. 빈 문자열이면 저장 가능합니다.
 let saveBlockedReason = '';
@@ -1011,22 +1013,62 @@ async function preloadPhotoUrls(){
     setWarning('photo-missing', '저장된 사진 ' + photoLoadFailed.size + '장을 사진 저장소에서 불러오지 못했습니다(브라우저 데이터 삭제 등). 해당 칸은 \'불러오기 실패\'로 표시되며, 삭제 후 다시 첨부할 수 있습니다.', [dismissAction('photo-missing')]);
   }
 }
+/* ── 다른 탭 확인 (Web Locks) ──
+   이 앱이 열려 있는 동안 공유 잠금을 쥐고 있습니다. 잠금을 쥔 탭이 둘 이상이면 다른 탭이 열려 있는 것이므로 사진 정리를 건너뜁니다.
+   (다른 탭이 첨부했지만 아직 이 탭이 모르는 사진을 지우지 않도록) Web Locks를 쓸 수 없는 브라우저에서는 사진 정리를 하지 않습니다. */
+const TAB_LOCK_NAME = 'parkie_sensor_open_tabs';
+let tabLockReady = Promise.resolve(false);
+function holdTabLock(){
+  const locks = navigator.locks;
+  if(!locks || typeof locks.request !== 'function' || typeof locks.query !== 'function') return Promise.resolve(false);
+  const granted = new Promise(resolve => {
+    try{
+      // 콜백이 끝나지 않는 Promise를 돌려주므로 페이지를 닫을 때까지 잠금을 유지합니다.
+      locks.request(TAB_LOCK_NAME, {mode:'shared'}, () => { resolve(true); return new Promise(()=>{}); })
+        .catch(() => resolve(false));
+    }catch(e){ resolve(false); }
+  });
+  // 잠금을 얻지 못한 채 멈춰 부팅이 막히지 않도록 1초 뒤에는 '확인 불가'로 봅니다.
+  return Promise.race([granted, new Promise(resolve => setTimeout(() => resolve(false), 1000))]);
+}
+// 다른 탭이 열려 있을 가능성이 있으면 true입니다. 확인할 수 없으면 안전하게 true로 봅니다.
+async function otherTabsMayBeOpen(){
+  if(!(await tabLockReady)) return true;
+  try{
+    const st = await navigator.locks.query();
+    const count = list => (list || []).filter(l => l.name === TAB_LOCK_NAME).length;
+    return count(st.held) + count(st.pending) > 1;
+  }catch(e){ return true; }
+}
+// 손상 데이터 백업(BACKUP_KEY) 원문이 참조하는 사진 id 목록입니다. 백업이 없으면 [], 읽을 수 없으면 null.
+function readBackupPhotoIds(){
+  let raw;
+  try{ raw = localStorage.getItem(BACKUP_KEY); }catch(e){ return null; }
+  if(!raw) return [];
+  return raw.match(/[pm]_[a-z0-9_]{4,64}/g) || [];
+}
 // 어디에서도 참조하지 않는 사진(저장 실패 등으로 남은 것)을 사진 저장소에서 정리합니다. 저장 데이터를 정상적으로 읽었을 때만 실행합니다.
+// 다른 탭이 열려 있을 수 있으면 건너뛰고, 손상 데이터 백업이 참조하는 사진은 지우지 않습니다.
 async function collectGarbagePhotos(){
   if(photoMemoryMode || saveBlockedReason) return;
   try{
+    if(await otherTabsMayBeOpen()) return;
+    const backupIds = readBackupPhotoIds();
+    if(backupIds === null) return;
     const refs = collectPhotoRefs();
+    backupIds.forEach(id => refs.add(id));
     const keys = await photoStore.keys();
+    if(saveBlockedReason) return;
     const orphans = keys.filter(k => typeof k === 'string' && PHOTO_ID_RE.test(k) && !refs.has(k));
     if(orphans.length) await photoStore.del(orphans);
   }catch(e){ console.warn('사진 정리 실패', e); }
 }
 
 /* ── 화면 갱신 / 편집 ── */
-// PDF 다운로드 시 사용할 파일명을 현재 날짜/호기/작업단계 기준으로 생성합니다.
-function getFilename(){
-  const nums = robots.map(r=>r.num).join('-');
-  return getDate()+'_PARKIE_'+nums+' 호기_'+stageLabel(activeStage).replace(/\s+/g,'')+'_센서점검보고서';
+// PDF 다운로드 시 사용할 파일명을 현재 날짜/호기/작업단계 기준으로 생성합니다. (PDF 생성 시에는 시작 시점의 복사본을 넘깁니다)
+function getFilename(list = robots, stage = activeStage){
+  const nums = list.map(r=>r.num).join('-');
+  return getDate()+'_PARKIE_'+nums+' 호기_'+stageLabel(stage).replace(/\s+/g,'')+'_센서점검보고서';
 }
 // 파일명 미리보기, 작업 단계 표시, 단계 버튼 active 상태, 확인 시점을 갱신합니다.
 function updateMeta(){
@@ -1041,14 +1083,37 @@ function setBooting(on){
   document.querySelector('.app').classList.toggle('booting', on);
   if(on) showToast('저장 데이터를 불러오는 중...'); else showToast('');
 }
+// PDF 생성 중이면 상태를 바꾸는 조작을 막습니다. 막았으면 true를 돌려줍니다. (화면 잠금이 안 되는 키보드 조작 등 대비)
+function blockedByPdf(){
+  if(!pdfBusy) return false;
+  showToast('PDF 생성 중에는 변경할 수 없습니다');
+  return true;
+}
+// PDF 생성 중 화면 잠금을 켜고 끕니다. 단계 전환·호기 추가/삭제·센서 결과·사진 등 입력 영역을 비활성화합니다.
+function setPdfLock(on){
+  pdfBusy = on;
+  const app = document.querySelector('.app');
+  if(app) app.classList.toggle('pdf-busy', on);
+  document.querySelectorAll('.info-panel, .robot-grid, .action-bar').forEach(el => { if(on) el.setAttribute('inert',''); else el.removeAttribute('inert'); });
+  const btn = document.getElementById('pdf-btn');
+  if(btn) btn.disabled = on;
+}
+// PDF용으로 호기 데이터를 깊은 복사합니다. 생성 도중 화면에서 바뀐 값이 PDF에 섞이지 않도록 합니다.
+function cloneRobotForPdf(r){
+  const ss = {}, memo = {};
+  for(const k of STAGE_KEYS){ ss[k] = [...r.ss[k]]; memo[k] = [...r.memo[k]]; }
+  return {id:r.id, num:r.num, status:{...r.status}, statusAuto:{...r.statusAuto}, photos:{...r.photos}, ss, memo};
+}
 // 사용자가 작업 전/이동 전/작업 후/이동 후 버튼을 눌렀을 때 현재 편집 단계를 변경합니다.
 function setStage(stage){
   if(!STAGES.some(s=>s.key===stage)) return;
+  if(blockedByPdf()) return;
   activeStage=stage;
   updateMeta(); render(); saveState();
 }
 // '+ 호기 추가' 버튼 기능입니다. 새 호기 카드를 추가하고 화면을 다시 그립니다.
 function addRobot(){
+  if(blockedByPdf()) return;
   rid++;
   const next = robots.length>0 ? Math.max(...robots.map(r=>Number(r.num)||0))+1 : 1;
   robots.push(makeRobot(next,rid));
@@ -1057,6 +1122,7 @@ function addRobot(){
 }
 // 호기 삭제 기능입니다. 최소 1개 호기는 남도록 제한하고, 되돌릴 수 없으므로 확인을 받습니다.
 function removeRobot(id){
+  if(blockedByPdf()) return;
   const r = robots.find(x=>x.id===id);
   if(!r) return;
   if(robots.length<=1){ showToast('최소 1개 호기가 필요합니다.'); return; }
@@ -1070,6 +1136,7 @@ function removeRobot(id){
 // 호기 번호 입력 변경을 반영합니다.
 function setRobotNum(id, el){
   const r = robots.find(x=>x.id===id); if(!r) return;
+  if(blockedByPdf()){ el.value = r.num; return; }
   r.num = Math.max(1, Math.floor(Number(el.value)) || 1);
   el.value = r.num;
   updateMeta(); saveState();
@@ -1077,6 +1144,7 @@ function setRobotNum(id, el){
 // 사용자가 현재 단계의 전체 상태를 직접 고르면 '자동 설정' 표시를 해제합니다(이후 자동 설정이 더 낮은 값으로 덮어쓰지 않음).
 function setRobotStatus(id, val){
   const r = robots.find(x=>x.id===id); if(!r) return;
+  if(blockedByPdf()){ render(); return; }
   if(!activeStage){ showToast('작업 단계를 선택해주세요'); render(); return; }
   r.status[activeStage] = STATUS_OPTIONS.includes(val) ? val : '';
   r.statusAuto[activeStage] = false;
@@ -1102,6 +1170,7 @@ function applyAutoStatus(r, stage){
 // 센서별 정상/이상 버튼을 토글합니다. 메모가 있는 '이상'을 해제하면 메모가 지워지므로 확인을 받습니다.
 function toggleStatus(robId,si,val){
   const r=robots.find(x=>x.id===robId); if(!r) return;
+  if(blockedByPdf()) return;
   if(!activeStage){ showToast('작업 단계를 선택해주세요'); return; }
   const cur = r.ss[activeStage][si];
   const next = (cur===val) ? null : val;
@@ -1189,6 +1258,7 @@ async function fileToJpegBlob(file){
 // 사진 슬롯 클릭 시 파일 선택/카메라 촬영을 열고, 선택된 사진을 사진 저장소(IndexedDB)에 저장한 뒤 칸에 연결합니다.
 // 사진 저장에 실패하면 첨부하지 않고 알립니다(화면에만 보이고 저장되지 않는 상황 방지).
 function upload(key,robId){
+  if(blockedByPdf()) return;
   if(!activeStage){ showToast('촬영 단계를 먼저 선택해주세요'); return; }
   if(saveBlockedReason){ alert('자동 저장이 중지된 상태라 사진을 첨부할 수 없습니다.\n\n사유: '+saveBlockedReason); return; }
   const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.capture='environment';
@@ -1224,6 +1294,7 @@ function upload(key,robId){
 }
 // 사진 슬롯의 X 버튼을 눌렀을 때 해당 사진을 삭제합니다. 다른 칸에서 같이 쓰는 사진이 아니면 사진 저장소에서도 지웁니다.
 function delPhoto(key,robId){
+  if(blockedByPdf()) return;
   const r=robots.find(x=>x.id===robId);
   if(!r || !(key in r.photos)) return;
   const ref = r.photos[key];
@@ -1458,10 +1529,12 @@ async function generatePDF(){
     showToast('PDF 생성이 취소되었습니다.');
     return;
   }
-  pdfBusy = true;
-  const btn = document.getElementById('pdf-btn');
-  if(btn) btn.disabled = true;
+  // 확인한 시점의 단계와 호기 데이터를 복사해 섹션·머리글·파일명·확인 시점에 모두 사용합니다.
+  // 생성 중(사진을 불러오는 동안)에는 화면을 잠그고, 혹시 바뀌더라도 PDF에는 섞이지 않습니다.
+  const stage = activeStage;
+  const snap = robots.map(cloneRobotForPdf);
   try {
+    setPdfLock(true);
     const now=getNow();
     showToast('PDF 생성 중...');
     const {jsPDF}=window.jspdf;
@@ -1485,14 +1558,14 @@ async function generatePDF(){
     doc.text('SENSOR INSPECTION TRACKER (RMEO)',M+42,10);
     doc.text(now,W-M,10,{align:'right'});
     const pb=photoBy||'-';
-    const statusText = robots.map(r => r.num + ' 호기 ' + (r.status[activeStage] || '미선택')).join(' / ');
+    const statusText = snap.map(r => r.num + ' 호기 ' + (r.status[stage] || '미선택')).join(' / ');
     // 호기가 많아 한 줄을 넘으면 줄바꿈합니다(페이지 밖으로 잘리지 않도록).
     const infoH = pdfWrappedText(doc,'Device: PARKIE   Inspector: '+pb+'   Date: '+now+'   Status: '+statusText,M,23,PDF_TABLE_W,{size:7.5,color:[90,90,90],lineH:3.8,maxLines:12,wordWrap:true});
     y = 23 + infoH + 6.2;
-    for(const r of robots){
+    for(const r of snap){
       // 섹션(제목+머리글+센서 4행)이 페이지에 다 들어가지 않으면 다음 페이지에서 시작합니다.
       if(y + PDF_SECTION_H > PDF_BOTTOM){ doc.addPage(); y=M; }
-      y=await pdfAddSection(doc,r,activeStage,y);
+      y=await pdfAddSection(doc,r,stage,y);
       y+=4;
     }
     const pages=doc.internal.getNumberOfPages();
@@ -1502,8 +1575,8 @@ async function generatePDF(){
       doc.setFont('helvetica','normal'); doc.setFontSize(6); doc.setTextColor(190,190,190);
       doc.text('HL Robotics - PARKIE Sensor Inspection Report  |  '+now+'  |  '+i+' / '+pages, W/2,292,{align:'center'});
     }
-    doc.save(getFilename()+'.pdf');
-    confirmedAt[activeStage] = now;
+    doc.save(getFilename(snap, stage)+'.pdf');
+    confirmedAt[stage] = now;
     updateMeta(); saveState();
     showToast('✓ PDF 저장 완료');
   } catch (error) {
@@ -1511,8 +1584,7 @@ async function generatePDF(){
     showToast('PDF 생성 실패');
     alert('PDF 생성 중 오류가 발생했습니다.\n\n' + errText(error));
   } finally {
-    pdfBusy = false;
-    if(btn) btn.disabled = false;
+    setPdfLock(false);
   }
 }
 // PDF 머리글에 넣을 로고 이미지를 한 번만 불러옵니다.
@@ -1532,6 +1604,7 @@ function showToast(msg){
 
 // '초기화' 버튼 기능입니다. 작성 중인 데이터, localStorage 저장 데이터, 사진 저장소의 사진을 모두 비웁니다.
 async function resetAll(){
+  if(blockedByPdf()) return;
   if(!confirm('진행중인 내용을 모두 초기화합니다. 저장된 사진도 모두 삭제됩니다.\n계속 진행하시겠습니까?')) return;
   try{
     if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
@@ -1561,10 +1634,15 @@ async function boot(){
   // 화면을 벗어나거나 창을 닫을 때 지연 중인 입력을 바로 저장합니다.
   document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') flushSave(); });
   window.addEventListener('pagehide', flushSave);
+  // 다른 탭의 사진 정리가 이 탭의 사진을 지우지 않도록, 열려 있는 동안 공유 잠금을 쥡니다.
+  tabLockReady = holdTabLock();
   // 다른 창(포털 데이터 관리, 같은 앱의 다른 탭 초기화)에서 저장 데이터를 지우면 되살리지 않도록 저장을 멈춥니다.
+  // 같은 앱의 다른 탭이 저장해 내용이 바뀐 경우에도, 이 탭의 오래된 내용으로 덮어쓰지 않도록 저장을 멈춥니다.
   window.addEventListener('storage', e => {
     if((e.key === STORAGE_KEY && e.newValue === null) || e.key === null){
       blockSaving('다른 창에서 저장 데이터가 삭제됨', '다른 창(포털 데이터 관리 등)에서 이 앱의 저장 데이터가 삭제되었습니다. 지운 데이터가 되살아나지 않도록 자동 저장을 멈췄습니다. 페이지를 새로고침해주세요.');
+    } else if(e.key === STORAGE_KEY){
+      blockSaving('다른 탭에서 저장 데이터가 변경됨', '다른 탭(창)에서 이 앱의 점검 내용이 저장되었습니다. 이 화면의 이전 내용으로 덮어쓰지 않도록 자동 저장을 멈췄습니다. 페이지를 새로고침해 최신 내용을 불러와주세요.');
     }
   });
   if(!window.jspdf || typeof window.jspdf.jsPDF !== 'function'){

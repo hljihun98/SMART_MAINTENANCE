@@ -1382,11 +1382,11 @@ async function loadPhotoForPdf(ref){
     URL.revokeObjectURL(url);
   }
 }
-// 사진 위에 겹쳐 그리는 촬영 각도 라벨 — 반투명 어두운 배경 + 흰 글씨. 사진을 거의 가리지 않게 작게 둔다.
+// 사진 위에 겹쳐 그리는 촬영 각도 라벨 — 옅은 반투명 배경(35%) + 흰 글씨. 사진을 가리지 않게 작고 투명하게 둔다.
 function pdfAngleBadge(doc,text,x,y){
-  const t=textToPng(text,{size:5,bold:true,color:[255,255,255],pad:1});
+  const t=textToPng(text,{size:5,bold:true,color:[255,255,255],pad:0.7});
   const canAlpha = typeof doc.GState==='function' && typeof doc.setGState==='function';
-  if(canAlpha) doc.setGState(new doc.GState({opacity:0.6}));
+  if(canAlpha) doc.setGState(new doc.GState({opacity:0.35}));
   doc.setFillColor(20,30,45); doc.roundedRect(x,y,t.wmm,t.hmm,0.6,0.6,'F');
   if(canAlpha) doc.setGState(new doc.GState({opacity:1}));
   doc.addImage(t.data,'PNG',x,y,t.wmm,t.hmm,undefined,'FAST');

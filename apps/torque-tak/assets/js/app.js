@@ -1,3 +1,31 @@
+/* ══════════════════════════════════════════════════════════
+   Torque Tak! — app.js 구조 안내
+   ══════════════════════════════════════════════════════════
+   빌드 없이 index.html이 그대로 읽는 단일 스크립트다. 위에서 아래로 다음 순서로 놓여 있다.
+
+     1. 제원표        나사 제원(피치·머리·좌면) → 볼트 강도구분 → 머리 형상 → 모재
+                      → 나사 고정제 → 마찰 조건(K/μ) → 와셔 → 모델 상수·판정 경계
+     2. compute()     입력 객체 하나 → 계산값 + 검토 항목 + 종합 판정. DOM을 건드리지 않는 순수 함수
+     3. parse()       사양 문자열("M8x1.25 저두 25") → {d, pitch, len, head}
+     4. 사내 시험     실측 파단 토크 표(MEAS)와 앱 예측값(MEAS_PRED, 최초 1회 계산)
+     5. 상태·저장     앱 상태 S, localStorage 저장·복원
+     6. 렌더          render() — S → parse → compute → R → 화면. 검토 목록·분해 토크 카드 포함
+     7. 화면 부품     퀵칩·세그먼트, 단면도(SVG), 슬라이더 2개, 계산 근거, 실측 대조, 바텀시트
+     8. 이벤트·시작   입력칸·버튼 핸들러, 리사이즈·저장 훅, init()
+
+   데이터 흐름
+     사용자 입력(입력칸·슬라이더·시트) → 상태 S 갱신 → render()
+       → parse(S.spec) = P → (볼트 길이 우선 물림 유도: S.Le·S.grip) → compute(...) = R
+       → R을 읽어 숫자·검토 항목·단면도·계산 근거를 쓴다 → 디바운스 저장(queueSave)
+
+   단위 약속 (식 안에서 따로 적지 않으면 이것을 따른다)
+     길이 mm · 힘 N · 응력·강도·면압 MPa(= N/mm²) · 토크는 계산 중 N·mm, 화면·R에서는 N·m(÷1000)
+     비율(이용률·여유·이완 손실)은 0~1 소수로 들고 다니다가 표시할 때 %로 바꾼다.
+
+   계산의 뼈대는 VDI 2230 Teil 1(체결토크식·FMzul·나사산 전단·컴플라이언스)이고, 규격이 없는
+   보정값(나사산 변형 0.65, 저두 0.50, 뽑힘 안전율 등)은 자체값으로 표시해 둔다 — 계산 근거
+   패널(writeBasis)이 단계마다 근거 등급을 밝힌다.
+   ══════════════════════════════════════════════════════════ */
 "use strict";
 const PI=Math.PI;
 
@@ -12,6 +40,7 @@ const PITCH={1.6:.35,2:.4,2.5:.45,3:.5,4:.7,5:.8,6:1,8:1.25,10:1.5,12:1.75,14:2,
    "M5×12"(길이 표기)가 오류로, "M20×10"은 피치 10으로 조용히 통과했다. */
 const FINE={1.6:[.2],2:[.25],2.5:[.35],3:[.35],4:[.5],5:[.5],6:[.75],8:[1,.75],10:[1.25,1,.75],
             12:[1.5,1.25,1],14:[1.5,1.25,1],16:[1.5,1],18:[2,1.5,1],20:[2,1.5,1],22:[2,1.5,1],24:[2,1.5,1]};
+/* 퀵칩으로 바로 고를 수 있는 호칭경 — 현장에서 자주 쓰는 M3~M12만. 나머지는 사양 입력칸으로 */
 const SIZES=[3,4,5,6,8,10,12];
 /* ISO 4762 육각홀붙이 머리 지름 dk max (mm) — 지원 범위(M1.6~M24) 전체를 채운다.
    단면도 축척과 dw 표가 없는 자리의 기준으로만 쓴다. 좌면 면적과 마찰 지름은 아래 dw다. */
@@ -24,6 +53,7 @@ const DW_4762={1.6:2.72,2:3.48,2.5:4.18,3:5.07,4:6.53,5:8.03,6:9.38,8:12.33,10:1
 /* ISO 7380-1 버튼머리 지름 dk (mm) — 상수 1.90d는 M3~M5에서만 맞는다.
    M6부터 1.75d로 꺾인다. 규격 수록 범위(M3~M16) 밖은 그 구간의 배수로 외삽한다. */
 const BTN_DK={3:5.7,4:7.6,5:9.5,6:10.5,8:14,10:17.5,12:21,16:28};
+/* 버튼머리 지름 dk [mm] — 표값 우선, 없으면 구간 배수(M6 미만 1.90d, 이상 1.75d) */
 const btnHead=d=>BTN_DK[d]||(d<6?1.90*d:1.75*d);
 /* 버튼머리 좌면 지름 dw — ISO 7380-1 dw min 원표를 대조하지 못해 ISO 4762의 dw/dk 비
    (M3 0.92 ~ M12 0.96, 평균 약 0.94)로 근사한다. 원표 대조가 필요한 자리다. */
@@ -31,6 +61,7 @@ const DW_DK_BTN=0.94;
 /* ISO 10642 접시머리 높이 k (mm) — 접시는 호칭 길이가 머리를 포함한 전장이라
    머리 밑 유효 길이를 구하려면 이 값을 빼야 한다. M3~M12는 정확히 0.62d. */
 const CSK_K={3:1.86,4:2.48,5:3.1,6:3.72,8:4.96,10:6.2,12:7.44,14:8.4,16:8.8,20:10.16};
+/* 접시머리 높이 k [mm] — 표에 없는 호칭경은 가장 가까운 호칭경의 k/d 비로 비례 환산 */
 function cskHead(d){
   if(CSK_K[d])return CSK_K[d];
   const k=Object.keys(CSK_K).map(Number).sort((a,b)=>Math.abs(a-d)-Math.abs(b-d))[0];
@@ -51,8 +82,10 @@ const CLS={
   "8.8" :{su:800, sy:640, label:"8.8", desc:"중탄소강"},
   "A2-70":{su:700,sy:450, label:"A2-70",desc:"SUS304 냉간압조"}
 };
+/* 강도구분 세그먼트 버튼 순서 — 저장값 복원도 이 목록에 있는 등급만 받는다 */
 const CLS_SEG=["12.9","10.9","8.8","A2-70"];
 /* ISO 898-1은 8.8을 호칭경으로 나눈다 — d>16에서 830/660 MPa로 올라간다. */
+/* 입력: 등급 이름, 호칭경 d [mm] / 출력: {su, sy [MPa], label, desc} — 8.8 대경이면 big:true를 붙인 복사본 */
 function clsOf(cls,d){
   const C=CLS[cls];
   return (cls==="8.8"&&d>16) ? Object.assign({},C,{su:830,sy:660,big:true}) : C;
@@ -154,6 +187,7 @@ const LOCK={
 
 /* 호칭경 보정 — LOCTITE 243 TDS 실측 3점 (M6:3 / M10:26 / M16:44 N·m) 기반 로그-로그 보간 */
 const LOCK_PTS=[[6,3/26],[10,1],[16,44/26]];
+/* 입력: 호칭경 d [mm] / 출력: M10 대비 고정제 토크 배율(무차원). M10에서 1, M6 ≈ 0.115, M16 ≈ 1.69 */
 function lockSizeF(d){
   const P=LOCK_PTS, sl=(i,j)=>Math.log(P[j][1]/P[i][1])/Math.log(P[j][0]/P[i][0]);
   /* M6 미만은 실측 구간 밖 — 적합 구간의 지수(약 4.2)를 그대로 외삽하면
@@ -165,6 +199,7 @@ function lockSizeF(d){
 }
 /* ISO 4032 표준 너트 높이 — TDS 시험의 기준 물림 길이 */
 const NUT_H={1.6:1.3,2:1.6,2.5:2,3:2.4,4:3.2,5:4.7,6:5.2,8:6.8,10:8.4,12:10.8,14:12.8,16:14.8,18:15.8,20:18,22:19.4,24:21.5};
+/* 표준 너트 높이 m [mm] — 표에 없으면 가장 가까운 호칭경의 m/d 비로 환산. 고정제 토크의 물림 보정 기준 */
 function nutH(d){
   if(NUT_H[d])return NUT_H[d];
   const k=Object.keys(NUT_H).map(Number).sort((a,b)=>Math.abs(a-d)-Math.abs(b-d))[0];
@@ -206,10 +241,15 @@ const KF={
    접시머리도 이 식으로 계산했을 때 표준머리 대비 0.58배가 나와 Bossard 감액표(≈0.56)와
    맞는다 — 원추 보정을 따로 넣지 않는 편이 제조사 공표값에 가깝다. */
 const HOLE_R = 1.1;                     // 구멍 지름 배수 — 좌면 면압 계산과 같은 값
+/* VDI 체결토크식의 두 성분 [mm] — 여기에 축력 F [N]를 곱하면 토크 [N·mm]
+     thread = 0.16·P + 0.58·d₂·μG   (리드각 + 나사면 마찰, d₂ = d − 0.6495P 유효경)
+     head   = D_Km/2 · μK           (좌면 마찰)
+   입력: d, p, D_Km [mm], mu 마찰계수 */
 const kTerms=(d,p,mu,DKm)=>{
   const d2=d-0.6495*p;
   return {thread:0.16*p + 0.58*d2*mu, head:DKm/2*mu};   // 나사부 성분 · 좌면 성분
 };
+/* 등가 토크계수 K = M/(F·d) (무차원) — 계산은 K로 하지만 값은 위 세 항식 그대로다 */
 const kOf=(d,p,mu,DKm)=>{const t=kTerms(d,p,mu,DKm);return (t.thread+t.head)/d;};
 /* 전체 토크 중 나사부가 먹는 비율 — 비틀림 응력은 좌면 마찰이 아니라 이 성분만으로 생긴다.
    좌면 지름과 마찰계수에 따라 움직이므로 같은 식에서 직접 구한다. */
@@ -266,6 +306,7 @@ const washerDia=(w,d)=>{
   if(!W||!W.dhr)return 0;
   return W.tbl ? (WASHER_D[W.tbl][d]||W.ext*d) : W.dhr*d;
 };
+/* 와셔 두께 h [mm] — 규격 표, 없으면 계열 대표 배수(tExt×d). 와셔 없음이면 0 */
 const washerThk=(w,d)=>{
   const W=WASHER[w], T=W&&WASHER_T[W.tbl||(W.spring?"spring":"")];
   return W&&W.dhr ? ((T&&T[d])||W.tExt*d) : 0;
@@ -279,7 +320,9 @@ const washerId=(w,d)=>WASHER[w]&&WASHER[w].spring ? 1.02*d : (WASHER_ID[d]||1.05
    이 앱의 이용률은 VDI FMzul 식과 0.1pt 안에서 일치한다(M6·M10·M16 × μ 6종 대조).
    90% 옵션은 표준머리 조합의 70%가 이용률 100%를 넘지만 남긴다 — 저마찰(MoS₂)에서는
    97% "주의"로 쓸 자리가 있다. */
+/* 목표 축력 세그먼트 [% 항복] — 순수 인장 기준 Fwant = %/100 × As × σy */
 const PL_SEG=[65,70,75,80,90];
+/* 작용 하중 종류 — 값은 볼트 1개·접합면 1개 기준 [N]. 축방향은 분리, 횡방향은 미끄럼을 검토한다 */
 const LOAD_SEG=[
   {v:"none",  label:"미입력"},
   {v:"axial", label:"축방향 인장"},
@@ -291,6 +334,7 @@ const SLV_SEG=[
   {v:"embed",label:"이완 손실", desc:"이완 손실 10% 고정을 탄성 계산으로 대체"},
   {v:"phi",  label:"하중 계수", desc:"외력 중 볼트가 부담하는 몫으로 볼트 응력까지 검토"}
 ];
+/* 해석 수준 순위 — 누적 단계라 "이 수준 이상이면" 비교(>=)로 쓴다 */
 const SLV_RANK={geo:0,embed:1,phi:2};
 /* 시판 표준 길이 (ISO 4762 계열) — 볼트 길이 슬라이더가 여기로 스냅한다 */
 const BOLT_LEN=[3,4,5,6,8,10,12,14,16,18,20,22,25,28,30,35,40,45,50,55,60,65,70,80,90,100,110,120,130,140,150,160,180,200];
@@ -378,8 +422,11 @@ const fmtCmp=(v,dig,thr)=>{
   for(let k=dig;k<=dig+3;k++){const s=v.toFixed(k); if(same(+s))return s;}
   return v.toFixed(dig+3);
 };
+/* 비율(0~1)을 정수 % 문자열로 — 경계 thr도 비율로 받는다 (예: pctCmp(util,[0.9,1.0])) */
 const pctCmp=(r,thr)=>fmtCmp(r*100,0,thr.map(t=>t*100))+"%";
+/* 유효단면적 As [mm²] = π/4·(d − 0.938194·P)² — ISO 898-1. 지름은 (유효경 d₂ + 골지름 d₃)/2 */
 const stressArea=(d,p)=>{const x=d-0.938194*p;return PI/4*x*x;};
+/* 탭 모재 전단강도 τu [MPa] = 0.6·σu × shear 보정(회주철 1.1, 그 외 1) — 0.6은 공학 통칙 */
 const tauOf=m=>MAT[m].su*0.6*(MAT[m].shear||1);
 /* 나사산 전단 면적 (Le 1mm당, 변형 보정 KNOCK 포함) — VDI 2230 R8 / Alexander 식에서 유도.
    · 암나사(탭 모재)는 수나사 바깥지름 d에서 잘린다:
@@ -434,6 +481,19 @@ function seatGeom(d,head,washer){
 /* ══════════════════════════════════════════════════════════
    핵심 계산
    ══════════════════════════════════════════════════════════ */
+/* 체결부 한 건을 계산한다 — DOM·전역 상태를 읽지 않는 순수 함수(render·사내 시험 예측이 함께 쓴다).
+   입력 o
+     d, pitch [mm] · cls 강도구분 · head 머리 · mat 탭 모재 · k 마찰 조건 · washer · lock 고정제
+     preload 목표 축력 [% 항복] · Le 물림 깊이 [mm] (0 = 미설정) · len 볼트 길이 [mm] | null
+     shank 비나사부 [mm] · slevel 해석 수준 · loadType/load 작용 하중 [N]
+     pend  render가 넘기는 "판재보다 짧은 길이" 보류 정보 {grip, Le} — 있으면 물림 0으로 계산
+   _probe  true면 내부 재귀 호출(Le를 기준선으로 옮겨 "Le만으로 적합해지나"를 볼 때) — 재귀를 끊는다
+   출력 R (주요 값)
+     Trec 권장 토크 [N·m] · Feff 적용 축력 [N] · Flo/Fhi 산포 하한·상한 축력 [N]
+     util 체결 중 항복 이용률 (0~1) · Tbreak 예상 파단 토크 [N·m] · pBear 좌면 면압 [MPa]
+     LeMin/LeOk 최소·적합 물림 [mm] · checks 검토 항목 배열 · lvl/tag/txt 종합 판정
+   순서: 좌면 기하·K → 강도·목표 축력 → 길이 기하 → 뽑힘·하향 제한 → 토크 → 산포 → 응력
+         → 면압 → 컴플라이언스(선택) → 고정제 → 하중 → 검토 항목 → 종합 판정 */
 function compute(o,_probe){
   const p=o.pitch, d=o.d, H=HEAD[o.head], M=MAT[o.mat], F_=KF[o.k];
   /* 접시머리에 평와셔를 끼울 자리는 없다 — 선택돼 있어도 무시하고 그 사실을 알린다.
@@ -459,6 +519,7 @@ function compute(o,_probe){
      않고 하중을 깎는다. 등급이 공급 관행을 넘으면 검토 항목에서 경고한다. */
   const cls=o.cls, C=clsOf(cls,d);
 
+  /* 항복 하중 Fy · 인장 파단 하중 Fu [N] = As [mm²] × σy·σu [MPa] */
   const As=stressArea(d,p), Fy=As*C.sy, Fu=As*C.su;
 
   /* 머리 형상 제한은 축력에 먼저 적용 — 토크와 축력의 정합성 확보 */
@@ -551,7 +612,11 @@ function compute(o,_probe){
   /* 화면·단면도가 함께 쓰는 표시용 물림 — 미설정이면 가정값, 그마저 없으면 기준값 */
   const LeShow = hasLe?o.Le:(noReach?0:(LeAssume!=null?LeAssume:LeOk));
 
+  /* 권장 토크 [N·m] = K × Feff [N] × d [mm] ÷ 1000. K가 VDI 세 항식을 F·d로 나눈 값이라
+     M = Feff·[0.16P + 0.58·d₂·μG + D_Km/2·μK] 와 같은 숫자다 */
   const Trec   = K*Feff*d/1000;
+  /* 예상 파단 하중 [N] — 볼트(머리 내력 포함)와 나사산 뽑힘 중 약한 쪽. 같은 K로 토크로 환산한다.
+     Le 미설정이면 가정 물림, 물림 0이면 0 */
   const Fbreak = hasLe    ? Math.min(FuHead,Fstrip)
                : noReach  ? 0
                : LeAssume!=null ? Math.min(FuHead,stripK*LeAssume)
@@ -581,6 +646,7 @@ function compute(o,_probe){
   /* 좌면 면압 — 판재 쪽. 상한 축력으로 검토 */
   let pBear=null, pRatio=null, pHW=null;
   if(Db){
+    /* 좌면 면적 Ab [mm²] = π/4·(Db² − 구멍²), 면압 p = Fhi / Ab [MPa], 한계 면압 pG와 비 */
     const Ab=PI/4*(Db*Db - Math.pow(HOLE_R*d,2));
     pBear = Fhi/Ab;
     pRatio= pBear/M.pG;
@@ -684,11 +750,16 @@ function compute(o,_probe){
     }
   }
 
+  /* 분해 토크 ÷ 예상 파단 토크 — 1을 넘으면 공구로 풀다가 볼트가 먼저 끊어진다 */
   if(Trem!==null) remRatio = Tbreak>0 ? Trem/Tbreak : null;
+  /* 물린 나사산 수 = Le / P. 3산 미만이나 Le 2.5mm 미만은 판재 함몰·찢김이 지배해 모델 밖이다 */
   const threads = hasLe?o.Le/p:null;
   const thinRegime = hasLe && (threads<3 || o.Le<2.5);
 
   /* ── 검토 항목 ─────────────────────────────────────────── */
+  /* 검토 항목 — 각 항목 {lvl, name, detail, val, kind, fix}
+     lvl: ok 적합 · warn 주의 · bad 설계 NG · na 미검토(입력 부족) · info 판정에 넣지 않는 정보
+     val: 오른쪽에 띄우는 값 문자열, fix: NG일 때 펼치는 대응 목록(FIX) */
   const checks=[];
   /* kind: "str"=구조 안전(설계 NG 가능) / "svc"=정비성(최대 주의까지)
      정비성 항목은 모델 불확실성이 커서 설계 판정을 뒤집지 않는다. */
@@ -948,6 +1019,8 @@ function compute(o,_probe){
     txt="검토 항목 전부 통과"+(breakMode==="head"?" · 머리 파단 지배":breakMode==="shank"?" · 볼트 목 파단 지배":"");
   }
 
+  /* 결과 객체 R — render·drawSection·writeBasis·updateSlider가 읽는다. 단위: 힘 N, 토크 N·m,
+     응력·면압 MPa, 길이 mm, 컴플라이언스 mm/N, 비율 0~1 */
   return{d,p,As,cls,C,H,M,K,mu,Klo,Khi,kf:F_,washer,washerSel,washerOn,washerIgnored,Fy,Fu,FuHead,Fwant,Fhead,Feff,Flo,Fhi,Fserv,FservMin,Freq,
          Fstrip,Ats,LeMin,LeOk,LeReach,LeAssume,LeShow,reachCapped,kInt,kExt,stripExt,stripK,tauU,FhiHead,breakMode,
          okPossible,threads,margin,limited,reachLimited,noReach,pend,hasLe,Le:o.Le,
@@ -961,6 +1034,9 @@ function compute(o,_probe){
 /* ══════════════════════════════════════════════════════════
    사양 문자열 파싱
    ══════════════════════════════════════════════════════════ */
+/* 사양 문자열 → {d [mm], pitch [mm], len [mm] | null, head, headAssumed} 또는 {err: 안내 문구}
+   받는 꼴: "M5-12", "M6 접시 20", "M8x1.25 저두 25", "M2,5-10"(소수점 쉼표), 머리 표기는 한·영 모두.
+   호칭경·피치는 ISO 261 표(PITCH·FINE)에 있는 것만, 길이는 lenCapOf(d) 이하만 받는다. */
 function parse(raw){
   /* 소수점 쉼표(M2,5 · M8x1,25)는 소수점으로 읽는다 — 그대로 두면 "M2,5-10"이 M2로,
      "M8x1,25"가 세목 M8×1로 조용히 바뀌어 계산됐다. 숫자 사이의 쉼표만 바꾼다. */
@@ -1078,6 +1154,7 @@ const MEAS_PRED = MEAS.map(m=>{
 /* ══════════════════════════════════════════════════════════
    상태 · 유틸
    ══════════════════════════════════════════════════════════ */
+/* DOM 조회 단축 · 표시 포맷(f1/f2 소수 자리, f0 정수 + 천 단위 구분) */
 const $=id=>document.getElementById(id);
 const f1=n=>n.toFixed(1), f2=n=>n.toFixed(2);
 const f0=n=>Math.round(n).toLocaleString();
@@ -1085,14 +1162,20 @@ const f0=n=>Math.round(n).toLocaleString();
 const sig3=n=>{ if(!isFinite(n))return"—";
   const a=Math.abs(n);
   return a>=100?n.toFixed(0):a>=10?n.toFixed(1):n.toFixed(2); };
+/* innerHTML에 넣을 문자열을 HTML 이스케이프 — 사용처 이름 등 데이터 문자열이 마크업으로 읽히지 않게 */
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+/* 앱 상태 S — 사용자 입력의 전부. render는 S만 보고 compute 입력을 만들고, saveState가 통째로 저장한다.
+   spec 사양 문자열 · cls/head/mat/k/washer/lock 선택값(표의 키) · preload [%] · Le 물림 [mm]
+   loadType/load 작용 하중 [N] · headAuto 머리를 문자열이 정하는지 · shank 비나사부 [mm] · slevel 해석 수준 */
 const S={spec:"M5-12",cls:"12.9",head:"std",mat:"S45C",k:"dry",washer:"none",lock:"none",
          preload:70,Le:0,loadType:"none",load:0,headAuto:true,
          shank:0,slevel:"embed",     // shank 0 = 비나사부 미고려
          lenSlider:true,             // 볼트 길이도 슬라이더로 조절할지 (선택 · 기본 켜짐)
          grip:null};                 // 유지되는 체결 두께 — 길이를 바꾸면 물림이 이걸 기준으로 따라온다.
                                      // null = 아직 모름(길이 없이 Le만 맞춘 상태) → 길이가 생기면 Le에서 세운다
+/* R: 마지막 compute 결과 · P: 마지막 parse 결과 (사양 오류면 R = null)
+   last*: 직전에 그린 값 — 같으면 DOM을 다시 쓰지 않는 가드(드래그 중 비용 절감) */
 let R=null,P=null,lastDigits="",lastLvl=null,lastIcon=null,lastChkKey=null;
 let lePending=null;                  // 길이가 판재보다 짧아 보류 중인 {grip, Le} — 지우지 않고 기다린다
 
@@ -1105,10 +1188,13 @@ let lePending=null;                  // 길이가 판재보다 짧아 보류 중
 const LS_KEY="torque-tak/v2";
 const LS_OLD=["torque-tak/v1"];       // 뜻이 바뀌어 읽지 않는 옛 키 — 남겨 두면 저장소만 차지한다
 let saveT=null;
+/* 상태 S를 localStorage에 그대로 저장 — 사생활 모드 등에서 막히면 조용히 넘어간다 */
 function saveState(){
   try{localStorage.setItem(LS_KEY,JSON.stringify(S));}catch(e){}
 }
+/* 저장 디바운스 — 연속 입력 중에는 마지막 입력 0.4초 뒤에 한 번만 쓴다 */
 function queueSave(){ clearTimeout(saveT); saveT=setTimeout(saveState,400); }
+/* 저장값 복원 — 키마다 형식·범위·표 존재를 확인한 것만 S에 반영한다. 실패하면 기본값 그대로 */
 function loadState(){
   try{LS_OLD.forEach(k=>localStorage.removeItem(k));}catch(e){}
   let raw=null;
@@ -1137,6 +1223,7 @@ function loadState(){
   if(S.loadType==="none")S.load=0;              // 해제 상태와 값이 어긋나지 않게
 }
 
+/* 검토 항목·종합 판정 아이콘 (lvl별 SVG) */
 const IC={
   ok:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   warn:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 6v8M12 18.2v.2"/></svg>',
@@ -1149,6 +1236,9 @@ const IC={
 /* ══════════════════════════════════════════════════════════
    렌더
    ══════════════════════════════════════════════════════════ */
+/* 화면 전체 갱신 — S → parse → 볼트 길이 우선 물림 유도 → compute → R → 각 영역.
+   fast=true는 슬라이더 드래그 중 경로: 숫자·검토 목록·분해 토크·단면도·슬라이더만 갱신하고
+   칩·세그먼트·계산 근거·실측 대조·저장은 건너뛴다(드래그가 끝나면 전체 render가 다시 돈다). */
 function render(fast){
   P=parse(S.spec);
   const pr=$("parse");
@@ -1218,6 +1308,7 @@ function render(fast){
              len:P.len,shank:S.shank,slevel:S.slevel,pend:lePending});
 
   if(!fast){
+    /* 파싱 결과 칩 — 호칭경×피치, 유효단면적, 머리, 등급, 와셔, 길이, 머리 가정 여부 */
     const chip=(t,c)=>{const e=document.createElement("span");e.className="pill"+(c?" "+c:"");e.textContent=t;pr.appendChild(e);};
     chip("M"+P.d+" × P"+P.pitch,"b");
     chip("As "+f2(R.As)+" mm²");
@@ -1233,6 +1324,7 @@ function render(fast){
     if(P.headAssumed&&S.headAuto)chip("표준 머리 가정","w");
   }
 
+  /* 히어로 영역 — 판정 색, 권장 토크 숫자, 토크렌치 ±10% 범위, 산포 축력 범위, 판정 문구 */
   setState(R.lvl);
   /* 걸 수 있는 축력이 0이면 권장 토크라는 값이 없다 — 0.00을 띄우면 계산된 권장값으로 읽힌다 */
   if(R.Trec>0){
@@ -1255,6 +1347,7 @@ function render(fast){
     $("vIcon").querySelectorAll("path").forEach(p=>p.setAttribute("stroke","#fff"));
   }
 
+  /* 통계 3칸 — 달성 축력 [N] · 항복 이용률 [%] · 예상 파단 토크 [N·m] */
   $("sForce").innerHTML=f0(R.Feff)+'<small>N</small>';
   $("sUtil").innerHTML=pctCmp(R.util,[0.90,1.0]).replace("%","")+'<small>%</small>';
   /* 물릴 나사부가 없으면 파단 토크도 없다 — 권장 토크와 같이 "—"로 둔다 (0.00은 계산값으로 읽힌다) */
@@ -1340,6 +1433,7 @@ function updateShankUI(){
   $("slvDesc").textContent=note;
 }
 
+/* 판정 단계(ok·warn·bad·idle)에 맞춰 색 토큰 --st / --st-tint를 바꾼다 — 숫자·판정 띠·슬라이더가 이 색을 쓴다 */
 function setState(lvl){
   /* :root 커스텀 프로퍼티를 건드리면 이걸 쓰는 문서 전체가 스타일 재계산에 들어간다.
      드래그 중에는 판정이 그대로인 프레임이 대부분이라 바뀔 때만 쓴다. */
@@ -1352,6 +1446,7 @@ function setState(lvl){
   document.documentElement.style.setProperty("--st-tint",t);
 }
 
+/* 권장 토크 숫자를 글자별 span으로 그린다 — 바뀐 자리만 굴러 올라오는 애니메이션(roll) */
 function setDigits(str){
   const el=$("digits");
   if(str===lastDigits)return;
@@ -1365,6 +1460,8 @@ function setDigits(str){
   }
 }
 
+/* 분해 시 필요 토크 카드 — 나사 고정제를 골랐을 때만 보인다.
+   Trem = 체결 마찰분 Tfric + 고정제 저항분 Tadh [N·m], 막대는 예상 파단 토크 대비 비율(90% 눈금) */
 function renderRemoval(){
   const card=$("remCard");
   if(!R||!R.Trem||R.remRatio==null){card.hidden=true;return;}
@@ -1403,6 +1500,7 @@ function renderRemoval(){
   foot.innerHTML+=srcTag("tds","iso4032","own");
 }
 
+/* 검토 항목 목록과 상단 개수 배지(NG·주의·적합)를 그린다. NG 항목에는 대응 방법(FIX)을 펼친다 */
 function renderChecks(){
   /* 드래그 중에는 검토 결과가 그대로인 프레임이 대부분이다. 목록 전체를 다시 만드는
      비용이 프레임 예산에서 가장 크므로 내용이 바뀔 때만 다시 만든다. */
@@ -1439,6 +1537,8 @@ function renderChecks(){
 /* ══════════════════════════════════════════════════════════
    퀵칩 · 세그먼트
    ══════════════════════════════════════════════════════════ */
+/* 호칭경·머리 퀵칩 — 최초 1회 버튼을 만들고, 이후 호출은 선택(on) 표시만 바꾼다.
+   호칭경 칩은 길이·머리 표기를 유지한 채 사양 문자열을 다시 쓰고, 머리 칩은 pickHead로 간다 */
 function buildQuick(){
   const q=$("quick");
   if(q.dataset.built==="1"){
@@ -1495,6 +1595,7 @@ function scrollChipIntoView(){
   if(l<q.scrollLeft+pad) q.scrollTo({left:Math.max(0,l-pad),behavior:"smooth"});
   else if(r>q.scrollLeft+q.clientWidth-pad) q.scrollTo({left:r-q.clientWidth+pad,behavior:"smooth"});
 }
+/* 퀵칩 줄 좌우 화살표 — 보이는 폭의 70%씩 스크롤, 스크롤할 때마다 페이드·화살표 노출을 갱신 */
 (function quickNav(){
   const q=$("quick");
   const step=dir=>{
@@ -1506,6 +1607,7 @@ function scrollChipIntoView(){
   q.addEventListener("scroll",updateQuickNav,{passive:true});
 })();
 
+/* 세그먼트 4종을 현재 상태로 맞춘다 — 강도구분 · 목표 축력 · 하중 종류 · 해석 수준(비나사부 입력 시) */
 function buildSegs(){
   seg("segCls","indCls",CLS_SEG,S.cls,v=>CLS[v].label,v=>{S.cls=v;render();});
   seg("segPl","indPl",PL_SEG,S.preload,v=>v+"%",v=>{S.preload=+v;render();});
@@ -1518,6 +1620,8 @@ function buildSegs(){
         v=>SLV_SEG.find(o=>o.v===v).label,
         v=>{S.slevel=v;render();});
 }
+/* 세그먼트 컨트롤 하나 — 최초 호출에 버튼을 만들고(cb = 선택 시 호출), 이후에는 선택 표시와
+   흰 인디케이터(indId)의 위치·폭만 옮긴다. items 값은 문자열로 비교한다 */
 function seg(id,indId,items,cur,lbl,cb){
   const el=$(id);
   if(el.dataset.built!=="1"){
@@ -1546,6 +1650,7 @@ function seg(id,indId,items,cur,lbl,cb){
   const ind=$(indId);
   ind.style.left=g[idx][0]+"px"; ind.style.width=g[idx][1]+"px";
 }
+/* 세그먼트별 버튼 [offsetLeft, offsetWidth] 캐시 [px] — seg()가 채우고 segsStale()이 버린다 */
 const SEGGEO={};
 /* 폭이 바뀌었을 수 있으니 캐시를 버린다 */
 function segsStale(ids){ (ids||Object.keys(SEGGEO)).forEach(id=>{delete SEGGEO[id];}); }
@@ -1556,6 +1661,9 @@ function segsStale(ids){ (ids||Object.keys(SEGGEO)).forEach(id=>{delete SEGGEO[i
 /* SVG 속성에는 var()를 쓸 수 없어 CSS 토큰과 같은 값을 여기 한 번만 적어 둔다.
    styles.css의 --ink-3 / --ng / --warn / --ok 를 바꾸면 여기도 함께 바꿔야 한다. */
 const DC={ink3:"#64738A", dim:"#5E7290", ng:"#C42317", warn:"#A25F00", ok:"#0A7A50"};
+/* 체결부 단면도 SVG(viewBox 340×200) — 클램프 판·탭 모재·볼트·와셔·머리, 물린 나사산 점(최대 26개),
+   뽑힘·좌면 압괴 표시, 비나사부 콜아웃, 물림·볼트 길이 치수선. 그림은 실제 축척이 아니다
+   (아래 "가로 축척" 설명) — 치수는 숫자로 읽고 판정은 검토 항목이 한다 */
 function drawSection(){
   if(!R){$("draw").innerHTML="";return;}
   const W=340,cy=88;
@@ -1712,6 +1820,7 @@ const leMax=()=>{
    L = 머리 + 체결 두께 + Le. 자유도가 2라 두 값만 제어하고 나머지는 유도한다.
    볼트 길이가 우선이다 — 길이를 바꾸면 체결 두께(판재)는 그대로 두고 물림이 따라온다.
    Le 슬라이더는 반대로 길이를 두고 체결 두께를 바꾼다. */
+/* headHOf: 접시머리 높이 [mm](다른 머리는 0) · lenOn: 길이 슬라이더를 보일지 · snapIn: 목록에서 v에 가장 가까운 값 */
 const headHOf =()=>(P&&!P.err&&HEAD[S.head].cone)?cskHead(P.d):0;
 const lenOn   =()=>S.lenSlider&&!!P&&!P.err;
 const snapIn  =(list,v)=>list.reduce((a,b)=>Math.abs(b-v)<Math.abs(a-v)?b:a);
@@ -1757,6 +1866,7 @@ function pickHead(h){
   const p=parse(S.spec);
   if(!p.err){P=p; S.spec=specWithLen(p.len); $("spec").value=S.spec;}
 }
+/* 길이 슬라이더 값 v [mm] → 표준 길이로 스냅해 사양 문자열을 다시 쓴다. 길이가 바뀌었으면 true */
 function setBoltLen(v){
   const ok=lenPicks();
   if(!ok.length)return false;            // 판재를 관통하는 표준 길이가 없다
@@ -1812,6 +1922,8 @@ function measureTracks(){
   TW.le =$("track").clientWidth||TW.le||300;
   TW.len=$("ltrack").clientWidth||TW.len||300;
 }
+/* 두 슬라이더(볼트 길이·물림 Le)의 썸·채움·눈금(최소·적합·상한)·라벨·ARIA를 R에 맞춘다.
+   measure=true면 트랙 폭을 다시 잰다(리사이즈·펼침 직후만) */
 function updateSlider(measure){
   if(!R)return;
   if(measure||!TW.le)measureTracks();
@@ -1871,6 +1983,9 @@ function updateSlider(measure){
     :R.noReach?"미설정, 물릴 나사부 없음, 판정 "+R.tag
     :"미설정, "+(R.reachCapped?"볼트 길이 한도 "+f1(R.LeShow):"적합 기준 "+f1(R.LeOk))+"mm 가정");
 }
+/* 물림 Le 슬라이더 — 포인터 드래그(rAF로 프레임당 1회, render(true) 빠른 경로)와 키보드
+   (←→ 한 칸 = 호칭경/10 mm, PageUp/Down 5칸, End 물릴 수 있는 끝, Home 미설정).
+   판정이 "적합"으로 넘어가는 순간에만 진동·"탁!" 표시를 낸다 */
 (function slider(){
   const t=$("track"); let drag=false,pid=null;
   const frac=x=>{const r=t.getBoundingClientRect();
@@ -1969,6 +2084,7 @@ function updateSlider(measure){
     if(setBoltLen(ok[j]))render();
   });
 })();
+/* 물림을 미설정으로 되돌림 · 비나사부에 맞춘 물림 제안 적용 */
 $("leReset").onclick=()=>{S.Le=0;S.grip=null;render();};
 $("leFit").onclick=()=>{const v=leFit(); if(v!=null){setLe(v);render();}};
 
@@ -2011,12 +2127,16 @@ const seatSrc=H=>H.semsW  ? {txt:"SEMS 머리를 ISO 4762 좌면 지름 dw로 �
               :H.iso      ? {txt:"ISO 4762 좌면 지름 dw",   key:"iso4762"}
               :H.iso7380  ? {txt:"ISO 7380-1 머리 지름 × "+DW_DK_BTN+" (dw 근사 — 원표 대조 필요)", key:"iso7380"}
               :             {txt:"자체 설정 좌면 배수 "+(H.dhr||0).toFixed(2)+"d", key:"own"};
+/* 근거 배지 묶음 HTML — SRC 키 목록을 받아 등급 색(t1~t4) 배지로. 설명은 title·aria-label에 */
 const srcTag=(...keys)=>`<span class="srcs">`+keys.map(k=>{
   const s=SRC[k];
   const full=s.label+" — "+s.note;
   return `<i class="src t${s.t}" title="${esc(full)}" aria-label="${esc("근거: "+full)}">${esc(s.label)}</i>`;
 }).join("")+`</span>`;
 
+/* 계산 근거 아코디언 — 단계마다 식에 실제 숫자를 넣어 보여 주고 근거 배지를 붙인다.
+   유효단면적 → 강도 → 축력 → 체결토크 → 조합응력 → 뽑힘 → 좌면 면압 → (비나사부) → (작용 하중)
+   → 필요 최소 물림 → 근거 등급 범례. 조건부 단계가 있어 번호는 sn()로 차례대로 매긴다 */
 function writeBasis(){
   if(!R)return;
   /* 비나사부 단계가 조건부로 끼어들므로 번호를 고정하지 않고 순서대로 매긴다 */
@@ -2282,6 +2402,8 @@ function writeBasis(){
 /* ══════════════════════════════════════════════════════════
    실측 대조 — 행별 재질 고정. 미상은 범위로 표기하고 편차 계산 안 함
    ══════════════════════════════════════════════════════════ */
+/* 사내 실측 대조 표 — 현재 호칭경의 시험 행만. 파단까지 간 행은 예상값·편차를, 재질 미상은
+   S45C~SS400 범위만 보이고, 아래에 사내 권장 토크 비교(ownCompare)와 가정 항목 경고를 붙인다 */
 function fillMeas(){
   if(!R)return;
   /* 시트에는 파단까지 간 행과 권장 토크만 산정한 행이 섞여 있다.
@@ -2375,6 +2497,8 @@ function ownCompare(same){
    바텀시트
    ══════════════════════════════════════════════════════════ */
 let sheetMode=null, sheetPrev=null;
+/* 선택 시트 — 모바일은 바텀시트, 데스크톱(900px+)은 중앙 모달(CSS가 결정).
+   mode: mat 모재 · head 머리 · k 체결 조건 · washer 와셔 · lock 고정제. 고르면 S를 바꾸고 닫고 render */
 function openSheet(mode){
   sheetMode=mode;
   sheetPrev=document.activeElement;             // 닫을 때 돌려줄 포커스
@@ -2424,6 +2548,7 @@ function openSheet(mode){
   const first=body.querySelector(".opt.on")||body.querySelector(".opt")||$("sheetX");
   try{first.focus({preventScroll:true});}catch(_){try{first.focus();}catch(__){}}
 }
+/* 시트 닫기 — 모달 속성 되돌리고, 시트를 연 버튼으로 포커스를 돌려준다 */
 function closeSheet(){
   const sh=$("sheet");
   $("scrim").classList.remove("on"); sh.classList.remove("on");
@@ -2435,6 +2560,7 @@ function closeSheet(){
 /* 시트를 연 행으로 포커스가 돌아가야 하므로 열기 버튼 자신이 sheetPrev가 된다 */
 document.querySelectorAll("[data-sheet]").forEach(b=>b.onclick=()=>openSheet(b.dataset.sheet));
 $("scrim").onclick=closeSheet; $("sheetX").onclick=closeSheet;
+/* 시트가 열려 있을 때 키보드 — Esc 닫기, Tab은 시트 안에서만 돈다 */
 document.addEventListener("keydown",e=>{
   if(!sheetMode)return;
   if(e.key==="Escape"){closeSheet();return;}
@@ -2447,6 +2573,7 @@ document.addEventListener("keydown",e=>{
   else if(!e.shiftKey&&(a===last||!$("sheet").contains(a))){first.focus({preventScroll:true});e.preventDefault();}
 });
 
+/* 시트 손잡이를 아래로 끌어 닫기 — 90px 넘게 내리면 닫고, 아니면 제자리로 */
 (function swipe(){
   const g=$("grab"), sh=$("sheet"); let sy=0,drag=false,dy=0;
   g.addEventListener("pointerdown",e=>{drag=true;sy=e.clientY;dy=0;sh.style.transition="none";
@@ -2461,15 +2588,18 @@ document.addEventListener("keydown",e=>{
 /* ══════════════════════════════════════════════════════════
    기타 인터랙션
    ══════════════════════════════════════════════════════════ */
+/* 아코디언(계산 근거·모델 한계·실측 대조·길이 설명) 열고 닫기 — aria-expanded도 함께 */
 document.querySelectorAll("[data-acc]").forEach(b=>{
   b.onclick=()=>{const a=$(b.dataset.acc);a.classList.toggle("open");
     b.setAttribute("aria-expanded",a.classList.contains("open"));};
 });
 let toastT=null;
+/* 하단 알림 — 1.9초 뒤 사라진다 */
 function toast(msg){
   const t=$("toast"); t.textContent=msg; t.classList.add("on");
   clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("on"),1900);
 }
+/* 권장 토크 숫자를 누르면 "12.3 N·m" 꼴로 복사 — Clipboard API, 막히면 textarea + execCommand */
 $("copyBtn").onclick=async()=>{
   /* 화면에 권장 토크가 없으면(사양 오류·축력 0) 복사할 숫자도 없다 — "0.00"이나 직전 값을 내보내지 않는다 */
   if(!R||!(R.Trec>0)){toast("복사할 권장 토크가 없습니다");return;}
@@ -2488,6 +2618,7 @@ $("copyBtn").onclick=async()=>{
    한 글자 편집에 '표준'으로 돌아간다(render의 머리 결정 참고) */
 $("spec").addEventListener("input",e=>{S.spec=e.target.value;render();});
 $("spec").addEventListener("focus",e=>e.target.select());
+/* 사양 입력칸 지우기 */
 $("clearBtn").onclick=()=>{S.spec="";$("spec").value="";$("spec").focus();render();};
 /* 숫자 입력 — type=number는 "1,000"·"2,5"를 빈 값으로 넘겨 하중 검토가 조용히 사라졌다.
    텍스트로 받아 쉼표를 직접 읽고, 읽을 수 없으면 0으로 바꾸되 그 사실을 칸 아래에 보인다.
@@ -2499,7 +2630,9 @@ function readNum(str,thousands){
   if(!/^(\d+\.?\d*|\.\d+)$/.test(u))return {v:0,ok:false};
   return {v:parseFloat(u),ok:true};
 }
+/* 숫자 입력칸 아래 오류 문구 표시(ok=false)·숨김(ok=true) */
 function numErr(id,ok,msg){ const e=$(id); e.hidden=ok; e.textContent=ok?"":msg; }
+/* 작용 하중 입력 [N] — 천 단위 쉼표 허용. 값이 들어오면 하중 종류가 미입력일 때 축방향으로 켠다 */
 $("load").addEventListener("input",e=>{
   const r=readNum(e.target.value,true);
   numErr("loadErr",r.ok,"숫자로 읽을 수 없습니다 — 하중 검토를 하지 않습니다 (예: 1500 · 1,500)");
@@ -2507,7 +2640,9 @@ $("load").addEventListener("input",e=>{
   if(S.load>0&&S.loadType==="none")S.loadType="axial";
   render();
 });
+/* 하중 검토 해제 */
 $("loadClr").onclick=()=>{S.loadType="none";S.load=0;$("load").value="";numErr("loadErr",true);render();};
+/* 비나사부 길이 입력 [mm] — 쉼표는 소수점으로 읽는다 */
 $("shank").addEventListener("input",e=>{
   const r=readNum(e.target.value,false);
   numErr("shankErr",r.ok,"숫자로 읽을 수 없습니다 — 비나사부를 0으로 봅니다 (예: 12 · 12.5)");
@@ -2516,7 +2651,9 @@ $("shank").addEventListener("input",e=>{
   if(S.Le>0)setLe(S.Le);
   render();
 });
+/* 비나사부 검토 해제 */
 $("shankClr").onclick=()=>{S.shank=0;$("shank").value="";numErr("shankErr",true);render();};
+/* 볼트 길이 슬라이더 켜기/끄기 */
 $("lenTgl").onclick=()=>{
   S.lenSlider=!S.lenSlider;
   render();
@@ -2524,13 +2661,16 @@ $("lenTgl").onclick=()=>{
   if(S.lenSlider)requestAnimationFrame(()=>updateSlider(true));
 };
 
+/* 스크롤하면 상단 바 아래 경계선을 보인다 */
 const bar=$("bar");
 addEventListener("scroll",()=>bar.classList.toggle("stuck",scrollY>4),{passive:true});
+/* 폭이 바뀌면 캐시한 세그먼트·트랙 위치를 버리고 다시 잰다 */
 addEventListener("resize",()=>{segsStale();updateSlider(true);buildSegs();updateQuickNav();});
 /* 탭을 닫거나 백그라운드로 보낼 때는 디바운스를 기다리지 않고 바로 쓴다 */
 addEventListener("pagehide",saveState);
 document.addEventListener("visibilitychange",()=>{if(document.hidden)saveState();});
 
+/* 시작 — 저장값 복원 → 입력칸에 되돌리기 → 첫 렌더 → 다음 프레임에 폭 측정 */
 (function init(){
   loadState();
   /* 저장값을 화면 입력에도 되돌린다 — S만 채우면 입력칸이 빈 채로 어긋난다 */

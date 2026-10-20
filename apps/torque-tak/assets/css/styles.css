@@ -1,3 +1,8 @@
+/* ══════════ Torque Tak! 스타일 ══════════
+   순서: 색·치수 토큰(:root) → 기본 → 상단 바 → 카드·사양 입력·퀵칩 → 히어로(권장 토크·판정)
+   → 검토 항목 → 분해 토크 카드 → 물림 카드(단면도·슬라이더) → 세그먼트·조건 행 → 숫자 입력칸
+   → 아코디언·계산 근거·표 → 시트·알림·하단 → 반응형(맨 끝).
+   판정 색 --st / --st-tint는 app.js setState가 판정에 맞춰 바꾼다. */
 :root{
   --bg:#F4F6F8; --surface:#FFFFFF; --surface-2:#F7F9FB;
   /* --ink-3는 검토 항목 설명문 같은 본문에 쓰이므로 흰 배경에서 4.5:1을 넘겨야 한다.
@@ -18,6 +23,7 @@
   --num:"SF Pro Display",-apple-system,"Pretendard Variable",Pretendard,"Segoe UI Variable",Roboto,sans-serif;
   --safe-b:env(safe-area-inset-bottom,0px);
 }
+/* 기본 초기화 — 여백 제거, 버튼·입력칸은 글꼴을 물려받고 장식을 없앤다 */
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 /* display를 지정한 요소에서도 hidden 속성이 이기도록 — .sl-h(체결 두께 줄)가 flex라 UA 규칙에 진다 */
 [hidden]{display:none !important}
@@ -30,10 +36,12 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .col{display:contents}
 
 
+/* 누름 피드백 — 살짝 줄어드는 효과 */
 .tap{transition:transform .1s var(--ease),background .14s var(--ease)}
 .tap:active{transform:scale(.97)}
 .tap-sm:active{transform:scale(.985)}
 
+/* 상단 바 — 스크롤해도 위에 붙어 있고, 스크롤하면 .stuck으로 경계선 */
 .bar{position:sticky;top:0;z-index:40;background:rgba(244,246,248,.86);
   -webkit-backdrop-filter:saturate(1.6) blur(14px);backdrop-filter:saturate(1.6) blur(14px);
   border-bottom:1px solid transparent;transition:border-color .2s var(--ease)}
@@ -52,9 +60,11 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .home-btn svg{width:12px;height:12px}
 .home-btn:hover{background:var(--surface-2);color:var(--ink)}
 
+/* 카드 공통 · 작은 라벨 */
 .card{background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--sh-1);margin-top:12px;overflow:hidden}
 .lbl{font-size:11.5px;font-weight:600;color:var(--ink-3);letter-spacing:.01em}
 
+/* 볼트 사양 입력칸 · 지우기 버튼 · 파싱 칩(.pill) · 오류 문구 */
 .spec-wrap{padding:16px 18px 14px}
 .spec-row{display:flex;align-items:center;gap:10px}
 #spec{flex:1;min-width:0;font-family:var(--num);font-size:34px;font-weight:700;
@@ -71,6 +81,7 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .pill.w{background:var(--warn-tint);color:var(--warn)}
 .pill.mute{background:var(--surface-2);color:var(--ink-3);font-weight:500}
 .err{margin-top:10px;font-size:13px;font-weight:500;color:var(--ng)}
+/* 퀵칩 줄 — 넘치면 가로 스크롤, 양끝 페이드와 좌우 화살표는 app.js updateQuickNav가 켠다 */
 .quick-wrap{position:relative}
 .quick-wrap::before,.quick-wrap::after{content:"";position:absolute;top:0;bottom:0;width:42px;
   pointer-events:none;opacity:0;transition:opacity .2s var(--ease);z-index:1}
@@ -96,6 +107,7 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .qchip.on{background:var(--ink);color:#fff}
 .qdiv{flex:none;width:1px;background:var(--line);margin:7px 5px}
 
+/* 히어로 — 권장 토크 숫자(.digits), 단위, 범위 띠, 종합 판정(.verdict). 색은 판정 토큰 --st */
 .hero{position:relative;padding:22px 18px 18px;transition:background .3s var(--ease)}
 .hero::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
   background:radial-gradient(120% 80% at 50% 0%,var(--st-tint) 0%,transparent 62%);
@@ -129,6 +141,7 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .vtxt{min-width:0}
 .vtxt b{display:block;font-size:13.5px;font-weight:700;color:var(--st);letter-spacing:-.015em;transition:color .3s var(--ease)}
 .vtxt span{display:block;font-size:12px;font-weight:500;color:var(--ink-2);margin-top:1px}
+/* 통계 3칸 — 달성 축력 · 항복 이용률 · 예상 파단 */
 .stats{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line-2)}
 .stat{padding:13px 8px;text-align:center;border-left:1px solid var(--line-2)}
 .stat:first-child{border-left:0}
@@ -169,6 +182,7 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .chk-v{font-family:var(--num);font-size:13.5px;font-weight:700;flex:none;font-variant-numeric:tabular-nums;
   color:var(--ink-2);margin-top:1px}
 
+/* 분해 시 필요 토크 카드 — 등급 태그, 큰 숫자, 마찰분·고정제분, 파단 대비 막대(90% 눈금) */
 .rem-h{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 0}
 .rem-tag{font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:var(--r-full);
   background:var(--surface-2);color:var(--ink-2)}
@@ -191,10 +205,12 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .rem-foot{font-size:12px;line-height:1.55;color:var(--ink-2);font-weight:500;margin-top:9px}
 .rem-foot b{font-weight:700}
 .rem-foot.bad{color:var(--ng)} .rem-foot.warn{color:var(--warn)}
+/* 물림 카드 — 머리글과 단면도 상자 */
 .sec-head{display:flex;align-items:baseline;justify-content:space-between;padding:16px 18px 0}
 .sec-head .v{font-family:var(--num);font-size:15px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .draw-box{padding:4px 12px 0}
 #draw{display:block;width:100%;height:auto}
+/* 슬라이더 — 트랙·레일·채움, 눈금(최소·적합·상한)과 라벨, 썸, 적합 진입 시 "탁!" 애니메이션 */
 .le-ctl{padding:6px 18px 18px}
 .track{position:relative;height:46px;touch-action:none;display:flex;align-items:center;cursor:grab}
 .track:active{cursor:grabbing}
@@ -234,6 +250,7 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .le-note{font-size:12px;font-weight:500;color:var(--ink-3)}
 .le-reset{font-size:12px;font-weight:600;color:var(--brand);padding:6px 0}
 
+/* 세그먼트 컨트롤(강도구분·목표 축력·하중 종류·해석 수준) — 흰 인디케이터 위치는 app.js seg()가 옮긴다 */
 .seg-block{padding:16px 18px 4px}
 .seg-block+.seg-block{padding-top:4px}
 .seg{position:relative;display:flex;background:var(--surface-2);border-radius:12px;padding:3px;margin-top:8px}
@@ -242,6 +259,7 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .seg button{position:relative;z-index:1;flex:1;height:44px;font-size:13px;font-weight:600;color:var(--ink-3);
   transition:color .2s var(--ease);border-radius:9px}
 .seg button.on{color:var(--ink)}
+/* 체결 조건 행 — 누르면 선택 시트가 열린다 */
 .rows{padding:8px 0 4px}
 .row{display:flex;align-items:center;gap:12px;width:100%;padding:14px 18px;text-align:left;
   transition:background .12s var(--ease)}
@@ -251,6 +269,7 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row .ch{width:14px;height:14px;flex:none;color:var(--ink-3)}
 
+/* 숫자 입력칸(작용 하중·비나사부)과 해제 버튼 */
 .load-in{display:flex;align-items:center;gap:10px;background:var(--surface-2);border-radius:var(--r);
   padding:0 14px;height:52px;margin-top:8px}
 .load-in input{flex:1;min-width:0;height:100%;font-family:var(--num);font-size:19px;font-weight:700;
@@ -282,6 +301,7 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .le-fit b{font-weight:800}
 .slv-desc{font-size:11.5px;font-weight:500;color:var(--ink-3);line-height:1.5;margin-top:7px}
 
+/* 아코디언 — grid-template-rows 0fr ↔ 1fr로 높이를 애니메이션한다 */
 .acc{margin-top:12px;background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--sh-1);overflow:hidden}
 .acc-h{display:flex;align-items:center;gap:9px;width:100%;padding:16px 18px;font-size:14px;font-weight:600;text-align:left}
 .acc-h .cnt{font-size:11.5px;font-weight:600;color:var(--ink-3);background:var(--surface-2);padding:2px 7px;border-radius:var(--r-full);flex:none}
@@ -291,6 +311,7 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .acc.open .acc-b{grid-template-rows:1fr}
 .acc-b>div{overflow:hidden}
 .acc-in{padding:0 18px 18px}
+/* 계산 근거 본문 — 단계 제목(.st), 판정 색(.bad·.good·.wr) */
 .eq{font-size:12.5px;line-height:1.85;color:var(--ink-2);font-variant-numeric:tabular-nums}
 .eq b{color:var(--ink);font-weight:700}
 .eq .st{font-weight:700;font-size:12px;color:var(--ink-3);display:block;margin-bottom:1px}
@@ -330,11 +351,13 @@ th:last-child,td:last-child{padding-right:0}
 .summ{font-size:12.5px;line-height:1.6;color:var(--ink-2);background:var(--surface-2);padding:12px;border-radius:var(--r-sm);margin-top:12px}
 .summ b{color:var(--ink);font-weight:700}
 .summ+.summ{margin-top:8px}
+/* 모델 한계 등 설명 문단 */
 .note{font-size:13px;line-height:1.65;color:var(--ink-2)}
 .note+.note{margin-top:10px}
 .note b{color:var(--ink);font-weight:600}
 .note code{font-family:var(--num);font-weight:700;background:var(--surface-2);padding:1px 5px;border-radius:5px;font-size:12px}
 
+/* 선택 시트와 가림막 — 모바일 바텀시트(데스크톱 중앙 모달 변형은 반응형 절), 선택지(.opt), 경고 띠 */
 .scrim{position:fixed;inset:0;z-index:50;background:rgba(11,18,32,.4);opacity:0;pointer-events:none;
   transition:opacity .26s var(--ease);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
 .scrim.on{opacity:1;pointer-events:auto}
@@ -363,11 +386,13 @@ th:last-child,td:last-child{padding-right:0}
 .warn-strip{display:flex;gap:8px;align-items:flex-start;background:var(--warn-tint);border-radius:var(--r-sm);
   padding:10px 12px;font-size:12px;line-height:1.55;color:var(--warn);font-weight:500;margin:0 8px 10px}
 .warn-strip svg{width:14px;height:14px;flex:none;margin-top:1px}
+/* 하단 알림 */
 .toast{position:fixed;left:50%;bottom:calc(24px + var(--safe-b));z-index:60;
   transform:translate(-50%,20px);opacity:0;pointer-events:none;background:var(--ink);color:#fff;
   font-size:13.5px;font-weight:600;padding:12px 18px;border-radius:var(--r-full);
   box-shadow:0 6px 24px rgba(11,18,32,.3);transition:transform .3s var(--ease),opacity .3s var(--ease);white-space:nowrap}
 .toast.on{transform:translate(-50%,0);opacity:1}
+/* 하단 식 요약 */
 .foot{text-align:center;font-size:11.5px;line-height:1.75;color:var(--ink-3);padding:22px 20px 0;font-weight:500}
 /* ══════════ 반응형 — 소스 순서상 마지막에 위치해야 override 유효 ══════════ */
 /* ── 초소형 단말 (Galaxy Fold, iPhone SE) ───────────── */

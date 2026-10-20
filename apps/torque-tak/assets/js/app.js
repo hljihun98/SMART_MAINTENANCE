@@ -1993,23 +1993,30 @@ function updateSlider(measure){
    판정이 "적합"으로 넘어가는 순간에만 진동·"탁!" 표시를 낸다 */
 (function slider(){
   const t=$("track"); let drag=false,pid=null;
+  /* 물림 기준선을 아래에서 위로 넘는 순간의 손맛 — 최소 기준 "틱!"(작고 흐리게), 적합 기준 "탁!".
+     전체 판정이 아니라 물림 깊이 기준이라, 면압 등 다른 항목이 막고 있어도 "탁!"은 난다.
+     글자 색은 전체 판정 색(--st)을 따르므로 다른 항목이 막으면 주황·빨강 "탁!"이 된다. */
+  const pop=(text,tick,vib)=>{
+    const th=$("thumb"), sn=$("snap");
+    th.classList.add("pulse"); setTimeout(()=>th.classList.remove("pulse"),260);
+    if(navigator.vibrate)try{navigator.vibrate(vib)}catch(e){}
+    sn.textContent=text; sn.classList.toggle("tick",tick); sn.style.left=th.style.left;
+    sn.classList.remove("go"); void sn.offsetWidth; sn.classList.add("go");
+  };
+  const cueLe=(a,b)=>{
+    if(!R||P&&P.err)return;
+    const mn=R.LeMin, ok=R.LeOk;
+    if(!(isFinite(mn)&&isFinite(ok)&&b>a))return;     // 늘리는 방향으로 넘을 때만
+    if(a<ok&&b>=ok) pop("탁!",false,50);      // 큰 진동 — 웹 진동은 세기 대신 길이로만 구분된다
+    else if(a<mn&&b>=mn) pop("틱!",true,10);  // 작은 진동
+  };
   const frac=x=>{const r=t.getBoundingClientRect();
     return Math.max(0,Math.min(1,(x-r.left)/r.width));};
   const set=(x,haptic)=>{
-    const wasOk=R&&R.lvl==="ok";
+    const prev=S.Le;
     setLe(Math.max(.1,Math.round(frac(x)*leMax()*10)/10));
     render(true);
-    const nowOk=R&&R.lvl==="ok";
-    /* 판정이 넘어가는 순간에만 진동·"탁!" — 같은 판정이 이어지는 프레임은 조용히 */
-    if(haptic&&nowOk!==wasOk){
-      const th=$("thumb"); th.classList.add("pulse");
-      setTimeout(()=>th.classList.remove("pulse"),260);
-      if(navigator.vibrate)try{navigator.vibrate(nowOk?[10,40,16]:12)}catch(e){}
-      if(nowOk){                       // 적합 진입 순간에만 "탁!"
-        const sn=$("snap"); sn.style.left=th.style.left;
-        sn.classList.remove("go"); void sn.offsetWidth; sn.classList.add("go");
-      }
-    }
+    if(haptic) cueLe(prev,S.Le);
   };
   let raf=null,px=null;
   t.addEventListener("pointerdown",e=>{
@@ -2031,7 +2038,7 @@ function updateSlider(measure){
   window.addEventListener("pointerup",end); window.addEventListener("pointercancel",end);
   t.addEventListener("keydown",e=>{
     const st=P&&!P.err?Math.max(.1,Math.round(P.d)/10):.5;
-    const go=v=>{setLe(v);render();e.preventDefault();};
+    const go=v=>{const prev=S.Le;setLe(v);render();cueLe(prev,S.Le);e.preventDefault();};
     if(e.key==="ArrowRight"||e.key==="ArrowUp")go(Math.round((S.Le+st)*10)/10);
     else if(e.key==="ArrowLeft"||e.key==="ArrowDown")go(Math.max(0,Math.round((S.Le-st)*10)/10));
     /* 물릴 수 있는 끝까지 — 길이 미지정이면 상한이 없으니 트랙 끝으로 */

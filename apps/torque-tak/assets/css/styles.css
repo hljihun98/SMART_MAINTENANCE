@@ -242,6 +242,8 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .snap{position:absolute;top:-14px;font-size:13.5px;font-weight:800;letter-spacing:-.03em;
   color:var(--st);opacity:0;pointer-events:none;transform:translateX(-50%)}
 .snap.go{animation:snapPop .64s var(--ease)}
+/* 최소 기준 "틱!" — "탁!"보다 작고 흐리게(판정 색이 아니라 중립 회색) */
+.snap.tick{font-size:11.5px;font-weight:700;color:var(--ink-3)}
 @keyframes snapPop{
   0%{opacity:0;transform:translateX(-50%) translateY(7px) scale(.5)}
   28%{opacity:1;transform:translateX(-50%) translateY(-3px) scale(1.14)}

@@ -104,6 +104,19 @@
   .pagehead .eyebrow::before{content:"";width:16px;height:2px;border-radius:2px;background:currentColor;}
   .pagehead h1{font-size:24px;font-weight:700;letter-spacing:-.02em;line-height:1.35;word-break:keep-all;}
   .pagehead h1 .nb{display:inline-block;}  /* 구절 단위로 묶어 좁은 화면에서는 쉼표 뒤에서만 줄바꿈 */
+  /* 제목 앞 구절을 기기에 맞게: 터치가 주 입력(스마트폰·태블릿)이면 '스마트폰 하나로,', 마우스·터치패드(PC)면 '하나의 플랫폼에서,'.
+     창 크기가 아니라 입력 방식으로 나누므로 PC 창을 좁혀도 PC 문구가 유지된다. 미지원 브라우저는 PC 문구. */
+  .for-touch{display:none;}
+  @media (pointer:coarse){
+    .for-touch{display:inline;}
+    .for-pointer{display:none;}
+  }
+  /* 특징 칩도 같은 기준: 스마트폰 '앱 설치 없이' / PC '프로그램 설치 없이'. 칩 레이아웃(inline-flex)을 유지하도록 따로 지정 */
+  .facts li.for-touch{display:none;}
+  @media (pointer:coarse){
+    .facts li.for-touch{display:inline-flex;}
+    .facts li.for-pointer{display:none;}
+  }
   .pagehead p{font-size:14px;color:var(--ink-2);margin-top:8px;max-width:680px;line-height:1.6;word-break:keep-all;}  /* keep-all: 한글 단어 중간에서 줄바꿈하지 않음 */
   /* 특징 칩: 현장에서 알아 둘 사용 조건 */
   .facts{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;list-style:none;}
@@ -302,17 +315,18 @@
         <img src="./logo.png" alt="HL Robotics" class="logo-mark">
       </a>
       <span class="sep"></span>
-      <span class="ctx">SMART Maintenance Platform <span class="vpill" id="ver-pill">v26.10.20.2</span></span>
+      <span class="ctx">SMART Maintenance Platform <span class="vpill" id="ver-pill">v26.10.20.3</span></span>
     </div>
   </div>
 
   <main class="wrap">
     <div class="pagehead">
       <div class="eyebrow">로봇 엔지니어링 도구</div>
-      <h1><span class="nb">스마트폰 하나로,</span> <span class="nb">감 대신 숫자와 기록으로</span></h1>
+      <h1><span class="nb"><span class="for-touch">스마트폰 하나로,</span><span class="for-pointer">하나의 플랫폼에서,</span></span> <span class="nb">감 대신 숫자와 기록으로</span></h1>
       <p>벨트 장력은 소리로 측정하고, 볼트 체결토크는 규격에 맞춰 계산하고, 센서 점검 결과는 사진과 함께 PDF 보고서로 남깁니다.</p>
       <ul class="facts">
-        <li><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2.5"/><path d="M11 18h2"/></svg>앱 설치 없이 바로 실행</li>
+        <li class="for-touch"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2.5"/><path d="M11 18h2"/></svg>앱 설치 없이 바로 실행</li>
+        <li class="for-pointer"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>프로그램 설치 없이 바로 실행</li>
         <li><svg viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M9 14h6"/><path d="M9 17h4"/></svg>PDF·CSV 보고서</li>
       </ul>
     </div>
@@ -338,8 +352,8 @@
 <script>
   /* ── 플랫폼 버전 ── 배포(main Merge) 때 이 한 곳만 고치면 상단 배지·푸터가 함께 바뀐다.
      화면에는 날짜 버전만 표시한다. num은 git 번호 태그와 맞추기 위한 기록용.
-     num: 번호 버전(v주.부.수), date: 배포일(YY.MM.DD) — git 태그 v2.0.4 / v26.10.20.2 과 맞춘다 */
-  var VERSION = { num:'v2.0.4', date:'26.10.20.2' };
+     num: 번호 버전(v주.부.수), date: 배포일(YY.MM.DD) — git 태그 v2.0.5 / v26.10.20.3 과 맞춘다 */
+  var VERSION = { num:'v2.0.5', date:'26.10.20.3' };
 
   /* ── 등록된 앱 목록 ──
      강조색 규칙: Tailwind 600 단계에서 색상환 약 30° 간격으로 골라 카드끼리 구분되게 한다

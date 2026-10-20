@@ -209,7 +209,9 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 .sec-head{display:flex;align-items:baseline;justify-content:space-between;padding:16px 18px 0}
 .sec-head .v{font-family:var(--num);font-size:15px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .draw-box{padding:4px 12px 0}
-#draw{display:block;width:100%;height:auto}
+/* 단면도(viewBox 340×200)는 폭에 맞춰 늘어나므로 최대 폭을 둔다 — PC 절반 화면에서 약 2배로 커져 글자·그림이 과하게 컸다.
+   440px = 최대 약 1.3배, 스마트폰(카드 폭 약 350px)에서는 영향 없음 */
+#draw{display:block;width:100%;height:auto;max-width:440px;margin:0 auto}
 /* 슬라이더 — 트랙·레일·채움, 눈금(최소·적합·상한)과 라벨, 썸, 적합 진입 시 "탁!" 애니메이션 */
 .le-ctl{padding:6px 18px 18px}
 .track{position:relative;height:46px;touch-action:none;display:flex;align-items:center;cursor:grab}
@@ -237,12 +239,22 @@ input{font:inherit;color:inherit;background:none;border:0;outline:0}
 /* 미설정 표시용 점 — 텍스트가 아니라 장식이므로 연한 톤을 유지한다 */
 .thumb.ghost::after{background:var(--ink-4);opacity:.5}
 .thumb.pulse{box-shadow:0 2px 8px rgba(11,18,32,.2),0 0 0 8px var(--st-tint)}
-.snap{position:absolute;top:-14px;font-size:13.5px;font-weight:800;letter-spacing:-.03em;
+/* "탁!"(적합 기준) — 크고 힘 있게. "틱!"(최소 기준)은 아래 .tick에서 작게 덮는다 */
+.snap{position:absolute;top:-20px;font-size:18px;font-weight:900;letter-spacing:-.03em;white-space:nowrap;
   color:var(--st);opacity:0;pointer-events:none;transform:translateX(-50%)}
 .snap.go{animation:snapPop .64s var(--ease)}
+/* 최소 기준 "틱!" — "탁!"보다 작고 흐리게(판정 색이 아니라 중립 회색) */
+.snap.tick{top:-14px;font-size:11.5px;font-weight:700;color:var(--ink-3)}
+.snap.tick.go{animation:tickPop .5s var(--ease)}
+@keyframes tickPop{
+  0%{opacity:0;transform:translateX(-50%) translateY(4px) scale(.8)}
+  30%{opacity:1;transform:translateX(-50%) translateY(-2px) scale(1.04)}
+  60%{opacity:1;transform:translateX(-50%) translateY(-3px) scale(1)}
+  100%{opacity:0;transform:translateX(-50%) translateY(-9px) scale(.96)}
+}
 @keyframes snapPop{
   0%{opacity:0;transform:translateX(-50%) translateY(7px) scale(.5)}
-  28%{opacity:1;transform:translateX(-50%) translateY(-3px) scale(1.14)}
+  28%{opacity:1;transform:translateX(-50%) translateY(-4px) scale(1.3)}
   52%{opacity:1;transform:translateX(-50%) translateY(-5px) scale(1)}
   100%{opacity:0;transform:translateX(-50%) translateY(-14px) scale(.94)}
 }
@@ -510,4 +522,10 @@ th:last-child,td:last-child{padding-right:0}
 }
 
 @media(prefers-reduced-motion:reduce){*{animation-duration:.01ms !important;transition-duration:.01ms !important}}
+/* 움직임 줄이기(Windows '애니메이션 효과' 끔 등)에서도 적합 진입 "탁!"은 보여야 한다 — 위 규칙이 0.01ms로 줄여
+   보이지 않았다. 이 모드에서는 튀어 오르는 움직임 없이 제자리에 0.7초 나타났다 사라지게만 한다(선택자 우선순위로 덮음). */
+@media(prefers-reduced-motion:reduce){
+  .snap.go{animation:snapStill .7s linear !important;animation-duration:.7s !important}
+  @keyframes snapStill{0%,80%{opacity:1;transform:translateX(-50%)}100%{opacity:0;transform:translateX(-50%)}}
+}
 :focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:6px}

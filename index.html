@@ -141,7 +141,32 @@
   }
 
   /* 앱 카드 2열 그리드 */
-  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}   /* 주력 앱 3개를 한 줄로 */
+  @media (max-width:900px){ .grid{grid-template-columns:repeat(2,1fr);} }
+
+  /* ── 이전 버전·테스트 중 앱: 낮은 행 목록 (강조색 줄·그림자 없음) ── */
+  .more-wrap{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+  .row{
+    display:flex;align-items:center;gap:14px;padding:13px 20px;
+    text-decoration:none;color:inherit;border-bottom:1px solid var(--border-soft);
+    transition:background .15s;
+  }
+  .row:last-child{border-bottom:none;}
+  .row:hover,.row:focus-visible{background:#F8FAFB;outline:none;}
+  .row:focus-visible{box-shadow:inset 0 0 0 3px var(--blue-bg);}
+  .row-ico{
+    width:32px;height:32px;border-radius:9px;flex:none;
+    display:flex;align-items:center;justify-content:center;
+    background:#F1F3F5;color:var(--muted);
+  }
+  .row-ico svg{width:17px;height:17px;stroke:currentColor;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round;}
+  .row-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+  .row-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .row .name{font-size:14px;font-weight:600;color:var(--ink-2);}
+  .row .pill{font-size:11px;padding:2px 8px;}
+  .row .desc{font-size:12.5px;color:var(--muted);line-height:1.5;word-break:keep-all;}
+  .row .open{flex:none;font-size:12.5px;font-weight:600;color:var(--muted);transition:color .15s;}
+  .row:hover .open,.row:focus-visible .open{color:var(--blue);}
 
   /* ── 개별 앱 카드 ── */
   .card{
@@ -230,6 +255,8 @@
   @media (max-width:680px){
     .appbar-inner{padding:14px 18px;flex-wrap:wrap;}
     .appbar .sep{display:none;}   /* 줄바꿈되면 로고 옆에 세로선만 남으므로 숨김 */
+    .row{padding:13px 16px;gap:12px;}
+    .row .open-t{display:none;}   /* 행 전체가 링크라 모바일에서는 화살표만 남겨 설명 폭을 확보 */
     .wrap{padding:24px 18px 52px;}
     .grid{grid-template-columns:1fr;}
   }
@@ -316,7 +343,7 @@
         <img src="./logo.png" alt="HL Robotics" class="logo-mark">
       </a>
       <span class="sep"></span>
-      <span class="ctx">SMART Maintenance Platform <span class="vpill" id="ver-pill">v26.10.20.4</span></span>
+      <span class="ctx">SMART Maintenance Platform <span class="vpill" id="ver-pill">v26.10.21</span></span>
     </div>
   </div>
 
@@ -339,6 +366,9 @@
 
     <div class="grid" id="app-grid"></div>
 
+    <!-- 이전 버전·테스트 중 앱: JS가 한 줄짜리 행으로 렌더링 -->
+    <div id="app-more"></div>
+
     <!-- 데이터 관리 섹션: JS가 동적으로 렌더링 -->
     <div id="mgmt-section"></div>
 
@@ -353,8 +383,8 @@
 <script>
   /* ── 플랫폼 버전 ── 배포(main Merge) 때 이 한 곳만 고치면 상단 배지·푸터가 함께 바뀐다.
      화면에는 날짜 버전만 표시한다. num은 git 번호 태그와 맞추기 위한 기록용.
-     num: 번호 버전(v주.부.수), date: 배포일(YY.MM.DD) — git 태그 v2.0.6 / v26.10.20.4 과 맞춘다 */
-  var VERSION = { num:'v2.0.6', date:'26.10.20.4' };
+     num: 번호 버전(v주.부.수), date: 배포일(YY.MM.DD) — git 태그 v2.0.7 / v26.10.21 과 맞춘다 */
+  var VERSION = { num:'v2.0.7', date:'26.10.21' };
 
   /* ── 등록된 앱 목록 ──
      강조색 규칙: Tailwind 600 단계에서 색상환 약 30° 간격으로 골라 카드끼리 구분되게 한다
@@ -385,18 +415,44 @@
     /* 체크 아이콘 SVG (사용 가능 배지에 사용) */
     var CHECK = '<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>';
 
-    /* APPS 배열을 순회하며 각 앱의 HTML 카드 문자열을 생성하고 그리드에 삽입 */
-    document.getElementById('app-grid').innerHTML = APPS.map(function(a){
+    /* 주력 앱(사용 가능)과 그 외(이전 버전·테스트 중·개발 중)를 나눈다.
+       status만 바꾸면 자동으로 그룹이 옮겨진다 — 예: ROBOSTOCK 테스트가 끝나 status를 지우면 위 카드로 올라감 */
+    function isMain(a){ return a.ready && !a.status; }
+    var mainApps = APPS.filter(isMain);
+    var moreApps = APPS.filter(function(a){ return !isMain(a); });
+
+    /* 상태 배지 HTML */
+    function pillOf(a){
+      return !a.ready            ? '<span class="pill dev">개발 중</span>'
+           : a.status === 'test' ? '<span class="pill test">테스트 중</span>'
+           : a.status === 'legacy' ? '<span class="pill legacy">이전 버전</span>'
+           :                       '<span class="pill ok">'+CHECK+'사용 가능</span>';
+    }
+
+    /* 그 외 앱: 강조색·그림자 없는 한 줄짜리 낮은 행 — 주력 카드보다 눈에 덜 띄게 */
+    var more = document.getElementById('app-more');
+    more.innerHTML = moreApps.length
+      ? '<div class="list-head" style="margin-top:28px"><span class="label">이전 버전 · 테스트 중</span></div>'
+        + '<div class="more-wrap">' + moreApps.map(function(a){
+            return '<a class="row" href="'+a.href+'">'+
+              '<span class="row-ico"><svg viewBox="0 0 24 24">'+a.icon+'</svg></span>'+
+              '<span class="row-body">'+
+                '<span class="row-title"><span class="name">'+a.name+'</span>'+pillOf(a)+'</span>'+
+                '<span class="desc">'+a.desc+'</span>'+
+              '</span>'+
+              '<span class="open"><span class="open-t">열기 </span>&rarr;</span>'+
+            '</a>';
+          }).join('') + '</div>'
+      : '';
+
+    /* 주력 앱 카드 그리드 */
+    document.getElementById('app-grid').innerHTML = mainApps.map(function(a){
       /* 아이콘/태그에 커스텀 색상이 있을 때만 인라인 스타일 추가 */
       var icoS = a.icoColor ? ' style="color:'+a.icoColor+';background:'+a.accentBg+';"' : '';
       var tagS = a.tagColor ? ' style="color:'+a.tagColor+';background:'+a.accentBg+';"' : '';
       /* 개발 중 앱의 "열기" 링크는 회색으로 처리 */
       var openS = a.ready ? '' : ' style="color:#64748B;"';
-      /* 사용 가능 여부에 따라 배지 HTML 결정 */
-      var pill = !a.ready            ? '<span class="pill dev">개발 중</span>'
-               : a.status === 'test' ? '<span class="pill test">테스트 중</span>'
-               : a.status === 'legacy' ? '<span class="pill legacy">이전 버전</span>'
-               :                       '<span class="pill ok">'+CHECK+'사용 가능</span>';
+      var pill = pillOf(a);
       /* CSS 커스텀 속성으로 각 카드의 강조색을 개별 설정 */
       return '<a class="card" href="'+a.href+'" style="--accent:'+a.accent+';--accent-bg:'+a.accentBg+';">'+
         '<div class="card-top">'+
@@ -412,7 +468,7 @@
     }).join('');
 
     /* 앱 개수 뱃지와 푸터 버전 텍스트 갱신 */
-    document.getElementById('app-count').textContent = '앱 '+APPS.length+'개';
+    document.getElementById('app-count').textContent = '앱 '+mainApps.length+'개';
     document.getElementById('ver-pill').textContent = 'v'+VERSION.date;
     document.getElementById('foot-ver').textContent = 'v'+VERSION.date+' · '+APPS.length+' apps';
   })();
@@ -608,6 +664,16 @@
 
   renderMgmt();
   measureIdb();
+
+  /* 포털이 다시 보일 때마다 저장 용량을 새로 계산한다.
+     - pageshow(persisted): 앱에서 뒤로가기로 돌아오면 브라우저가 이전 화면을 캐시(bfcache)에서 그대로 꺼내므로,
+       앱에서 저장한 데이터가 목록에 반영되지 않았다.
+     - visibilitychange: 다른 탭에서 앱을 쓰고 돌아온 경우.
+     - storage: 다른 탭에서 저장·삭제한 경우. */
+  function refreshMgmt(){ renderMgmt(); measureIdb(); }
+  window.addEventListener('pageshow', function(e){ if(e.persisted) refreshMgmt(); });
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) refreshMgmt(); });
+  window.addEventListener('storage', refreshMgmt);
 </script>
 </body>
 </html>
